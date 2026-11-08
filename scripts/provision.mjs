@@ -70,7 +70,7 @@ main = "../src/index.ts"
 compatibility_date = "2025-01-01"
 
 [vars]
-GEMINI_MODEL = "${cfg.geminiModel ?? 'gemini-2.5-flash'}"
+GEMINI_MODEL = "${cfg.geminiModel ?? 'gemini-3.5-flash-lite'}"
 
 [assets]
 directory = "../public"

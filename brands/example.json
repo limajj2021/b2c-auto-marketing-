@@ -7,7 +7,7 @@
   "workerName": "leadgen-example",
   "d1Name": "leadgen-example-db",
   "adminUsername": "owner",
-  "geminiModel": "gemini-2.5-flash",
+  "geminiModel": "gemini-3.5-flash-lite",
   "settings": {
     "services": "（已核准的產品與服務說明）",
     "audience": "（目標受眾）",

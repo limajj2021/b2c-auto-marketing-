@@ -10,7 +10,7 @@
 | 3 | Threads 重啟後不重複 | 發布過程中重新部署，確認 `posts` 無重複、Threads 無重複貼文 | ☐ |
 | 4 | LINE Webhook + Reply | Messaging API channel，Webhook URL 設為 `<管理網址>/line/webhook`，按 Verify，加好友收到歡迎訊息 | ☐ |
 | 5 | LINE 真人接手衝突 | 在 OA Manager 以真人回覆，確認 Bot 不與之衝突（「聊天」與「Bot」模式設定） | ☐ |
-| 6 | Gemini 免費額度 | 確認模型、RPM/日額度、商用條款、免費方案資料使用條件；後台「立即生成草稿」成功並寫入 `ai_generations` | ☐ |
+| 6 | Gemini 免費額度 | 確認模型、RPM/日額度、商用條款、免費方案資料使用條件；後台「立即生成草稿」成功並寫入 `ai_generations` | 🟡 部分：2026-11-08 以 curl 驗證 key 有效、`gemini-3.5-flash-lite` 生成成功（HTTP 200，用量欄位與程式解析一致）。`gemini-2.5-flash` 已對新用戶下架（404），預設已改。`gemini-3.8-flash` 當時 503。**尚未驗證**：免費額度數字與商用／資料條款、經 Worker 實際寫入 `ai_generations`。該 key 曾貼入對話，須刪除重發 |
 | 7 | Workers 部署 | `npm run provision -- --brand <x>` 成功，`/api/health` 回 ok | ☐ |
 | 8 | D1 讀寫 | 後台登入、改設定、LINE 留資後後台可見 | ☐ |
 | 9 | Cron | 於 Cloudflare Dashboard 確認 `*/5` 觸發，開啟自動發文後有生成與發布 | ☐ |

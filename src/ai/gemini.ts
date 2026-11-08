@@ -56,7 +56,7 @@ export async function generatePost(env: Env, topic: string, now = new Date()): P
   const brand = await getBrand(env);
   const s = await getSettings(env, brand.id);
   await checkQuota(env, brand, s, now);
-  const model = env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const started = Date.now();
   const prompt = buildPrompt(brand, s, topic);
 

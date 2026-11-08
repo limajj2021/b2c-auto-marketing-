@@ -7,7 +7,7 @@
   "workerName": "leadgen-lending-demo",
   "d1Name": "leadgen-lending-demo-db",
   "adminUsername": "owner",
-  "geminiModel": "gemini-2.5-flash",
+  "geminiModel": "gemini-3.5-flash-lite",
   "settings": {
     "services": "（經審核的服務說明；不得含利率、成數、核貸承諾）",
     "audience": "（目標受眾）",
