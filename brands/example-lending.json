@@ -1,0 +1,30 @@
+{
+  "brandId": "lending-demo",
+  "name": "放款服務範例",
+  "industry": "lending",
+  "description": "（僅填寫經法遵確認可公開之資訊；上線前須確認合法營業身分與廣告限制）",
+  "timezone": "Asia/Taipei",
+  "workerName": "leadgen-lending-demo",
+  "d1Name": "leadgen-lending-demo-db",
+  "adminUsername": "owner",
+  "geminiModel": "gemini-2.5-flash",
+  "settings": {
+    "services": "（經審核的服務說明；不得含利率、成數、核貸承諾）",
+    "audience": "（目標受眾）",
+    "content_topics": ["借貸基本知識", "還款規劃觀念", "諮詢前準備"],
+    "banned_words": ["保證", "包過", "免審"],
+    "cta_text": "歡迎加入 LINE 初步諮詢：",
+    "line_add_url": "https://line.me/R/ti/p/@your-oa-id",
+    "posting_mode": "B",
+    "posts_per_day": 1
+  },
+  "lineConfig": {
+    "services": ["一般借貸諮詢", "其他"],
+    "fields": [
+      { "key": "adult", "label": "請問您是否已年滿 18 歲？", "required": true, "blockIf": "否", "options": ["是", "否"] },
+      { "key": "name", "label": "請問怎麼稱呼您？", "required": true },
+      { "key": "need", "label": "請簡述諮詢需求（請勿填寫身分證號、帳號密碼）", "required": true },
+      { "key": "contact", "label": "希望的聯絡方式與方便時段", "required": true }
+    ]
+  }
+}

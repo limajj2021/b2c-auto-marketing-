@@ -1,0 +1,53 @@
+import { getBrand, getSettings } from '../db';
+import type { Env } from '../types';
+import { verifyLineSignature } from '../util/crypto';
+import { iso } from '../util/time';
+import { getDisplayName, reply } from './api';
+import { parseLineConfig } from './config';
+import { handleText, welcomeReply } from './flow';
+
+export async function handleLineWebhook(env: Env, req: Request): Promise<Response> {
+  const raw = await req.text();
+  if (!(await verifyLineSignature(env.LINE_CHANNEL_SECRET, raw, req.headers.get('x-line-signature')))) {
+    return new Response('invalid signature', { status: 401 });
+  }
+  let body: any;
+  try { body = JSON.parse(raw); } catch { return new Response('bad request', { status: 400 }); }
+
+  const brand = await getBrand(env);
+  const s = await getSettings(env, brand.id);
+  if (!s.line_auto_reply_enabled) return new Response('paused', { status: 200 });
+
+  let failed = false;
+  for (const ev of body.events ?? []) {
+    const eventId: string | undefined = ev.webhookEventId;
+    if (!eventId || !ev.source?.userId) continue;
+    // 去重：先搶佔事件 ID，重送的 Webhook 不會重複回覆或重複寫入
+    const claim = await env.DB.prepare('INSERT OR IGNORE INTO processed_events(brand_id,external_event_id,event_type,processed_at) VALUES(?,?,?,?)')
+      .bind(brand.id, eventId, ev.type, iso()).run();
+    if (claim.meta.changes !== 1) continue;
+    try {
+      const contactId = await upsertContact(env, brand.id, ev.source.userId, ev.type === 'follow');
+      let replies = null;
+      if (ev.type === 'follow') replies = welcomeReply(parseLineConfig(s.line_config));
+      else if (ev.type === 'message' && ev.message?.type === 'text') replies = await handleText(env, brand.id, contactId, ev.message.text);
+      else if (ev.type === 'message') replies = welcomeReply(parseLineConfig(s.line_config));
+      if (replies && ev.replyToken) await reply(env, ev.replyToken, replies);
+    } catch (e) {
+      failed = true;
+      // 釋放佔位讓 LINE 重送可重新處理；日誌不含訊息內容
+      await env.DB.prepare('DELETE FROM processed_events WHERE brand_id=? AND external_event_id=?').bind(brand.id, eventId).run();
+      console.error('line:event_failed', ev.type, (e as Error).message);
+    }
+  }
+  return new Response(failed ? 'error' : 'ok', { status: failed ? 500 : 200 });
+}
+
+async function upsertContact(env: Env, brandId: string, userId: string, fetchName: boolean): Promise<number> {
+  const found = await env.DB.prepare('SELECT id FROM contacts WHERE brand_id=? AND line_user_id=?').bind(brandId, userId).first<{ id: number }>();
+  if (found) return found.id;
+  const name = fetchName ? await getDisplayName(env, userId) : null;
+  await env.DB.prepare('INSERT OR IGNORE INTO contacts(brand_id,line_user_id,display_name,created_at) VALUES(?,?,?,?)')
+    .bind(brandId, userId, name, iso()).run();
+  return (await env.DB.prepare('SELECT id FROM contacts WHERE brand_id=? AND line_user_id=?').bind(brandId, userId).first<{ id: number }>())!.id;
+}

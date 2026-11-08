@@ -1,0 +1,8 @@
+# 複製為 .dev.vars（已被 .gitignore）。正式環境請用 wrangler secret，不要提交真實值。
+SESSION_SECRET=change-me-to-32+random-chars
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+THREADS_ACCESS_TOKEN=
+THREADS_USER_ID=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash

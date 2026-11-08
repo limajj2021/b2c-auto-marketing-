@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>營運後台</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--fg:#1c1f24;--mut:#6b7280;--pri:#2563eb;--bad:#dc2626;--ok:#16a34a;--bd:#e5e7eb}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1b2027;--fg:#e8eaed;--mut:#9aa3af;--bd:#2c333c}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;padding-bottom:72px}
+main{padding:16px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+h2{font-size:18px;margin:0 0 10px}h3{font-size:15px;margin:14px 0 6px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+textarea{min-height:90px}
+button{padding:10px 14px;border:0;border-radius:8px;background:var(--pri);color:#fff;font:inherit;min-height:44px}
+button.sec{background:var(--bd);color:var(--fg)}button.bad{background:var(--bad)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.row>*{flex:1}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--bd)}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;min-height:56px}nav button.on{color:var(--pri);font-weight:600}
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}.kpi div{background:var(--bg);border-radius:8px;padding:10px}.kpi b{font-size:22px;display:block}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bd)}
+.mut{color:var(--mut);font-size:13px}.err{color:var(--bad)}pre{white-space:pre-wrap;word-break:break-word;margin:6px 0;font:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav id="nav" class="hide"></nav>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function api(method, path, body) {
+  const r = await fetch('/api' + path, { method, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui' }, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401 && path !== '/login') { me = null; render(); throw new Error('請重新登入'); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || '操作失敗');
+  return d;
+}
+const act = async (fn, okMsg) => { try { await fn(); if (okMsg) alert(okMsg); } catch (e) { alert(e.message); } };
+let me = null, tab = 'home';
+const TABS = { home: ['首頁', 'admin'], threads: ['Threads', 'admin'], line: ['LINE', 'admin'], leads: ['留資', 'staff'] };
+
+async function render() {
+  const app = $('#app'), nav = $('#nav');
+  if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
+  if (!me) {
+    nav.classList.add('hide');
+    app.innerHTML = `<div class="card"><h2>登入</h2><label>帳號</label><input id="u" autocomplete="username"><label>密碼</label><input id="p" type="password" autocomplete="current-password"><div class="row"><button id="go">登入</button></div></div>`;
+    $('#go').onclick = () => act(async () => { await api('POST', '/login', { username: $('#u').value, password: $('#p').value }); me = null; await render(); });
+    return;
+  }
+  const allowed = Object.entries(TABS).filter(([, v]) => me.role === 'admin' || v[1] === 'staff');
+  if (!allowed.some(([k]) => k === tab)) tab = allowed[0][0];
+  nav.classList.remove('hide');
+  nav.innerHTML = allowed.map(([k, v]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${v[0]}</button>`).join('') + `<button data-t="out">登出</button>`;
+  nav.querySelectorAll('button').forEach((b) => b.onclick = async () => {
+    if (b.dataset.t === 'out') { await api('POST', '/logout').catch(() => {}); me = null; return render(); }
+    tab = b.dataset.t; render();
+  });
+  app.innerHTML = '<div class="card mut">載入中…</div>';
+  try { await ({ home, threads, line, leads }[tab])(app); } catch (e) { app.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+
+async function home(app) {
+  const d = await api('GET', '/dashboard');
+  const miss = Object.entries(d.configured).filter(([, v]) => !v).map(([k]) => k);
+  app.innerHTML = `<div class="card"><h2>系統狀態</h2>
+    <p>${d.healthy ? '✅ 正常' : '⚠️ Threads 憑證失效，請重新授權'}${miss.length ? `<br><span class="err">尚未設定：${miss.join('、')}</span>` : ''}</p>
+    <div class="kpi"><div>今日發文<b>${d.posted_today}</b></div><div>待審核草稿<b>${d.pending_drafts}</b></div>
+    <div>今日留資<b>${d.inquiries_today}</b></div><div>未處理留資<b>${d.inquiries_pending}</b></div></div>
+    <p class="mut">今日 AI 生成 ${d.gen_today} / ${d.gen_limit}</p></div>
+    <div class="card"><h2>自動化開關</h2><div class="row">
+    <button id="t1" class="${d.auto_post_enabled ? 'bad' : ''}">${d.auto_post_enabled ? '暫停自動發文' : '恢復自動發文'}</button>
+    <button id="t2" class="${d.line_auto_reply_enabled ? 'bad' : ''}">${d.line_auto_reply_enabled ? '暫停自動接待' : '恢復自動接待'}</button></div>
+    <div class="row"><button class="sec" id="gl">前往留資列表</button></div></div>`;
+  $('#t1').onclick = () => act(async () => { await api('POST', '/pause', { auto_post_enabled: !d.auto_post_enabled }); render(); });
+  $('#t2').onclick = () => act(async () => { await api('POST', '/pause', { line_auto_reply_enabled: !d.line_auto_reply_enabled }); render(); });
+  $('#gl').onclick = () => { tab = 'leads'; render(); };
+}
+
+async function threads(app) {
+  const [{ settings: s }, posts] = await Promise.all([api('GET', '/settings'), api('GET', '/posts')]);
+  const drafts = posts.filter((p) => p.status === 'draft');
+  const rest = posts.filter((p) => p.status !== 'draft').slice(0, 30);
+  app.innerHTML = `<div class="card"><h2>發文設定</h2>
+    ${s.regulated ? '<p class="mut">此產業為受監管業務：所有貼文強制人工審核。</p>' : ''}
+    <label>發文模式</label><select id="mode"><option value="A">A 全自動</option><option value="B">B 審核後發布</option><option value="C">C 指定主題</option></select>
+    <label><input type="checkbox" id="rr" style="width:auto"> Mode C 需審核</label>
+    <label>每日發文數（1–5）</label><input id="ppd" type="number" min="1" max="5">
+    <label>發布時間（逗號分隔 HH:MM，依序對應每篇）</label><input id="times">
+    <label>本週主題（Mode C）</label><textarea id="topic"></textarea>
+    <label>品牌語氣</label><input id="tone"><label>禁用詞（逗號分隔）</label><input id="ban">
+    <label>CTA 文字</label><input id="cta"><label>LINE 加好友網址（https）</label><input id="url">
+    <div class="row"><button id="save">儲存設定</button></div></div>
+    <div class="card"><h2>產生草稿</h2><label>指定主題（可空白）</label><input id="gt"><div class="row"><button id="gen">立即生成草稿</button></div></div>
+    <div class="card"><h2>待審核草稿 (${drafts.length})</h2>${drafts.map((p) => `<div data-id="${p.id}"><textarea>${esc(p.content)}</textarea>
+      ${p.error_message ? `<div class="err">${esc(p.error_message)}</div>` : ''}<div class="row"><button class="sec" data-a="save">儲存修改</button><button data-a="ok">核准</button><button class="bad" data-a="del">刪除</button></div><hr></div>`).join('') || '<p class="mut">沒有草稿</p>'}</div>
+    <div class="card"><h2>發布歷史</h2>${rest.map((p) => `<div><span class="tag">${p.status}</span> <span class="mut">${esc((p.published_at || p.scheduled_at || '').slice(0, 16).replace('T', ' '))} UTC</span>
+      <pre>${esc(p.content)}</pre>${p.error_message ? `<div class="err">${esc(p.error_message)}</div>` : ''}${p.status === 'failed' ? `<button class="sec" data-retry="${p.id}">重試</button>` : ''}</div>`).join('') || '<p class="mut">尚無紀錄</p>'}</div>`;
+  $('#mode').value = s.posting_mode; $('#rr').checked = s.require_review; $('#ppd').value = s.posts_per_day;
+  $('#times').value = s.publishing_times.join(','); $('#topic').value = s.weekly_topic; $('#tone').value = s.content_tone;
+  $('#ban').value = s.banned_words.join(','); $('#cta').value = s.cta_text; $('#url').value = s.line_add_url;
+  const list = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+  $('#save').onclick = () => act(() => api('PUT', '/settings', {
+    posting_mode: $('#mode').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: list($('#times').value),
+    weekly_topic: $('#topic').value, content_tone: $('#tone').value, banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: $('#url').value,
+  }), '已儲存');
+  $('#gen').onclick = () => act(async () => { await api('POST', '/posts/generate', { topic: $('#gt').value }); render(); });
+  app.querySelectorAll('[data-id] button').forEach((b) => b.onclick = () => act(async () => {
+    const box = b.closest('[data-id]'), id = box.dataset.id, content = box.querySelector('textarea').value;
+    if (b.dataset.a === 'save') { await api('PUT', '/posts/' + id, { content }); alert('已儲存'); return; }
+    if (b.dataset.a === 'ok') { await api('PUT', '/posts/' + id, { content }); await api('POST', `/posts/${id}/approve`, {}); }
+    if (b.dataset.a === 'del') { if (!confirm('確定刪除？')) return; await api('DELETE', '/posts/' + id); }
+    render();
+  }));
+  app.querySelectorAll('[data-retry]').forEach((b) => b.onclick = () => act(async () => { await api('POST', `/posts/${b.dataset.retry}/retry`, {}); render(); }));
+}
+
+async function line(app) {
+  const [c, faq] = await Promise.all([api('GET', '/line-config'), api('GET', '/faq')]);
+  app.innerHTML = `<div class="card"><h2>LINE 接待設定</h2>
+    <label>歡迎訊息</label><textarea id="welcome"></textarea>
+    <label>選單名稱：了解服務 / 立即詢問 / 聯絡專人</label><div class="row"><input id="m1"><input id="m2"><input id="m3"></div>
+    <label>服務說明（已核准內容）</label><textarea id="info"></textarea><label>營業時間</label><input id="hours">
+    <label>真人接手提示</label><textarea id="human"></textarea><label>隱私告知（須包含「同意」指示）</label><textarea id="priv"></textarea>
+    <label>完成訊息</label><input id="done"><label>未匹配回覆</label><input id="fb">
+    <label>服務類型（逗號分隔）</label><input id="svc">
+    <label>表單欄位（每行：key|提問|必填(1/0)|攔截答案(可空)）</label><textarea id="fields" style="min-height:140px"></textarea>
+    <div class="row"><button id="save">儲存</button></div></div>
+    <div class="card"><h2>FAQ</h2>${faq.map((f) => `<div data-f="${f.id}"><label>關鍵字（逗號分隔）</label><input class="k" value="${esc(f.keyword)}"><label>固定答案</label><textarea class="r">${esc(f.response)}</textarea>
+      <label>優先順序</label><input class="p" type="number" value="${f.priority}"><label><input class="e" type="checkbox" style="width:auto" ${f.enabled ? 'checked' : ''}> 啟用</label>
+      <div class="row"><button class="sec" data-a="s">儲存</button><button class="bad" data-a="d">刪除</button></div><hr></div>`).join('')}
+      <h3>新增 FAQ</h3><input id="nk" placeholder="關鍵字，例如：營業時間,幾點"><textarea id="nr" placeholder="固定答案"></textarea><div class="row"><button id="add">新增</button></div></div>`;
+  const set = (id, v) => $('#' + id).value = v;
+  set('welcome', c.welcome); set('m1', c.menu.info); set('m2', c.menu.inquiry); set('m3', c.menu.human); set('info', c.serviceInfo); set('hours', c.businessHours);
+  set('human', c.humanNotice); set('priv', c.privacyNotice); set('done', c.completeMessage); set('fb', c.fallback); set('svc', c.services.join(','));
+  set('fields', c.fields.map((f) => [f.key, f.label, f.required ? 1 : 0, f.blockIf || ''].join('|')).join('\n'));
+  $('#save').onclick = () => act(() => api('PUT', '/line-config', {
+    welcome: $('#welcome').value, menu: { info: $('#m1').value, inquiry: $('#m2').value, human: $('#m3').value }, serviceInfo: $('#info').value,
+    businessHours: $('#hours').value, humanNotice: $('#human').value, privacyNotice: $('#priv').value, completeMessage: $('#done').value, fallback: $('#fb').value,
+    services: $('#svc').value.split(/[,，]/).map((x) => x.trim()).filter(Boolean),
+    fields: $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => { const [key, label, req, blockIf] = l.split('|'); return { key: key.trim(), label: (label || '').trim(), required: req?.trim() !== '0', ...(blockIf?.trim() ? { blockIf: blockIf.trim() } : {}) }; }),
+  }), '已儲存');
+  app.querySelectorAll('[data-f] button').forEach((b) => b.onclick = () => act(async () => {
+    const box = b.closest('[data-f]'), id = box.dataset.f;
+    if (b.dataset.a === 'd') { if (!confirm('確定刪除？')) return; await api('DELETE', '/faq/' + id); }
+    else await api('PUT', '/faq/' + id, { keyword: $('.k', box).value, response: $('.r', box).value, priority: +$('.p', box).value, enabled: $('.e', box).checked });
+    render();
+  }));
+  $('#add').onclick = () => act(async () => { await api('POST', '/faq', { keyword: $('#nk').value, response: $('#nr').value }); render(); });
+}
+
+let leadFilter = { status: '', from: '' };
+async function leads(app) {
+  const q = new URLSearchParams(); if (leadFilter.status) q.set('status', leadFilter.status); if (leadFilter.from) q.set('from', leadFilter.from);
+  const rows = await api('GET', '/inquiries?' + q);
+  app.innerHTML = `<div class="card"><h2>留資紀錄</h2><div class="row"><select id="fs"><option value="">全部</option><option value="pending">未處理</option><option value="done">已處理</option></select>
+    <input id="ff" type="date"></div></div>` + rows.map((r) => `<div class="card"><div><b>${esc(r.answers.name || r.display_name || '（未填）')}</b> <span class="tag">${r.handling_status === 'done' ? '已處理' : '未處理'}</span></div>
+    <div class="mut">${esc(r.created_at.slice(0, 16).replace('T', ' '))} UTC · ${esc(r.service || '')}${r.line_user_id ? ` · ${esc(r.line_user_id)}` : ''}</div>
+    <pre>${Object.entries(r.answers).map(([k, v]) => `${esc(k)}：${esc(v)}`).join('\n')}</pre>
+    <div class="row"><button class="sec" data-id="${r.id}" data-to="${r.handling_status === 'done' ? 'pending' : 'done'}">標記為${r.handling_status === 'done' ? '未處理' : '已處理'}</button>
+    ${me.role === 'admin' ? `<button class="bad" data-del="${r.id}">刪除</button>` : ''}</div></div>`).join('') || '<div class="card mut">沒有資料</div>';
+  $('#fs').value = leadFilter.status; $('#ff').value = leadFilter.from;
+  $('#fs').onchange = () => { leadFilter.status = $('#fs').value; render(); };
+  $('#ff').onchange = () => { leadFilter.from = $('#ff').value; render(); };
+  app.querySelectorAll('[data-to]').forEach((b) => b.onclick = () => act(async () => { await api('PATCH', '/inquiries/' + b.dataset.id, { handling_status: b.dataset.to }); render(); }));
+  app.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => act(async () => { if (!confirm('確定永久刪除這筆留資？')) return; await api('DELETE', '/inquiries/' + b.dataset.del); render(); }));
+}
+render();
+</script>
+</body>
+</html>

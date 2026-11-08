@@ -1,0 +1,18 @@
+# 開發用範本。正式企業環境由 scripts/provision.mjs 產生 .generated/wrangler.<brand>.toml。
+name = "leadgen-dev"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/line/*"]
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "leadgen-dev"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

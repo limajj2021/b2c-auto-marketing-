@@ -1,0 +1,23 @@
+{
+  "brandId": "example",
+  "name": "範例品牌",
+  "industry": "general",
+  "description": "（品牌介紹，供 AI 生成貼文使用，只放公開資訊）",
+  "timezone": "Asia/Taipei",
+  "workerName": "leadgen-example",
+  "d1Name": "leadgen-example-db",
+  "adminUsername": "owner",
+  "geminiModel": "gemini-2.5-flash",
+  "settings": {
+    "services": "（已核准的產品與服務說明）",
+    "audience": "（目標受眾）",
+    "content_tone": "專業、親切、清楚",
+    "content_topics": ["品牌知識", "常見問題", "使用情境"],
+    "banned_words": [],
+    "cta_text": "想了解更多，歡迎加入 LINE 諮詢：",
+    "line_add_url": "https://line.me/R/ti/p/@your-oa-id",
+    "posting_mode": "B",
+    "posts_per_day": 1
+  },
+  "lineConfig": {}
+}
