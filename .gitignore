@@ -4,3 +4,4 @@ node_modules
 .secrets
 .generated
 backups
+brands/test.json

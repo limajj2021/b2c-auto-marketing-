@@ -29,6 +29,7 @@ if (existsSync(secretFile)) {
     if (m && m[2]) secrets[m[1]] = m[2];
   }
 }
+for (const k of SECRET_KEYS) if (!secrets[k] && process.env[`LEADGEN_${k}`]) secrets[k] = process.env[`LEADGEN_${k}`]; // 允許以環境變數傳入，不落地成檔案
 const generatedSession = !secrets.SESSION_SECRET;
 if (generatedSession) secrets.SESSION_SECRET = randomBytes(32).toString('hex');
 const missing = SECRET_KEYS.filter((k) => !secrets[k] && k !== 'SESSION_SECRET');
