@@ -26,6 +26,7 @@ export async function reply(env: Env, replyToken: string, replies: Reply[]): Pro
     headers: { 'content-type': 'application/json', authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}` },
     body: JSON.stringify({ replyToken, messages: toLineMessages(replies) }),
   });
+  console.log('line:reply', res.status, replies.length); // 僅狀態，不含訊息內容
   if (!res.ok) throw new Error(`LINE reply HTTP ${res.status}`);
 }
 
