@@ -70,6 +70,13 @@ summary::-webkit-details-marker{display:none}summary:after{content:"›";font-si
 .login{min-height:100dvh;display:grid;place-items:center;padding:20px}.login .card{width:100%;max-width:380px;padding:26px}
 .login .logo{width:52px;height:52px;border-radius:16px;font-size:22px;margin:0 auto 14px}
 code{background:var(--soft);padding:2px 7px;border-radius:7px;font-size:13px;word-break:break-all}
+.hint{color:var(--mut);font-size:12.5px;margin:6px 2px 0;line-height:1.5}.hint b{color:var(--fg)}
+.callout{display:flex;gap:10px;background:var(--pri-soft);color:var(--fg);border-radius:12px;padding:12px 14px;font-size:14px;margin:12px 0}.callout.warn{background:var(--warn-soft)}.callout.bad{background:var(--bad-soft)}
+.callout:before{content:"ⓘ";font-weight:700;color:var(--pri)}.callout.warn:before{content:"⚠";color:var(--warn)}.callout.bad:before{content:"⛔";color:var(--bad)}
+.help ol,.help ul{margin:8px 0 8px 4px;padding-left:20px}.help li{margin:6px 0}.help details{scroll-margin-top:84px}.help summary{font-size:15px}.help details{padding:0}.help details>div{padding:0 0 14px}
+.back{display:inline-flex;align-items:center;gap:4px;color:var(--pri);font-weight:600;background:none;padding:6px 2px;min-height:0;margin-bottom:8px}
+.q{flex:none;width:34px;min-height:34px;height:34px;padding:0;border-radius:50%;background:var(--soft);color:var(--mut);font-size:16px}
+.err-field{border-color:var(--bad)!important;background:var(--bad-soft)!important}
 .hide{display:none!important}.grow{flex:1}.lead dl{margin:8px 0 0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}.lead dt{color:var(--mut)}.lead dd{margin:0;word-break:break-word}
 </style>
 </head>
@@ -90,7 +97,13 @@ const ICON = {
 const svg = (n) => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
 
 let me = null, tab = 'home', TZ = 'Asia/Taipei', brandName = '營運後台';
-const state = { postSeg: 'draft', leadStatus: '', leadFrom: '' };
+const state = { postSeg: 'draft', leadStatus: '', leadFrom: '', helpOpen: 'start', helpFrom: 'home' };
+let dirty = false;
+// 未儲存提醒：表單卡片(data-form)內任何輸入都會標記，儲存成功或重新渲染後清除
+document.addEventListener('input', (e) => { if (e.target.closest?.('[data-form]')) dirty = true; });
+async function leaveOk() { if (!dirty) return true; const ok = await confirmSheet('有尚未儲存的修改，確定要離開？', '離開不儲存'); if (ok) dirty = false; return ok; }
+const markField = (el, bad) => { el.classList.toggle('err-field', !!bad); if (bad) { el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } };
+function check(rules) { for (const [el, bad, msg] of rules) { markField(el, bad); if (bad) { toast(msg, 'bad'); return false; } } return true; }
 
 function toast(msg, kind = '') {
   const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
@@ -125,16 +138,18 @@ const list = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
 const TABS = [['home', '首頁', 'home', 'admin'], ['posts', '貼文', 'post', 'admin'], ['line', 'LINE', 'line', 'admin'], ['leads', '留資', 'lead', 'staff'], ['settings', '設定', 'gear', 'admin']];
 
 async function render() {
+  dirty = false;
   const root = $('#root');
   if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
   if (!me) return loginView(root);
   fetch('/api/public').then((r) => r.json()).then((d) => { brandName = d.name || brandName; const b = $('#bn'); if (b) b.textContent = brandName; }).catch(() => {});
   const allowed = TABS.filter((t) => me.role === 'admin' || t[3] === 'staff');
-  if (!allowed.some((t) => t[0] === tab)) tab = allowed[0][0];
-  root.innerHTML = `<header><div class="in"><div class="logo">${esc(brandName[0] || '營')}</div><div class="grow"><b id="bn">${esc(brandName)}</b><small>${me.role === 'admin' ? '管理員' : '客服'} · ${esc(me.name)}</small></div></div></header>
+  if (tab !== 'help' && !allowed.some((t) => t[0] === tab)) tab = allowed[0][0];
+  root.innerHTML = `<header><div class="in"><div class="logo">${esc(brandName[0] || '營')}</div><div class="grow"><b id="bn">${esc(brandName)}</b><small>${me.role === 'admin' ? '管理員' : '客服'} · ${esc(me.name)}</small></div><button class="q" id="helpBtn" aria-label="說明">?</button></div></header>
   <main id="view">${skeleton}</main>
   <nav><div class="in">${allowed.map((t) => `<button data-t="${t[0]}" class="${t[0] === tab ? 'on' : ''}">${svg(t[2])}${t[1]}</button>`).join('')}</div></nav>`;
-  $$('nav button').forEach((b) => b.onclick = () => { tab = b.dataset.t; scrollTo(0, 0); render(); });
+  $$('nav button').forEach((b) => b.onclick = async () => { if (!(await leaveOk())) return; tab = b.dataset.t; scrollTo(0, 0); render(); });
+  $('#helpBtn').onclick = async () => { if (!(await leaveOk())) return; state.helpFrom = tab; tab = 'help'; scrollTo(0, 0); render(); };
   try { await VIEWS[tab]($('#view')); } catch (e) { $('#view').innerHTML = `<div class="card"><b>載入失敗</b><p class="mut">${esc(e.message)}</p></div>`; }
 }
 
@@ -146,6 +161,28 @@ function loginView(root) {
   $('#go').onclick = (e) => go(e.target); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
 }
 
+
+// ---------------- 說明中心 ----------------
+const HELP = [
+  ['start', '🚀 第一次使用，照這 5 步', `<ol><li><b>設定 → 連線 → LINE：</b>貼上 Channel secret 與 access token，按「驗證並儲存」。</li><li><b>設定 → 連線 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → 連線 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE 頁：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」開關。</li></ol><p class="hint">首頁的「開通進度」會幫你打勾，沒完成的項目旁邊有按鈕可直接前往。</p>`],
+  ['line', '💬 如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 Provider → 你的 channel。</li><li><b>Basic settings</b> 分頁複製 <b>Channel secret</b>（32 位英數字）。</li><li><b>Messaging API</b> 分頁按 <b>Issue</b> 產生 <b>Channel access token (long-lived)</b> 並複製。</li><li>貼到後台「設定 → 連線 → LINE」，按「驗證並儲存」。系統會自動設定 Webhook 並測試。</li><li>回到 LINE Developers 的 Messaging API 分頁，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，把<b>「自動回應訊息」與「加入好友的歡迎訊息」關閉</b>，否則會和系統重複回覆。</li></ol><div class="callout warn">憑證請只貼在這個後台，不要貼到聊天或社群。換新憑證請回到 LINE Developers 重新核發後再貼。</div>`],
+  ['gemini', '🤖 如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b>，複製。</li><li>貼到「設定 → 連線 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p class="hint">AI 只用來寫 Threads 貼文，不會讀取顧客資料。每日生成次數與每月額度有上限，用完會自動停止，不會多收費。</p>`],
+  ['threads', '🧵 如何連結 Threads', `<ol><li>到「設定 → 連線 → Threads」按<b>連結 Threads</b>。</li><li>在 Threads 頁面登入要發文的帳號並按同意。</li><li>完成後會自動回到後台，顯示「已連結 @帳號」。</li></ol><div class="callout">授權約 60 天到期，系統會在到期前自動續期，不需要處理。若首頁出現「授權已失效」，再按一次「連結 Threads」即可。</div><div class="callout warn">若按下後出現「無法使用此應用程式」之類訊息，代表帳號還沒被加為測試人員，請聯絡開發者。</div>`],
+  ['modes', '📝 三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接依排程發布，不經人工。適合低風險內容。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，你核准後才會發。</li><li><b>C 指定主題：</b>依「本週主題」產生文章；可選擇是否需要審核。</li></ul><div class="callout bad">金融、放款等受監管產業，系統會<b>強制人工審核</b>，不論選哪個模式都不會自動發布。</div><p class="hint">內容檢查會擋下「保證核貸」「免審」這類字眼。被擋的草稿需要先修改才能核准。</p>`],
+  ['leads', '📥 顧客留資怎麼運作', `<ol><li>顧客在 LINE 點「立即詢問」→ 看到隱私告知 → 輸入「同意」。</li><li>依序回答服務類型與表單問題 → 確認送出。</li><li>你在後台「留資」頁看到新紀錄（未處理）。</li><li>聯絡完顧客後，按「標記為已處理」。</li></ol><p class="hint">顧客可以隨時輸入「查詢我的資料」或「刪除我的資料」。留資超過保存期限（預設 180 天）會自動刪除。</p>`],
+  ['human', '🙋 真人接手怎麼運作', `<ul><li>顧客點「聯絡專人」或輸入「真人／客服」後，<b>系統暫停對該顧客的自動回覆</b>。</li><li>請到 <b>LINE Official Account Manager</b> 的聊天介面親自回覆。</li><li>顧客輸入「選單」或滿 24 小時，自動回覆才會恢復。</li></ul>`],
+  ['faq', '🧰 常見問題排除', `<ul><li><b>LINE 傳訊息沒有回應：</b>① 首頁「LINE 自動接待」是否打開 ② Developers Console 的 Use webhook 是否開啟 ③ 設定 → 連線 → LINE 按「測試連線」。</li><li><b>LINE 回了兩次：</b>到 Official Account Manager 關閉自動回應訊息與歡迎訊息。</li><li><b>草稿「內容檢查未通過」：</b>貼文含有禁止宣稱或禁用詞，請改寫後再核准。</li><li><b>開不了自動發文：</b>需要先連好 Gemini 與 Threads。</li><li><b>貼文卡在「待核對」：</b>系統正在向 Threads 確認是否已發出，會自動處理，請勿重複建立。</li><li><b>貼文「失敗」：</b>可按「重試」；若一直失敗請查看錯誤訊息或聯絡開發者。</li><li><b>忘記密碼：</b>請管理員到「設定 → 帳號」重設，或聯絡開發者。</li></ul>`],
+  ['safe', '🔒 安全小提醒', `<ul><li>第一次登入後請立刻改密碼（設定 → 帳號 → 變更我的密碼）。</li><li>客服人員請用「客服」角色，只能看與處理留資。</li><li>離職或不再需要的帳號，請在「設定 → 帳號」把開關關掉。</li><li>不要把憑證、密碼貼到聊天軟體。</li></ul>`],
+];
+async function helpView(v) {
+  v.innerHTML = `<button class="back" id="bk">‹ 返回</button><div class="card help"><h2>說明中心</h2><p class="mut">點開各項查看步驟。</p>
+  ${HELP.map(([id, t, body]) => `<details id="h-${id}" ${state.helpOpen === id ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`).join('')}</div>`;
+  $('#bk').onclick = () => { tab = state.helpFrom || 'home'; render(); };
+  const el = $('#h-' + state.helpOpen); if (el && state.helpJump) setTimeout(() => el.scrollIntoView({ block: 'start' }), 50);
+  state.helpJump = false;
+}
+const openHelp = (id) => { state.helpOpen = id; state.helpJump = true; state.helpFrom = tab; tab = 'help'; render(); };
+
 // ---------------- 首頁 ----------------
 async function homeView(v) {
   const [d, ig, st] = await Promise.all([api('GET', '/dashboard'), api('GET', '/integrations'), api('GET', '/settings')]);
@@ -155,11 +192,11 @@ async function homeView(v) {
   else if (qs.get('threads') === 'error') { toast('Threads 連結失敗：' + (qs.get('reason') || ''), 'bad'); history.replaceState(null, '', '/'); }
   const s = st.settings;
   const steps = [
-    ['填寫品牌資料', !!(st.brand.description && s.services && !s.services.startsWith('（')), '設定', 'settings'],
-    ['設定 LINE 連線', ig.line.configured, '去設定', 'settings'],
-    ['設定 AI（Gemini）', ig.gemini.configured, '去設定', 'settings'],
-    ['連結 Threads 帳號', ig.threads.configured, ig.threads.oauth_available ? '連結' : '設定', 'settings'],
-    ['編輯 LINE 服務說明', !!(s.line_ready), '編輯', 'line'],
+    ['填寫品牌資料', !!(st.brand.description && s.services && !s.services.startsWith('（')), '設定', 'settings', 'start'],
+    ['設定 LINE 連線', ig.line.configured, '去設定', 'settings', 'line'],
+    ['設定 AI（Gemini）', ig.gemini.configured, '去設定', 'settings', 'gemini'],
+    ['連結 Threads 帳號', ig.threads.configured, ig.threads.oauth_available ? '連結' : '設定', 'settings', 'threads'],
+    ['編輯 LINE 服務說明', !!(s.line_ready), '編輯', 'line', 'start'],
   ];
   const done = steps.filter((x) => x[1]).length;
   const warn = d.threads_status === 'token_invalid' ? '<p><span class="chip bad">Threads 授權已失效</span> 請到「設定」重新連結</p>' : '';
@@ -169,14 +206,22 @@ async function homeView(v) {
   <div><span>今日留資</span><b>${d.inquiries_today}</b></div><div><span>未處理留資</span><b>${d.inquiries_pending}</b></div></div>
   <p class="mut" style="margin-top:10px">今日 AI 生成 ${d.gen_today} / ${d.gen_limit}</p></div>
   ${done < steps.length ? `<div class="card"><h2>開通進度 ${done}/${steps.length}</h2><div class="bar"><i style="width:${done / steps.length * 100}%"></i></div>
-  ${steps.map((x, i) => `<div class="step"><div class="dot ${x[1] ? 'ok' : ''}">${x[1] ? '✓' : i + 1}</div><div class="t"><b>${x[0]}</b></div>${x[1] ? '' : `<button class="sec" data-go="${x[3]}">${x[2]}</button>`}</div>`).join('')}</div>` : ''}
+  ${steps.map((x, i) => `<div class="step"><div class="dot ${x[1] ? 'ok' : ''}">${x[1] ? '✓' : i + 1}</div><div class="t"><b>${x[0]}</b>${x[1] ? '' : `<a href="#" class="mut" data-help="${x[4]}">怎麼做？</a>`}</div>${x[1] ? '' : `<button class="sec" data-go="${x[3]}">${x[2]}</button>`}</div>`).join('')}</div>` : ''}
   <div class="card"><h2>自動化開關</h2>
   <div class="sw"><div><b>自動發文</b><span class="mut">${d.auto_post_enabled ? '依排程生成並發布' : '已暫停，不會生成也不會發布'}</span></div><label class="toggle"><input type="checkbox" id="t1" ${d.auto_post_enabled ? 'checked' : ''}><i></i></label></div>
   <div class="sw"><div><b>LINE 自動接待</b><span class="mut">${d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停，不會自動回覆'}</span></div><label class="toggle"><input type="checkbox" id="t2" ${d.line_auto_reply_enabled ? 'checked' : ''}><i></i></label></div></div>
   <div class="row"><button class="sec" data-go="leads">查看留資 ${d.inquiries_pending ? `（${d.inquiries_pending} 筆未處理）` : ''}</button></div>`;
   $$('[data-go]', v).forEach((b) => b.onclick = () => { tab = b.dataset.go; render(); });
-  $('#t1').onchange = (e) => act(null, async () => { await api('POST', '/pause', { auto_post_enabled: e.target.checked }); render(); });
-  $('#t2').onchange = (e) => act(null, async () => { await api('POST', '/pause', { line_auto_reply_enabled: e.target.checked }); render(); });
+  $$('[data-help]', v).forEach((a) => a.onclick = (e) => { e.preventDefault(); openHelp(a.dataset.help); });
+  const flip = (key, label) => async (e) => {
+    const on = e.target.checked;
+    if (!on && !(await confirmSheet(`確定要暫停「${label}」？`, '暫停', false))) { e.target.checked = true; return; }
+    try { await api('POST', '/pause', { [key]: on }); toast(on ? `已開啟${label}` : `已暫停${label}`, 'ok'); }
+    catch (err) { toast(err.message, 'bad'); }
+    render(); // 失敗時會還原開關狀態
+  };
+  $('#t1').onchange = flip('auto_post_enabled', '自動發文');
+  $('#t2').onchange = flip('line_auto_reply_enabled', 'LINE 自動接待');
 }
 
 // ---------------- 貼文 ----------------
@@ -187,7 +232,7 @@ async function postsView(v) {
   const groups = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
   const seg = state.postSeg;
   const card = (p) => `<div class="post" data-id="${p.id}"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip ${STATUS[p.status]?.[1] || ''}">${STATUS[p.status]?.[0] || p.status}</span><span class="mut">${fmt(p.published_at || p.scheduled_at)}</span></div>
-    ${p.status === 'draft' ? `<textarea>${esc(p.content)}</textarea>` : `<pre>${esc(p.content)}</pre>`}
+    ${p.status === 'draft' ? `<textarea>${esc(p.content)}</textarea><div class="hint">${[...p.content].length} / 500 字</div>` : `<pre>${esc(p.content)}</pre>`}
     ${p.error_message ? `<p class="mut" style="color:var(--bad)">${esc(p.error_message)}</p>` : ''}
     <div class="row" style="margin-top:8px">${p.status === 'draft' ? '<button class="sec" data-a="save">儲存</button><button data-a="ok">核准發布</button><button class="bad" data-a="del">刪除</button>' : ''}
     ${p.status === 'failed' ? '<button class="sec" data-a="retry">重試</button>' : ''}${p.status === 'scheduled' ? '<button class="bad" data-a="del">取消排程</button>' : ''}</div></div>`;
@@ -196,27 +241,48 @@ async function postsView(v) {
   <div class="card">${groups[seg].map(card).join('') || empty(seg === 'draft' ? '沒有待審核的草稿' : '目前沒有項目')}</div>
   <details class="card" open><summary>立即生成草稿</summary><label>指定主題（可空白，由 AI 依品牌設定發想）</label><input id="gt" placeholder="例如：本週活動、常見問題">
     <div class="row"><button id="gen">生成一則草稿</button></div><p class="mut">生成後會先放進待審核，核准後才會發布。</p></details>
-  <details class="card"><summary>發文設定</summary>
+  <details class="card" data-form><summary>發文設定</summary>
     ${s.regulated ? '<p class="chip warn">受監管產業：所有貼文強制人工審核</p>' : ''}
-    <label>發文模式</label><select id="mode"><option value="A">A　全自動（通過內容檢查才自動發）</option><option value="B">B　審核後發布</option><option value="C">C　指定主題生成</option></select>
+    <label>發文模式</label><select id="mode"><option value="A">A　全自動（通過內容檢查才自動發）</option><option value="B">B　審核後發布</option><option value="C">C　指定主題生成</option></select><div class="hint" id="modeHint"></div>
     <label>本週主題（模式 C 使用）</label><textarea id="topic"></textarea>
     <div class="sw"><div><b>模式 C 需審核</b></div><label class="toggle"><input type="checkbox" id="rr"><i></i></label></div>
-    <label>每日發文數（1–5）</label><input id="ppd" type="number" min="1" max="5" inputmode="numeric">
-    <label>發布時間（24 小時制，逗號分隔，依序對應每篇）</label><input id="times" placeholder="10:00,14:00,20:00">
+    <label>每日發文數（1–5）</label><input id="ppd" type="number" min="1" max="5" inputmode="numeric"><div class="hint">發布時間的數量要和每日發文數對應，例如 2 篇請填 2 個時間。</div>
+    <label>發布時間（24 小時制，逗號分隔，依序對應每篇）</label><input id="times" placeholder="10:00,14:00,20:00" inputmode="numeric"><div class="hint">時間以品牌時區計算，格式 <b>HH:MM</b>，例如 <b>09:30</b>。</div>
     <label>品牌語氣</label><input id="tone"><label>內容主題（逗號分隔）</label><input id="tops"><label>禁用詞（逗號分隔）</label><input id="ban">
-    <label>CTA 文字</label><input id="cta"><label>LINE 加好友網址（https）</label><input id="url">
+    <label>CTA 文字</label><input id="cta"><label>LINE 加好友網址（https）</label><input id="url" inputmode="url" placeholder="https://line.me/R/ti/p/@你的ID"><div class="hint">貼文結尾會自動附上「CTA 文字 + 這個網址」。請先用手機點開確認能加入好友。</div>
     <div class="row"><button id="save">儲存發文設定</button></div></details>`;
   $('#mode').value = s.posting_mode; $('#topic').value = s.weekly_topic; $('#rr').checked = s.require_review; $('#ppd').value = s.posts_per_day;
   $('#times').value = s.publishing_times.join(','); $('#tone').value = s.content_tone; $('#tops').value = s.content_topics.join(','); $('#ban').value = s.banned_words.join(',');
   $('#cta').value = s.cta_text; $('#url').value = s.line_add_url;
+  const MODE = { A: '<b>全自動：</b>通過內容檢查就直接發，不經人工。', B: '<b>審核後發布：</b>先產生草稿，你核准才發。建議使用。', C: '<b>指定主題：</b>依「本週主題」產生；可選擇是否需審核。' };
+  const showMode = () => { $('#modeHint').innerHTML = (MODE[$('#mode').value] || '') + (s.regulated ? ' <b>（受監管產業已強制人工審核）</b>' : ''); };
+  $('#mode').onchange = showMode; showMode();
   $$('.seg button', v).forEach((b) => b.onclick = () => { state.postSeg = b.dataset.s; render(); });
-  $('#save').onclick = (e) => act(e.target, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value,
-    publishing_times: list($('#times').value), content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: $('#url').value }), '已儲存');
+  $('#save').onclick = async (e) => {
+    const t = list($('#times').value).map((x) => x.replace('：', ':')); $('#times').value = t.join(',');
+    const url = $('#url').value.trim(); $('#url').value = url;
+    if (!check([
+      [$('#ppd'), !(+$('#ppd').value >= 1 && +$('#ppd').value <= 5), '每日發文數需為 1 到 5'],
+      [$('#times'), !t.length || t.some((x) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)), '發布時間格式需為 HH:MM，例如 09:30,14:00'],
+      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`],
+      [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭'],
+    ])) return;
+    if (url && !/line\.me/.test(url) && !(await confirmSheet('這個網址看起來不是 LINE 的加好友連結，確定要使用？', '確定使用', false))) return;
+    if ($('#mode').value === 'A' && s.posting_mode !== 'A' && !s.regulated && !(await confirmSheet('全自動模式不會經過人工審核就直接發布，確定要切換？', '確定切換', false))) return;
+    const r = await act(e.target, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value,
+    publishing_times: list($('#times').value), content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url }), '已儲存');
+    if (r) dirty = false;
+  };
   $('#gen').onclick = (e) => act(e.target, async () => { const r = await api('POST', '/posts/generate', { topic: $('#gt').value }); toast(r.issues?.length ? '已生成，但內容檢查有警示，請修改' : '草稿已生成', r.issues?.length ? '' : 'ok'); state.postSeg = 'draft'; render(); });
   $$('.post button', v).forEach((b) => b.onclick = () => act(b, async () => {
     const box = b.closest('.post'), id = box.dataset.id, a = b.dataset.a, content = $('textarea', box)?.value;
     if (a === 'save') { await api('PUT', '/posts/' + id, { content }); toast('已儲存', 'ok'); return; }
-    if (a === 'ok') { await api('PUT', '/posts/' + id, { content }); await api('POST', `/posts/${id}/approve`, {}); toast('已核准，將依排程發布', 'ok'); }
+    if (a === 'ok') {
+      if ([...content].length > 500) throw new Error('超過 500 字，Threads 會拒收，請先縮短');
+      await api('PUT', '/posts/' + id, { content });
+      const r = await api('POST', `/posts/${id}/approve`, {});
+      toast(r.warning || '已核准，將依排程發布', r.warning ? '' : 'ok');
+    }
     if (a === 'del') { if (!(await confirmSheet('確定要刪除這則貼文？'))) return; await api('DELETE', '/posts/' + id); }
     if (a === 'retry') await api('POST', `/posts/${id}/retry`, {});
     render();
@@ -227,14 +293,14 @@ async function postsView(v) {
 async function lineView(v) {
   const [c, faq] = await Promise.all([api('GET', '/line-config'), api('GET', '/faq')]);
   v.innerHTML = `
-  <div class="card"><h2>接待內容</h2><p class="mut">顧客在 LINE 看到的文字。留空會使用預設值。</p>
+  <div class="card" data-form><h2>接待內容</h2><p class="mut">顧客在 LINE 看到的文字。留空會使用預設值。<a href="#" data-help="line">需要幫助？</a></p>
   <label>歡迎訊息</label><textarea id="welcome"></textarea>
   <label>選單按鈕名稱</label><div class="row" style="margin-top:0"><input id="m1" aria-label="了解服務"><input id="m2" aria-label="立即詢問"><input id="m3" aria-label="聯絡專人"></div>
   <label>服務說明（請放已核准的內容）</label><textarea id="info"></textarea><label>營業時間</label><input id="hours">
-  <label>真人接手提示</label><textarea id="human"></textarea><label>隱私告知（需含「輸入同意」的指示）</label><textarea id="priv"></textarea>
+  <label>真人接手提示</label><textarea id="human"></textarea><label>隱私告知（需含「輸入同意」的指示）</label><div class="hint">顧客必須輸入「<b>同意</b>」才能繼續，請保留這個指示。</div><textarea id="priv"></textarea>
   <label>完成訊息</label><input id="done"><label>未匹配時的回覆</label><input id="fb">
   <h3>留資表單</h3><label>服務類型（逗號分隔）</label><input id="svc">
-  <label>欄位（每行一個：代號｜提問｜必填 1/0｜遇到此答案則轉專人）</label><textarea id="fields" style="min-height:150px;font-size:14px"></textarea>
+  <label>欄位（每行一個：代號｜提問｜必填 1/0｜遇到此答案則轉專人）</label><div class="hint">範例：<code>need｜請簡述您的需求｜1</code><br>代號需為英文小寫（可含數字與底線），不可重複。請勿設計收集身分證、銀行帳密等敏感資料的欄位。</div><textarea id="fields" style="min-height:150px;font-size:14px"></textarea>
   <div class="row"><button id="save">儲存</button></div></div>
   <div class="card"><h2>FAQ 固定問答</h2><p class="mut">關鍵字用逗號分隔；數字越大越優先比對。</p>
   ${faq.map((f) => `<details data-f="${f.id}"><summary>${esc(f.keyword)} ${f.enabled ? '' : '<span class="chip">停用</span>'}</summary>
@@ -246,11 +312,26 @@ async function lineView(v) {
   set('welcome', c.welcome); set('m1', c.menu.info); set('m2', c.menu.inquiry); set('m3', c.menu.human); set('info', c.serviceInfo); set('hours', c.businessHours);
   set('human', c.humanNotice); set('priv', c.privacyNotice); set('done', c.completeMessage); set('fb', c.fallback); set('svc', c.services.join(','));
   set('fields', c.fields.map((f) => [f.key, f.label, f.required ? 1 : 0, f.blockIf || ''].join('｜')).join('\n'));
-  $('#save').onclick = (e) => act(e.target, () => api('PUT', '/line-config', {
+  $$('[data-help]', v).forEach((a) => a.onclick = (e) => { e.preventDefault(); openHelp(a.dataset.help); });
+  $('#save').onclick = async (e) => {
+    const rows = $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => l.split(/[｜|]/).map((x) => x.trim()));
+    const keys = rows.map((r) => r[0]);
+    const bad = rows.findIndex((r) => !/^[a-z][a-z0-9_]{0,20}$/.test(r[0]) || !r[1]);
+    if (!check([
+      [$('#priv'), !$('#priv').value.includes('同意'), '隱私告知需包含「同意」的指示，顧客才知道要輸入什麼'],
+      [$('#svc'), !list($('#svc').value).length, '至少需要一個服務類型'],
+      [$('#fields'), !rows.length, '至少需要一個表單欄位'],
+      [$('#fields'), bad >= 0, `第 ${bad + 1} 行格式不對：需要「英文小寫代號｜提問文字」`],
+      [$('#fields'), new Set(keys).size !== keys.length, '欄位代號不可重複'],
+      [$('#m1'), new Set([$('#m1').value, $('#m2').value, $('#m3').value]).size < 3 || [$('#m1'), $('#m2'), $('#m3')].some((x) => !x.value.trim()), '三個選單名稱都需填寫且不能相同'],
+    ])) return;
+    const r = await act(e.target, () => api('PUT', '/line-config', {
     welcome: $('#welcome').value, menu: { info: $('#m1').value, inquiry: $('#m2').value, human: $('#m3').value }, serviceInfo: $('#info').value, businessHours: $('#hours').value,
     humanNotice: $('#human').value, privacyNotice: $('#priv').value, completeMessage: $('#done').value, fallback: $('#fb').value, services: list($('#svc').value),
     fields: $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => { const [key, label, req, blockIf] = l.split(/[｜|]/); return { key: key.trim(), label: (label || '').trim(), required: (req || '1').trim() !== '0', ...((blockIf || '').trim() ? { blockIf: blockIf.trim() } : {}) }; }),
   }), '已儲存');
+    if (r) dirty = false;
+  };
   $$('[data-f] button', v).forEach((b) => b.onclick = () => act(b, async () => {
     const box = b.closest('[data-f]'), id = box.dataset.f;
     if (b.dataset.a === 'd') { if (!(await confirmSheet('確定刪除這則 FAQ？'))) return; await api('DELETE', '/faq/' + id); }
@@ -289,16 +370,16 @@ async function settingsView(v) {
     : `<p class="mut">按下按鈕後會前往 Threads 授權，完成後自動回到這裡。</p><div class="row"><button id="thOn" ${ig.threads.oauth_available ? '' : 'disabled'}>連結 Threads</button></div>${ig.threads.oauth_available ? '' : '<p class="mut">系統尚未設定 Threads App，請聯絡開發者。</p>'}`}</details>
   <details><summary><span>LINE ${badge(ig.line.configured)}</span></summary>
     ${ig.line.configured ? `<p>機器人：<b>${esc(ig.line.name || '已設定')}</b></p>` : ''}
-    <label>Channel secret</label><input id="lsec" autocomplete="off" placeholder="${ig.line.configured ? '已設定，重新輸入以更換' : ''}">
-    <label>Channel access token（long-lived）</label><input id="ltok" autocomplete="off">
+    <label>Channel secret</label><input id="lsec" autocomplete="off" autocapitalize="none" placeholder="${ig.line.configured ? '已設定，重新輸入以更換' : '32 位英數字'}"><div class="hint">位置：LINE Developers → Basic settings。<a href="#" data-help="line">看圖文步驟</a></div>
+    <label>Channel access token（long-lived）</label><input id="ltok" autocomplete="off" autocapitalize="none"><div class="hint">位置：Messaging API 分頁 → Issue。請貼上完整內容，不要加空格或換行。</div>
     <p class="mut">儲存時會自動驗證並把 Webhook 設為：<br><code>${esc(ig.line.webhook_url)}</code></p>
     <div class="row"><button id="lsave">驗證並儲存</button>${ig.line.configured ? '<button class="sec" data-t="line">測試連線</button>' : ''}</div></details>
   <details><summary><span>AI（Gemini） ${badge(ig.gemini.configured)}</span></summary>
-    <label>API key</label><input id="gkey" autocomplete="off" placeholder="${ig.gemini.configured ? '已設定，重新輸入以更換' : ''}">
+    <label>API key</label><input id="gkey" autocomplete="off" autocapitalize="none" placeholder="${ig.gemini.configured ? '已設定，重新輸入以更換' : ''}"><div class="hint"><a href="#" data-help="gemini">如何取得？</a></div>
     <div class="row"><button id="gsave">驗證並儲存</button>${ig.gemini.configured ? '<button class="sec" data-t="gemini">測試連線</button>' : ''}</div></details></div>
 
-  <div class="card"><h2>品牌資訊</h2><label>品牌名稱</label><input id="bname"><label>品牌介紹（供 AI 撰寫貼文，只放公開資訊）</label><textarea id="bdesc"></textarea>
-  <label>產品與服務</label><textarea id="bsvc"></textarea><label>目標受眾</label><input id="baud"><label>時區</label><input id="btz">
+  <div class="card" data-form><h2>品牌資訊</h2><label>品牌名稱</label><input id="bname"><label>品牌介紹（供 AI 撰寫貼文，只放公開資訊）</label><textarea id="bdesc"></textarea>
+  <label>產品與服務</label><textarea id="bsvc"></textarea><label>目標受眾</label><input id="baud"><label>時區</label><input id="btz"><div class="hint">例如 <b>Asia/Taipei</b>。發布時間與「今日」的計算都依這個時區。</div>
   <div class="row"><button id="bsave">儲存</button></div></div>
 
   <div class="card"><h2>帳號</h2>${users.map((u) => `<div class="sw"><div><b>${esc(u.username)}</b><span class="mut">${u.role === 'admin' ? '管理員' : '客服'}${u.username === me.name ? ' · 你' : ''}</span></div>
@@ -312,23 +393,36 @@ async function settingsView(v) {
   <p class="mut" style="text-align:center"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p>
   <div class="row"><button class="sec" id="out">登出</button></div>`;
   $('#bname').value = st.brand.name; $('#bdesc').value = st.brand.description; $('#bsvc').value = st.settings.services; $('#baud').value = st.settings.audience; $('#btz').value = st.brand.timezone;
+  $$('[data-help]', v).forEach((a) => a.onclick = (e) => { e.preventDefault(); openHelp(a.dataset.help); });
   const th = $('#thOn'); if (th) th.onclick = (e) => act(e.target, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
   const off = $('#thOff'); if (off) off.onclick = (e) => act(e.target, async () => { if (!(await confirmSheet('中斷 Threads 連結？自動發文將無法發布。'))) return; await api('DELETE', '/integrations/threads'); render(); });
   $$('[data-t]', v).forEach((b) => b.onclick = () => act(b, async () => { const r = await api('POST', '/integrations/test', { target: b.dataset.t }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
-  $('#lsave').onclick = (e) => act(e.target, async () => {
+  $('#lsave').onclick = async (e) => {
+    $('#lsec').value = $('#lsec').value.replace(/\s+/g, ''); $('#ltok').value = $('#ltok').value.replace(/\s+/g, '');
+    if (!check([[$('#lsec'), !/^[0-9a-fA-F]{32}$/.test($('#lsec').value), 'Channel secret 應為 32 位英數字'], [$('#ltok'), $('#ltok').value.length < 50, 'Access token 看起來不完整，請重新複製']])) return;
+    await act(e.target, async () => {
     const r = await api('POST', '/integrations/line', { channel_secret: $('#lsec').value, channel_access_token: $('#ltok').value });
     toast(r.webhook_verified ? `LINE 已連線（${r.bot}），Webhook 驗證通過` : `已儲存（${r.bot}），但 Webhook 驗證未通過，請在 LINE 後台開啟 Use webhook`, r.webhook_verified ? 'ok' : '');
     render();
-  });
-  $('#gsave').onclick = (e) => act(e.target, async () => { await api('POST', '/integrations/gemini', { api_key: $('#gkey').value }); toast('Gemini 已連線', 'ok'); render(); });
-  $('#bsave').onclick = (e) => act(e.target, () => api('PUT', '/settings', { name: $('#bname').value, description: $('#bdesc').value, services: $('#bsvc').value, audience: $('#baud').value, timezone: $('#btz').value }), '已儲存');
-  $$('[data-u]', v).forEach((c) => c.onchange = () => act(null, async () => { await api('PATCH', '/users/' + c.dataset.u, { enabled: c.checked }); toast(c.checked ? '已啟用' : '已停用', 'ok'); }));
-  $('#nadd').onclick = (e) => act(e.target, async () => { await api('POST', '/users', { username: $('#nu').value.trim(), role: $('#nr2').value, password: $('#np').value }); toast('帳號已建立', 'ok'); render(); });
-  $('#pchg').onclick = (e) => act(e.target, async () => { await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = ''; }, '密碼已變更');
+    });
+  };
+  $('#gsave').onclick = async (e) => {
+    $('#gkey').value = $('#gkey').value.replace(/\s+/g, '');
+    if (!check([[$('#gkey'), $('#gkey').value.length < 20, 'API key 看起來不完整，請重新複製']])) return;
+    await act(e.target, async () => { await api('POST', '/integrations/gemini', { api_key: $('#gkey').value }); toast('Gemini 已連線', 'ok'); render(); });
+  };
+  $('#bsave').onclick = async (e) => {
+    if (!check([[$('#bname'), !$('#bname').value.trim(), '品牌名稱不可為空'], [$('#btz'), !(() => { try { new Intl.DateTimeFormat('en', { timeZone: $('#btz').value.trim() }); return true; } catch { return false; } })(), '時區格式不對，例如 Asia/Taipei']])) return;
+    const r = await act(e.target, () => api('PUT', '/settings', { name: $('#bname').value.trim(), description: $('#bdesc').value, services: $('#bsvc').value, audience: $('#baud').value, timezone: $('#btz').value.trim() }), '已儲存');
+    if (r) { dirty = false; TZ = $('#btz').value.trim(); }
+  };
+  $$('[data-u]', v).forEach((c) => c.onchange = async () => { if (!c.checked && !(await confirmSheet('停用這個帳號？對方將立即無法登入。', '停用'))) { c.checked = true; return; } act(null, async () => { await api('PATCH', '/users/' + c.dataset.u, { enabled: c.checked }); toast(c.checked ? '已啟用' : '已停用', 'ok'); }); });
+  $('#nadd').onclick = (e) => !check([[$('#nu'), !/^[a-zA-Z0-9_.-]{3,32}$/.test($('#nu').value.trim()), '帳號需為 3–32 字英數（可含 . _ -）'], [$('#np'), $('#np').value.length < 10, '密碼至少 10 字元']]) || act(e.target, async () => { await api('POST', '/users', { username: $('#nu').value.trim(), role: $('#nr2').value, password: $('#np').value }); toast('帳號已建立', 'ok'); render(); });
+  $('#pchg').onclick = (e) => !check([[$('#pn'), $('#pn').value.length < 10, '新密碼至少 10 字元'], [$('#pn'), $('#pn').value === $('#pc').value, '新密碼不能和目前密碼相同']]) || act(e.target, async () => { await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = ''; }, '密碼已變更');
   $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); me = null; render(); };
 }
 
-const VIEWS = { home: homeView, posts: postsView, line: lineView, leads: leadsView, settings: settingsView };
+const VIEWS = { help: helpView, home: homeView, posts: postsView, line: lineView, leads: leadsView, settings: settingsView };
 render();
 </script>
 </body>

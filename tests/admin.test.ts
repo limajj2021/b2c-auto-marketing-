@@ -61,3 +61,26 @@ describe('admin auth & roles', () => {
     expect((await env.DB.prepare('SELECT status,approved_by FROM posts').first<any>())).toMatchObject({ status: 'scheduled', approved_by: 'boss' });
   });
 });
+
+describe('foolproof guards', () => {
+  it('refuses to enable auto-post / auto-reply without required connections', async () => {
+    const env = await makeEnv();
+    const admin = (await login(env, 'boss', 'correct-horse-1')).cookie;
+    const noThreads = { ...env, THREADS_ACCESS_TOKEN: '', GEMINI_API_KEY: '', LINE_CHANNEL_SECRET: '' } as any;
+    const r = await api(noThreads, 'POST', '/api/pause', { auto_post_enabled: true }, admin);
+    expect(r.status).toBe(409);
+    expect((await r.json() as any).error).toContain('Gemini');
+    expect((await api(noThreads, 'POST', '/api/pause', { line_auto_reply_enabled: true }, admin)).status).toBe(409);
+    // turning things OFF is always allowed
+    expect((await api(noThreads, 'POST', '/api/pause', { auto_post_enabled: false }, admin)).status).toBe(200);
+    // with connections present it succeeds
+    expect((await api(env, 'POST', '/api/pause', { auto_post_enabled: true }, admin)).status).toBe(200);
+  });
+
+  it('refuses auto-post when Threads authorization is flagged invalid', async () => {
+    const env = await makeEnv();
+    await env.DB.prepare("UPDATE brand_settings SET threads_status='token_invalid'").run();
+    const admin = (await login(env, 'boss', 'correct-horse-1')).cookie;
+    expect((await api(env, 'POST', '/api/pause', { auto_post_enabled: true }, admin)).status).toBe(409);
+  });
+});

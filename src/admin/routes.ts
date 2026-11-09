@@ -125,6 +125,19 @@ add('POST', '/pause', 'admin', async ({ env, req, actor, brandId }) => {
   if (typeof b.auto_post_enabled === 'boolean') { sets.push('auto_post_enabled=?'); vals.push(b.auto_post_enabled ? 1 : 0); }
   if (typeof b.line_auto_reply_enabled === 'boolean') { sets.push('line_auto_reply_enabled=?'); vals.push(b.line_auto_reply_enabled ? 1 : 0); }
   if (!sets.length) return err(400, 'nothing to update');
+  // 防呆：必要連線未完成時不允許開啟自動化
+  if (b.auto_post_enabled === true) {
+    const s = await getSettings(env, brandId);
+    const missing = [
+      !env.GEMINI_API_KEY && 'Gemini（AI）',
+      !(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID) && 'Threads',
+      s.threads_status !== 'ok' && 'Threads 授權已失效，請重新連結',
+    ].filter(Boolean);
+    if (missing.length) return err(409, `無法開啟自動發文，請先完成：${missing.join('、')}（設定 → 連線）`);
+  }
+  if (b.line_auto_reply_enabled === true && !(env.LINE_CHANNEL_SECRET && env.LINE_CHANNEL_ACCESS_TOKEN)) {
+    return err(409, '無法開啟自動接待，請先完成 LINE 連線（設定 → 連線）');
+  }
   await env.DB.prepare(`UPDATE brand_settings SET ${sets.join(',')},updated_at=? WHERE brand_id=?`).bind(...vals, iso(), brandId).run();
   await audit(env, brandId, actor.name, 'toggle', JSON.stringify(b));
   return json({ ok: true });
@@ -240,7 +253,7 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   await env.DB.prepare(`UPDATE posts SET status='scheduled',approved_by=?,scheduled_at=?,error_message=NULL,updated_at=? WHERE id=? AND status='draft'`)
     .bind(actor.name, at.toISOString(), iso(), m[1]).run();
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
-  return json({ ok: true });
+  return json({ ok: true, warning: env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
 });
 
 add('POST', '/posts/(\\d+)/retry', 'admin', async ({ env, m, actor, brandId }) => {
