@@ -5,3 +5,4 @@ node_modules
 .generated
 backups
 brands/test.json
+brands/test2.json

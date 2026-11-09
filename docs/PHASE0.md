@@ -20,3 +20,10 @@
 
 - 本機 workerd + 本機 D1：`wrangler d1 migrations apply --local` 成功；`/api/health` = `{"ok":true}`；無簽章的 LINE Webhook = 401；`/` 回傳後台頁。
 - `npm test`：25 項單元／整合測試（簽章、去重、留資流程、人工接手、FAQ、排程不重複、未核准不發布、unknown 核對、token 失效、額度、權限、CSRF、稽核）。
+
+## Phase 3 演練結果（2026-11-09，測試用 Cloudflare 帳號）
+
+- ✅ **備份**：`npm run backup` 匯出遠端 D1（13 個 CREATE TABLE、20 筆資料列）。
+- ✅ **還原**：匯入全新空 D1，各表筆數與原庫一致（brands/posts/contacts/admin_users/ai_generations）。臨時庫已刪除。
+- ✅ **第二家企業**：另一份設定部署成功，`/api/health` 通過；兩庫資料互不相通（品牌名、貼文、留資各自獨立）；A 企業管理員密碼無法登入 B 企業。測試資源已刪除。
+- ⬜ 未做：客戶控制權交接演練（需第二個真實 Cloudflare 帳號）、開發者撤權後持續運作驗證。
