@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>隱私政策</title><link rel="stylesheet" href="/legal.css"></head>
+<body><main><article>
+<h1>隱私政策</h1><p class="mut"><span class="brand">本服務</span> · 最後更新：<span id="d"></span></p>
+<h2>1. 我們蒐集的資料</h2>
+<ul>
+<li><b>LINE 官方帳號：</b>您的 LINE 使用者代碼、顯示名稱，以及您在諮詢表單中主動填寫的稱呼、需求內容、希望的聯絡方式與補充說明。</li>
+<li><b>Threads 帳號授權（僅限管理者）：</b>當企業管理者連結 Threads 時，我們取得帳號代碼、使用者名稱，以及用於代為發佈貼文的授權權杖。</li>
+</ul>
+<h2>2. 使用目的</h2>
+<ul><li>回覆您的諮詢並由專人與您聯繫。</li><li>代企業管理者依其設定發佈 Threads 貼文。</li></ul>
+<p>我們不會向第三方出售您的資料，也不會將顧客的個人資料提供給生成貼文的 AI 模型。</p>
+<h2>3. 我們不蒐集的資料</h2>
+<p>請勿在諮詢中提供身分證字號、銀行帳號密碼、信用卡號等敏感資料。系統偵測到此類資料時將拒絕接收。</p>
+<h2>4. 保存期限</h2>
+<p>諮詢紀錄於保存期限屆滿後自動刪除（預設 180 天，由企業設定）。Threads 授權權杖於管理者中斷連結或撤銷授權時刪除。</p>
+<h2>5. 您的權利：查詢與刪除</h2>
+<ul>
+<li>在 LINE 對話中輸入 <b>「查詢我的資料」</b> 可查詢留存筆數，輸入 <b>「刪除我的資料」</b> 並確認後，即刪除您的所有諮詢紀錄。</li>
+<li>Threads 使用者可隨時在 Threads 的「設定 → 帳號 → 網站權限」中撤銷授權，我們將在收到通知後刪除相關權杖。詳見 <a href="/data-deletion.html">資料刪除說明</a>。</li>
+</ul>
+<h2>6. 資料安全</h2>
+<p>授權權杖與連線憑證以加密方式儲存；後台僅限已授權的管理人員登入，並依角色限制可見資料。</p>
+<h2>7. 聯絡我們</h2>
+<p>如有疑問，請透過本服務的 LINE 官方帳號與我們聯繫。</p>
+<p class="mut">本頁為通用範本，企業正式上線前請由法務依實際營運情況檢視並補充。</p>
+</article></main>
+<script>
+document.getElementById('d').textContent=new Date().toISOString().slice(0,10);
+fetch('/api/public').then(r=>r.json()).then(d=>{if(d.name){document.querySelectorAll('.brand').forEach(e=>e.textContent=d.name);document.title='隱私政策 · '+d.name}}).catch(()=>{});
+</script></body></html>

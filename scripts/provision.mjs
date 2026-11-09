@@ -20,7 +20,9 @@ for (const k of ['brandId', 'name', 'workerName', 'd1Name', 'timezone', 'adminUs
   if (!cfg[k]) { console.error(`設定缺少 ${k}`); process.exit(1); }
 }
 
-const SECRET_KEYS = ['SESSION_SECRET', 'LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'THREADS_ACCESS_TOKEN', 'THREADS_USER_ID', 'GEMINI_API_KEY'];
+// 後台「設定 → 連線」可直接填入 LINE / Gemini / Threads 憑證（加密存入資料庫）；以下 Secrets 為選填的後備或系統層設定。
+const SECRET_KEYS = ['SESSION_SECRET', 'CRED_ENC_KEY', 'THREADS_APP_SECRET', 'LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'THREADS_ACCESS_TOKEN', 'THREADS_USER_ID', 'GEMINI_API_KEY'];
+const AUTO_KEYS = ['SESSION_SECRET', 'CRED_ENC_KEY']; // 未提供且 Worker 上尚無時自動產生；已存在時絕不覆蓋
 const secrets = {};
 const secretFile = `.secrets/${brand}.env`;
 if (existsSync(secretFile)) {
@@ -30,9 +32,7 @@ if (existsSync(secretFile)) {
   }
 }
 for (const k of SECRET_KEYS) if (!secrets[k] && process.env[`LEADGEN_${k}`]) secrets[k] = process.env[`LEADGEN_${k}`]; // 允許以環境變數傳入，不落地成檔案
-const generatedSession = !secrets.SESSION_SECRET;
-if (generatedSession) secrets.SESSION_SECRET = randomBytes(32).toString('hex');
-const missing = SECRET_KEYS.filter((k) => !secrets[k] && k !== 'SESSION_SECRET');
+const threadsAppId = cfg.threadsAppId ?? process.env.LEADGEN_THREADS_APP_ID ?? '';
 
 const dir = '.generated';
 const tomlPath = `${dir}/wrangler.${brand}.toml`;
@@ -46,7 +46,7 @@ if (dry) {
     '讀取企業設定', '驗證雲端權限 (wrangler whoami)', '建立／取得 D1', '產生 wrangler 設定並執行遷移', '寫入品牌種子資料與管理員',
     '部署 Worker + 管理頁', '設定 Secrets（值不會顯示）', '健康檢查', '輸出管理網址與待完成授權',
   ].forEach((t, i) => console.log(` ${i + 1}. ${t}`));
-  console.log(`待補憑證：${missing.join(', ') || '無'}`);
+  console.log('憑證（LINE / Gemini / Threads）部署後於後台「設定 → 連線」填入。');
   process.exit(0);
 }
 
@@ -72,11 +72,12 @@ compatibility_date = "2025-01-01"
 
 [vars]
 GEMINI_MODEL = "${cfg.geminiModel ?? 'gemini-3.5-flash-lite'}"
+THREADS_APP_ID = "${threadsAppId}"
 
 [assets]
 directory = "../public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/line/*"]
+run_worker_first = ["/api/*", "/line/*", "/threads/*"]
 
 [triggers]
 crons = ["*/5 * * * *"]
@@ -116,8 +117,12 @@ const out = wr(['deploy', '--config', tomlPath]);
 const url = (out.match(/https:\/\/[^\s]+\.workers\.dev/) ?? [])[0];
 
 step(7, '設定 Secrets（不輸出值）');
+let existing = new Set();
+try { existing = new Set(JSON.parse(wr(['secret', 'list', '--config', tomlPath])).map((x) => x.name)); } catch { /* 首次部署 */ }
+for (const k of AUTO_KEYS) {
+  if (!secrets[k] && !existing.has(k)) { secrets[k] = randomBytes(32).toString('hex'); console.log(`   （${k} 已自動產生並設定）`); }
+}
 for (const k of SECRET_KEYS) if (secrets[k]) wr(['secret', 'put', k, '--config', tomlPath], { input: secrets[k] });
-if (generatedSession) console.log('   （SESSION_SECRET 已自動產生並設定）');
 
 step(8, '健康檢查');
 let healthy = false;
@@ -131,4 +136,5 @@ console.log(`\n管理網址：${url ?? '（請至 Cloudflare 後台查看）'}`)
 console.log(`LINE Webhook URL：${url ? url + '/line/webhook' : '<管理網址>/line/webhook'}`);
 if (adminPassword) console.log(`管理員帳號：${cfg.adminUsername}\n一次性初始密碼：${adminPassword}\n（僅顯示一次，登入後請立即至後台變更）`);
 else console.log(`管理員 ${cfg.adminUsername} 已存在，未重設密碼。`);
-if (missing.length) console.log(`\n待完成授權／憑證（放入 ${secretFile} 後重跑本指令）：\n - ${missing.join('\n - ')}`);
+console.log(`\n下一步：登入後台 → 設定 → 連線，貼上 LINE 憑證與 Gemini key，並按「連結 Threads」。`);
+if (!threadsAppId || !existing.has('THREADS_APP_SECRET') && !secrets.THREADS_APP_SECRET) console.log('提醒：尚未設定 Threads App（brands/*.json 的 threadsAppId 與 .secrets 的 THREADS_APP_SECRET），「連結 Threads」按鈕將無法使用。');

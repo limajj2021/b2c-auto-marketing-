@@ -144,6 +144,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
       posting_mode: s.posting_mode, require_review: !!s.require_review, posts_per_day: s.posts_per_day,
       publishing_times: jsonArr(s.publishing_times), daily_gen_limit: s.daily_gen_limit,
       regulated: needsReview(brand.industry, { posting_mode: 'A', require_review: 0 }),
+      line_ready: !!parseLineConfig(s.line_config).serviceInfo && !parseLineConfig(s.line_config).serviceInfo.startsWith('（'),
     },
   });
 });

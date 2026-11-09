@@ -2,172 +2,333 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3b5bdb">
 <title>營運後台</title>
 <style>
-:root{--bg:#f5f6f8;--card:#fff;--fg:#1c1f24;--mut:#6b7280;--pri:#2563eb;--bad:#dc2626;--ok:#16a34a;--bd:#e5e7eb}
-@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1b2027;--fg:#e8eaed;--mut:#9aa3af;--bd:#2c333c}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;padding-bottom:72px}
-main{padding:16px;max-width:640px;margin:0 auto}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
-h2{font-size:18px;margin:0 0 10px}h3{font-size:15px;margin:14px 0 6px}
-label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
-input,select,textarea{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
-textarea{min-height:90px}
-button{padding:10px 14px;border:0;border-radius:8px;background:var(--pri);color:#fff;font:inherit;min-height:44px}
-button.sec{background:var(--bd);color:var(--fg)}button.bad{background:var(--bad)}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.row>*{flex:1}
-nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--bd)}
-nav button{flex:1;background:none;color:var(--mut);border-radius:0;min-height:56px}nav button.on{color:var(--pri);font-weight:600}
-.kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}.kpi div{background:var(--bg);border-radius:8px;padding:10px}.kpi b{font-size:22px;display:block}
-.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bd)}
-.mut{color:var(--mut);font-size:13px}.err{color:var(--bad)}pre{white-space:pre-wrap;word-break:break-word;margin:6px 0;font:inherit}
-.hide{display:none}
+:root{
+  --bg:#f4f5f9;--card:#fff;--fg:#1b2030;--mut:#6b7385;--bd:#e6e8f0;--soft:#f0f2f8;
+  --pri:#3b5bdb;--pri-fg:#fff;--pri-soft:#e9edff;--ok:#12a150;--ok-soft:#e3f6ec;
+  --warn:#c77700;--warn-soft:#fff3dc;--bad:#d92d3a;--bad-soft:#fde8ea;
+  --sh:0 1px 2px rgba(20,28,60,.05),0 6px 20px rgba(20,28,60,.06);--r:16px
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0e1118;--card:#171b25;--fg:#e9ecf5;--mut:#9aa3b5;--bd:#262c3a;--soft:#1e2432;
+  --pri:#7c93ff;--pri-fg:#0e1118;--pri-soft:#222a4a;--ok:#3ccf82;--ok-soft:#14301f;
+  --warn:#f0b24a;--warn-soft:#3a2c10;--bad:#ff6b76;--bad-soft:#3b1a1e;--sh:0 1px 2px rgba(0,0,0,.4)}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang TC",system-ui,sans-serif;
+  padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);
+  padding:calc(12px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid var(--bd)}
+header .in{max-width:680px;margin:0 auto;display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--pri),#8f6bff);color:#fff;display:grid;place-items:center;font-weight:700}
+header b{display:block;font-size:16px;line-height:1.2}header small{color:var(--mut);font-size:12px}
+main{max-width:680px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:16px;margin-bottom:14px;box-shadow:var(--sh)}
+h2{font-size:17px;margin:0 0 4px;letter-spacing:.2px}h3{font-size:14px;margin:18px 0 8px;color:var(--mut);font-weight:600}
+p{margin:6px 0}.mut{color:var(--mut);font-size:13px}
+label{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px;font-weight:500}
+input,select,textarea{width:100%;padding:12px 13px;border:1px solid var(--bd);border-radius:12px;background:var(--soft);color:var(--fg);font:inherit;font-size:16px;outline:none;transition:.15s}
+input:focus,select:focus,textarea:focus{border-color:var(--pri);background:var(--card);box-shadow:0 0 0 3px var(--pri-soft)}
+textarea{min-height:96px;resize:vertical}
+button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:12px 16px;min-height:46px;background:var(--pri);color:var(--pri-fg);cursor:pointer;transition:.15s}
+button:active{transform:scale(.98)}button:disabled{opacity:.5}
+button.sec{background:var(--soft);color:var(--fg)}button.bad{background:var(--bad-soft);color:var(--bad)}button.ghost{background:none;color:var(--pri);padding:8px 10px;min-height:36px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.row>*{flex:1;min-width:120px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:var(--soft);color:var(--mut)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}.chip.warn{background:var(--warn-soft);color:var(--warn)}.chip.bad{background:var(--bad-soft);color:var(--bad)}.chip.pri{background:var(--pri-soft);color:var(--pri)}
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi div{background:var(--soft);border-radius:14px;padding:12px 14px}.kpi b{display:block;font-size:26px;line-height:1.1;margin-top:2px}.kpi span{color:var(--mut);font-size:12px}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:6;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(14px);border-top:1px solid var(--bd);
+  padding-bottom:env(safe-area-inset-bottom)}
+nav .in{max-width:680px;margin:0 auto;display:flex}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 8px;min-height:58px}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav button.on{color:var(--pri)}
+.step{display:flex;gap:12px;align-items:center;padding:12px 0;border-top:1px solid var(--bd)}.step:first-of-type{border-top:0}
+.dot{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;background:var(--soft);color:var(--mut)}
+.dot.ok{background:var(--ok);color:#fff}.step .t{flex:1;min-width:0}.step .t b{display:block;font-size:15px}.step button{flex:none;min-height:38px;padding:8px 14px;font-size:14px}
+.bar{height:8px;border-radius:99px;background:var(--soft);overflow:hidden;margin:10px 0 4px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--pri),#8f6bff);border-radius:99px;transition:.4s}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--bd)}.sw:first-of-type{border-top:0}
+.sw b{display:block;font-size:15px}.toggle{position:relative;flex:none;width:52px;height:30px}.toggle input{opacity:0;position:absolute;inset:0;width:100%;height:100%;margin:0;z-index:1;cursor:pointer}
+.toggle i{position:absolute;inset:0;border-radius:99px;background:var(--bd);transition:.2s}.toggle i:after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:.2s}
+.toggle input:checked+i{background:var(--ok)}.toggle input:checked+i:after{left:25px}
+.seg{display:flex;background:var(--soft);border-radius:12px;padding:4px;gap:4px;margin-bottom:14px}
+.seg button{flex:1;background:none;color:var(--mut);min-height:38px;padding:6px;font-size:14px}.seg button.on{background:var(--card);color:var(--fg);box-shadow:var(--sh)}
+.post .row>button{min-width:0;padding:11px 8px}.post{border-top:1px solid var(--bd);padding:14px 0}.post:first-of-type{border-top:0}.post pre{white-space:pre-wrap;word-break:break-word;margin:8px 0;font:inherit;font-size:15px}
+.empty{text-align:center;color:var(--mut);padding:28px 8px}.empty svg{width:40px;height:40px;stroke:var(--bd);fill:none;stroke-width:1.5;margin-bottom:6px}
+.sk{height:14px;border-radius:8px;background:linear-gradient(90deg,var(--soft),var(--bd),var(--soft));background-size:200% 100%;animation:sk 1.2s infinite;margin:10px 0}@keyframes sk{to{background-position:-200% 0}}
+details{border-top:1px solid var(--bd)}details:first-of-type{border-top:0}summary{list-style:none;cursor:pointer;padding:14px 0;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+summary::-webkit-details-marker{display:none}summary:after{content:"›";font-size:20px;color:var(--mut);transition:.2s}details[open] summary:after{transform:rotate(90deg)}
+#toasts{position:fixed;left:0;right:0;top:calc(10px + env(safe-area-inset-top));z-index:20;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.toast{pointer-events:auto;background:var(--fg);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:14px;font-weight:500;max-width:90%;box-shadow:0 8px 30px rgba(0,0,0,.25);animation:in .25s}
+.toast.bad{background:var(--bad);color:#fff}.toast.ok{background:var(--ok);color:#fff}@keyframes in{from{opacity:0;transform:translateY(-8px)}}
+.sheet{position:fixed;inset:0;z-index:30;background:rgba(10,14,25,.5);display:flex;align-items:flex-end;justify-content:center;animation:fade .2s}@keyframes fade{from{opacity:0}}
+.sheet>div{background:var(--card);width:100%;max-width:680px;border-radius:22px 22px 0 0;padding:22px 18px calc(18px + env(safe-area-inset-bottom))}
+.login{min-height:100dvh;display:grid;place-items:center;padding:20px}.login .card{width:100%;max-width:380px;padding:26px}
+.login .logo{width:52px;height:52px;border-radius:16px;font-size:22px;margin:0 auto 14px}
+code{background:var(--soft);padding:2px 7px;border-radius:7px;font-size:13px;word-break:break-all}
+.hide{display:none!important}.grow{flex:1}.lead dl{margin:8px 0 0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}.lead dt{color:var(--mut)}.lead dd{margin:0;word-break:break-word}
 </style>
 </head>
 <body>
-<main id="app"></main>
-<nav id="nav" class="hide"></nav>
+<div id="toasts"></div>
+<div id="root"></div>
 <script>
-const $ = (s, r = document) => r.querySelector(s);
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ICON = {
+  home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  post: '<path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
+  line: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 10h6M9 13h4"/>',
+  lead: '<path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-4-6.3"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
+};
+const svg = (n) => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
+
+let me = null, tab = 'home', TZ = 'Asia/Taipei', brandName = '營運後台';
+const state = { postSeg: 'draft', leadStatus: '', leadFrom: '' };
+
+function toast(msg, kind = '') {
+  const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
+  $('#toasts').append(t); setTimeout(() => t.remove(), kind === 'bad' ? 5000 : 2600);
+}
+function confirmSheet(msg, okText = '確定', danger = true) {
+  return new Promise((res) => {
+    const s = document.createElement('div'); s.className = 'sheet';
+    s.innerHTML = `<div><h2>${esc(msg)}</h2><div class="row"><button class="sec" data-v="0">取消</button><button class="${danger ? 'bad' : ''}" data-v="1">${esc(okText)}</button></div></div>`;
+    s.onclick = (e) => { const v = e.target.dataset?.v; if (v !== undefined || e.target === s) { s.remove(); res(v === '1'); } };
+    document.body.append(s);
+  });
+}
 async function api(method, path, body) {
   const r = await fetch('/api' + path, { method, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui' }, body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 401 && path !== '/login') { me = null; render(); throw new Error('請重新登入'); }
+  if (r.status === 401 && path !== '/login' && path !== '/me') { me = null; render(); throw new Error('登入已過期，請重新登入'); }
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || '操作失敗');
   return d;
 }
-const act = async (fn, okMsg) => { try { await fn(); if (okMsg) alert(okMsg); } catch (e) { alert(e.message); } };
-let me = null, tab = 'home';
-const TABS = { home: ['首頁', 'admin'], threads: ['Threads', 'admin'], line: ['LINE', 'admin'], leads: ['留資', 'staff'] };
+async function act(btn, fn, okMsg) {
+  if (btn) btn.disabled = true;
+  try { const r = await fn(); if (okMsg) toast(okMsg, 'ok'); return r; }
+  catch (e) { toast(e.message, 'bad'); }
+  finally { if (btn) btn.disabled = false; }
+}
+const fmt = (iso) => iso ? new Intl.DateTimeFormat('zh-TW', { timeZone: TZ, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : '—';
+const skeleton = '<div class="card"><div class="sk" style="width:40%"></div><div class="sk"></div><div class="sk" style="width:70%"></div></div>'.repeat(2);
+const empty = (t) => `<div class="empty">${svg('inbox').replace('<svg','<svg')}<div>${esc(t)}</div></div>`;
+const list = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+
+const TABS = [['home', '首頁', 'home', 'admin'], ['posts', '貼文', 'post', 'admin'], ['line', 'LINE', 'line', 'admin'], ['leads', '留資', 'lead', 'staff'], ['settings', '設定', 'gear', 'admin']];
 
 async function render() {
-  const app = $('#app'), nav = $('#nav');
+  const root = $('#root');
   if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
-  if (!me) {
-    nav.classList.add('hide');
-    app.innerHTML = `<div class="card"><h2>登入</h2><label>帳號</label><input id="u" autocomplete="username"><label>密碼</label><input id="p" type="password" autocomplete="current-password"><div class="row"><button id="go">登入</button></div></div>`;
-    $('#go').onclick = () => act(async () => { await api('POST', '/login', { username: $('#u').value, password: $('#p').value }); me = null; await render(); });
-    return;
-  }
-  const allowed = Object.entries(TABS).filter(([, v]) => me.role === 'admin' || v[1] === 'staff');
-  if (!allowed.some(([k]) => k === tab)) tab = allowed[0][0];
-  nav.classList.remove('hide');
-  nav.innerHTML = allowed.map(([k, v]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${v[0]}</button>`).join('') + `<button data-t="out">登出</button>`;
-  nav.querySelectorAll('button').forEach((b) => b.onclick = async () => {
-    if (b.dataset.t === 'out') { await api('POST', '/logout').catch(() => {}); me = null; return render(); }
-    tab = b.dataset.t; render();
-  });
-  app.innerHTML = '<div class="card mut">載入中…</div>';
-  try { await ({ home, threads, line, leads }[tab])(app); } catch (e) { app.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  if (!me) return loginView(root);
+  fetch('/api/public').then((r) => r.json()).then((d) => { brandName = d.name || brandName; const b = $('#bn'); if (b) b.textContent = brandName; }).catch(() => {});
+  const allowed = TABS.filter((t) => me.role === 'admin' || t[3] === 'staff');
+  if (!allowed.some((t) => t[0] === tab)) tab = allowed[0][0];
+  root.innerHTML = `<header><div class="in"><div class="logo">${esc(brandName[0] || '營')}</div><div class="grow"><b id="bn">${esc(brandName)}</b><small>${me.role === 'admin' ? '管理員' : '客服'} · ${esc(me.name)}</small></div></div></header>
+  <main id="view">${skeleton}</main>
+  <nav><div class="in">${allowed.map((t) => `<button data-t="${t[0]}" class="${t[0] === tab ? 'on' : ''}">${svg(t[2])}${t[1]}</button>`).join('')}</div></nav>`;
+  $$('nav button').forEach((b) => b.onclick = () => { tab = b.dataset.t; scrollTo(0, 0); render(); });
+  try { await VIEWS[tab]($('#view')); } catch (e) { $('#view').innerHTML = `<div class="card"><b>載入失敗</b><p class="mut">${esc(e.message)}</p></div>`; }
 }
 
-async function home(app) {
-  const d = await api('GET', '/dashboard');
-  const miss = Object.entries(d.configured).filter(([, v]) => !v).map(([k]) => k);
-  app.innerHTML = `<div class="card"><h2>系統狀態</h2>
-    <p>${d.healthy ? '✅ 正常' : '⚠️ Threads 憑證失效，請重新授權'}${miss.length ? `<br><span class="err">尚未設定：${miss.join('、')}</span>` : ''}</p>
-    <div class="kpi"><div>今日發文<b>${d.posted_today}</b></div><div>待審核草稿<b>${d.pending_drafts}</b></div>
-    <div>今日留資<b>${d.inquiries_today}</b></div><div>未處理留資<b>${d.inquiries_pending}</b></div></div>
-    <p class="mut">今日 AI 生成 ${d.gen_today} / ${d.gen_limit}</p></div>
-    <div class="card"><h2>自動化開關</h2><div class="row">
-    <button id="t1" class="${d.auto_post_enabled ? 'bad' : ''}">${d.auto_post_enabled ? '暫停自動發文' : '恢復自動發文'}</button>
-    <button id="t2" class="${d.line_auto_reply_enabled ? 'bad' : ''}">${d.line_auto_reply_enabled ? '暫停自動接待' : '恢復自動接待'}</button></div>
-    <div class="row"><button class="sec" id="gl">前往留資列表</button></div></div>`;
-  $('#t1').onclick = () => act(async () => { await api('POST', '/pause', { auto_post_enabled: !d.auto_post_enabled }); render(); });
-  $('#t2').onclick = () => act(async () => { await api('POST', '/pause', { line_auto_reply_enabled: !d.line_auto_reply_enabled }); render(); });
-  $('#gl').onclick = () => { tab = 'leads'; render(); };
+function loginView(root) {
+  root.innerHTML = `<div class="login"><div class="card"><div class="logo">營</div><h2 style="text-align:center">登入後台</h2><p class="mut" style="text-align:center">請輸入管理員提供的帳號</p>
+  <label>帳號</label><input id="u" autocomplete="username" autocapitalize="none"><label>密碼</label><input id="p" type="password" autocomplete="current-password">
+  <div class="row"><button id="go">登入</button></div></div></div>`;
+  const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); me = null; await render(); });
+  $('#go').onclick = (e) => go(e.target); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
 }
 
-async function threads(app) {
-  const [{ settings: s }, posts] = await Promise.all([api('GET', '/settings'), api('GET', '/posts')]);
-  const drafts = posts.filter((p) => p.status === 'draft');
-  const rest = posts.filter((p) => p.status !== 'draft').slice(0, 30);
-  app.innerHTML = `<div class="card"><h2>發文設定</h2>
-    ${s.regulated ? '<p class="mut">此產業為受監管業務：所有貼文強制人工審核。</p>' : ''}
-    <label>發文模式</label><select id="mode"><option value="A">A 全自動</option><option value="B">B 審核後發布</option><option value="C">C 指定主題</option></select>
-    <label><input type="checkbox" id="rr" style="width:auto"> Mode C 需審核</label>
-    <label>每日發文數（1–5）</label><input id="ppd" type="number" min="1" max="5">
-    <label>發布時間（逗號分隔 HH:MM，依序對應每篇）</label><input id="times">
-    <label>本週主題（Mode C）</label><textarea id="topic"></textarea>
-    <label>品牌語氣</label><input id="tone"><label>禁用詞（逗號分隔）</label><input id="ban">
+// ---------------- 首頁 ----------------
+async function homeView(v) {
+  const [d, ig, st] = await Promise.all([api('GET', '/dashboard'), api('GET', '/integrations'), api('GET', '/settings')]);
+  TZ = st.brand.timezone;
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('threads') === 'connected') { toast('Threads 已連結成功', 'ok'); history.replaceState(null, '', '/'); }
+  else if (qs.get('threads') === 'error') { toast('Threads 連結失敗：' + (qs.get('reason') || ''), 'bad'); history.replaceState(null, '', '/'); }
+  const s = st.settings;
+  const steps = [
+    ['填寫品牌資料', !!(st.brand.description && s.services && !s.services.startsWith('（')), '設定', 'settings'],
+    ['設定 LINE 連線', ig.line.configured, '去設定', 'settings'],
+    ['設定 AI（Gemini）', ig.gemini.configured, '去設定', 'settings'],
+    ['連結 Threads 帳號', ig.threads.configured, ig.threads.oauth_available ? '連結' : '設定', 'settings'],
+    ['編輯 LINE 服務說明', !!(s.line_ready), '編輯', 'line'],
+  ];
+  const done = steps.filter((x) => x[1]).length;
+  const warn = d.threads_status === 'token_invalid' ? '<p><span class="chip bad">Threads 授權已失效</span> 請到「設定」重新連結</p>' : '';
+  v.innerHTML = `
+  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>系統狀態</h2><span class="chip ${d.healthy ? 'ok' : 'bad'}">${d.healthy ? '運作正常' : '需要處理'}</span></div>${warn}
+  <div class="kpi" style="margin-top:12px"><div><span>今日發文</span><b>${d.posted_today}</b></div><div><span>待審核草稿</span><b>${d.pending_drafts}</b></div>
+  <div><span>今日留資</span><b>${d.inquiries_today}</b></div><div><span>未處理留資</span><b>${d.inquiries_pending}</b></div></div>
+  <p class="mut" style="margin-top:10px">今日 AI 生成 ${d.gen_today} / ${d.gen_limit}</p></div>
+  ${done < steps.length ? `<div class="card"><h2>開通進度 ${done}/${steps.length}</h2><div class="bar"><i style="width:${done / steps.length * 100}%"></i></div>
+  ${steps.map((x, i) => `<div class="step"><div class="dot ${x[1] ? 'ok' : ''}">${x[1] ? '✓' : i + 1}</div><div class="t"><b>${x[0]}</b></div>${x[1] ? '' : `<button class="sec" data-go="${x[3]}">${x[2]}</button>`}</div>`).join('')}</div>` : ''}
+  <div class="card"><h2>自動化開關</h2>
+  <div class="sw"><div><b>自動發文</b><span class="mut">${d.auto_post_enabled ? '依排程生成並發布' : '已暫停，不會生成也不會發布'}</span></div><label class="toggle"><input type="checkbox" id="t1" ${d.auto_post_enabled ? 'checked' : ''}><i></i></label></div>
+  <div class="sw"><div><b>LINE 自動接待</b><span class="mut">${d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停，不會自動回覆'}</span></div><label class="toggle"><input type="checkbox" id="t2" ${d.line_auto_reply_enabled ? 'checked' : ''}><i></i></label></div></div>
+  <div class="row"><button class="sec" data-go="leads">查看留資 ${d.inquiries_pending ? `（${d.inquiries_pending} 筆未處理）` : ''}</button></div>`;
+  $$('[data-go]', v).forEach((b) => b.onclick = () => { tab = b.dataset.go; render(); });
+  $('#t1').onchange = (e) => act(null, async () => { await api('POST', '/pause', { auto_post_enabled: e.target.checked }); render(); });
+  $('#t2').onchange = (e) => act(null, async () => { await api('POST', '/pause', { line_auto_reply_enabled: e.target.checked }); render(); });
+}
+
+// ---------------- 貼文 ----------------
+const STATUS = { draft: ['待審核', 'warn'], scheduled: ['已排程', 'pri'], publishing: ['發布中', 'pri'], published: ['已發布', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
+async function postsView(v) {
+  const [{ settings: s, brand }, posts] = await Promise.all([api('GET', '/settings'), api('GET', '/posts')]);
+  TZ = brand.timezone;
+  const groups = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
+  const seg = state.postSeg;
+  const card = (p) => `<div class="post" data-id="${p.id}"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip ${STATUS[p.status]?.[1] || ''}">${STATUS[p.status]?.[0] || p.status}</span><span class="mut">${fmt(p.published_at || p.scheduled_at)}</span></div>
+    ${p.status === 'draft' ? `<textarea>${esc(p.content)}</textarea>` : `<pre>${esc(p.content)}</pre>`}
+    ${p.error_message ? `<p class="mut" style="color:var(--bad)">${esc(p.error_message)}</p>` : ''}
+    <div class="row" style="margin-top:8px">${p.status === 'draft' ? '<button class="sec" data-a="save">儲存</button><button data-a="ok">核准發布</button><button class="bad" data-a="del">刪除</button>' : ''}
+    ${p.status === 'failed' ? '<button class="sec" data-a="retry">重試</button>' : ''}${p.status === 'scheduled' ? '<button class="bad" data-a="del">取消排程</button>' : ''}</div></div>`;
+  v.innerHTML = `
+  <div class="seg"><button data-s="draft" class="${seg === 'draft' ? 'on' : ''}">待審核 ${groups.draft.length}</button><button data-s="queue" class="${seg === 'queue' ? 'on' : ''}">排程 ${groups.queue.length}</button><button data-s="hist" class="${seg === 'hist' ? 'on' : ''}">歷史</button></div>
+  <div class="card">${groups[seg].map(card).join('') || empty(seg === 'draft' ? '沒有待審核的草稿' : '目前沒有項目')}</div>
+  <details class="card" open><summary>立即生成草稿</summary><label>指定主題（可空白，由 AI 依品牌設定發想）</label><input id="gt" placeholder="例如：本週活動、常見問題">
+    <div class="row"><button id="gen">生成一則草稿</button></div><p class="mut">生成後會先放進待審核，核准後才會發布。</p></details>
+  <details class="card"><summary>發文設定</summary>
+    ${s.regulated ? '<p class="chip warn">受監管產業：所有貼文強制人工審核</p>' : ''}
+    <label>發文模式</label><select id="mode"><option value="A">A　全自動（通過內容檢查才自動發）</option><option value="B">B　審核後發布</option><option value="C">C　指定主題生成</option></select>
+    <label>本週主題（模式 C 使用）</label><textarea id="topic"></textarea>
+    <div class="sw"><div><b>模式 C 需審核</b></div><label class="toggle"><input type="checkbox" id="rr"><i></i></label></div>
+    <label>每日發文數（1–5）</label><input id="ppd" type="number" min="1" max="5" inputmode="numeric">
+    <label>發布時間（24 小時制，逗號分隔，依序對應每篇）</label><input id="times" placeholder="10:00,14:00,20:00">
+    <label>品牌語氣</label><input id="tone"><label>內容主題（逗號分隔）</label><input id="tops"><label>禁用詞（逗號分隔）</label><input id="ban">
     <label>CTA 文字</label><input id="cta"><label>LINE 加好友網址（https）</label><input id="url">
-    <div class="row"><button id="save">儲存設定</button></div></div>
-    <div class="card"><h2>產生草稿</h2><label>指定主題（可空白）</label><input id="gt"><div class="row"><button id="gen">立即生成草稿</button></div></div>
-    <div class="card"><h2>待審核草稿 (${drafts.length})</h2>${drafts.map((p) => `<div data-id="${p.id}"><textarea>${esc(p.content)}</textarea>
-      ${p.error_message ? `<div class="err">${esc(p.error_message)}</div>` : ''}<div class="row"><button class="sec" data-a="save">儲存修改</button><button data-a="ok">核准</button><button class="bad" data-a="del">刪除</button></div><hr></div>`).join('') || '<p class="mut">沒有草稿</p>'}</div>
-    <div class="card"><h2>發布歷史</h2>${rest.map((p) => `<div><span class="tag">${p.status}</span> <span class="mut">${esc((p.published_at || p.scheduled_at || '').slice(0, 16).replace('T', ' '))} UTC</span>
-      <pre>${esc(p.content)}</pre>${p.error_message ? `<div class="err">${esc(p.error_message)}</div>` : ''}${p.status === 'failed' ? `<button class="sec" data-retry="${p.id}">重試</button>` : ''}</div>`).join('') || '<p class="mut">尚無紀錄</p>'}</div>`;
-  $('#mode').value = s.posting_mode; $('#rr').checked = s.require_review; $('#ppd').value = s.posts_per_day;
-  $('#times').value = s.publishing_times.join(','); $('#topic').value = s.weekly_topic; $('#tone').value = s.content_tone;
-  $('#ban').value = s.banned_words.join(','); $('#cta').value = s.cta_text; $('#url').value = s.line_add_url;
-  const list = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
-  $('#save').onclick = () => act(() => api('PUT', '/settings', {
-    posting_mode: $('#mode').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: list($('#times').value),
-    weekly_topic: $('#topic').value, content_tone: $('#tone').value, banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: $('#url').value,
-  }), '已儲存');
-  $('#gen').onclick = () => act(async () => { await api('POST', '/posts/generate', { topic: $('#gt').value }); render(); });
-  app.querySelectorAll('[data-id] button').forEach((b) => b.onclick = () => act(async () => {
-    const box = b.closest('[data-id]'), id = box.dataset.id, content = box.querySelector('textarea').value;
-    if (b.dataset.a === 'save') { await api('PUT', '/posts/' + id, { content }); alert('已儲存'); return; }
-    if (b.dataset.a === 'ok') { await api('PUT', '/posts/' + id, { content }); await api('POST', `/posts/${id}/approve`, {}); }
-    if (b.dataset.a === 'del') { if (!confirm('確定刪除？')) return; await api('DELETE', '/posts/' + id); }
+    <div class="row"><button id="save">儲存發文設定</button></div></details>`;
+  $('#mode').value = s.posting_mode; $('#topic').value = s.weekly_topic; $('#rr').checked = s.require_review; $('#ppd').value = s.posts_per_day;
+  $('#times').value = s.publishing_times.join(','); $('#tone').value = s.content_tone; $('#tops').value = s.content_topics.join(','); $('#ban').value = s.banned_words.join(',');
+  $('#cta').value = s.cta_text; $('#url').value = s.line_add_url;
+  $$('.seg button', v).forEach((b) => b.onclick = () => { state.postSeg = b.dataset.s; render(); });
+  $('#save').onclick = (e) => act(e.target, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value,
+    publishing_times: list($('#times').value), content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: $('#url').value }), '已儲存');
+  $('#gen').onclick = (e) => act(e.target, async () => { const r = await api('POST', '/posts/generate', { topic: $('#gt').value }); toast(r.issues?.length ? '已生成，但內容檢查有警示，請修改' : '草稿已生成', r.issues?.length ? '' : 'ok'); state.postSeg = 'draft'; render(); });
+  $$('.post button', v).forEach((b) => b.onclick = () => act(b, async () => {
+    const box = b.closest('.post'), id = box.dataset.id, a = b.dataset.a, content = $('textarea', box)?.value;
+    if (a === 'save') { await api('PUT', '/posts/' + id, { content }); toast('已儲存', 'ok'); return; }
+    if (a === 'ok') { await api('PUT', '/posts/' + id, { content }); await api('POST', `/posts/${id}/approve`, {}); toast('已核准，將依排程發布', 'ok'); }
+    if (a === 'del') { if (!(await confirmSheet('確定要刪除這則貼文？'))) return; await api('DELETE', '/posts/' + id); }
+    if (a === 'retry') await api('POST', `/posts/${id}/retry`, {});
     render();
   }));
-  app.querySelectorAll('[data-retry]').forEach((b) => b.onclick = () => act(async () => { await api('POST', `/posts/${b.dataset.retry}/retry`, {}); render(); }));
 }
 
-async function line(app) {
+// ---------------- LINE ----------------
+async function lineView(v) {
   const [c, faq] = await Promise.all([api('GET', '/line-config'), api('GET', '/faq')]);
-  app.innerHTML = `<div class="card"><h2>LINE 接待設定</h2>
-    <label>歡迎訊息</label><textarea id="welcome"></textarea>
-    <label>選單名稱：了解服務 / 立即詢問 / 聯絡專人</label><div class="row"><input id="m1"><input id="m2"><input id="m3"></div>
-    <label>服務說明（已核准內容）</label><textarea id="info"></textarea><label>營業時間</label><input id="hours">
-    <label>真人接手提示</label><textarea id="human"></textarea><label>隱私告知（須包含「同意」指示）</label><textarea id="priv"></textarea>
-    <label>完成訊息</label><input id="done"><label>未匹配回覆</label><input id="fb">
-    <label>服務類型（逗號分隔）</label><input id="svc">
-    <label>表單欄位（每行：key|提問|必填(1/0)|攔截答案(可空)）</label><textarea id="fields" style="min-height:140px"></textarea>
-    <div class="row"><button id="save">儲存</button></div></div>
-    <div class="card"><h2>FAQ</h2>${faq.map((f) => `<div data-f="${f.id}"><label>關鍵字（逗號分隔）</label><input class="k" value="${esc(f.keyword)}"><label>固定答案</label><textarea class="r">${esc(f.response)}</textarea>
-      <label>優先順序</label><input class="p" type="number" value="${f.priority}"><label><input class="e" type="checkbox" style="width:auto" ${f.enabled ? 'checked' : ''}> 啟用</label>
-      <div class="row"><button class="sec" data-a="s">儲存</button><button class="bad" data-a="d">刪除</button></div><hr></div>`).join('')}
-      <h3>新增 FAQ</h3><input id="nk" placeholder="關鍵字，例如：營業時間,幾點"><textarea id="nr" placeholder="固定答案"></textarea><div class="row"><button id="add">新增</button></div></div>`;
-  const set = (id, v) => $('#' + id).value = v;
+  v.innerHTML = `
+  <div class="card"><h2>接待內容</h2><p class="mut">顧客在 LINE 看到的文字。留空會使用預設值。</p>
+  <label>歡迎訊息</label><textarea id="welcome"></textarea>
+  <label>選單按鈕名稱</label><div class="row" style="margin-top:0"><input id="m1" aria-label="了解服務"><input id="m2" aria-label="立即詢問"><input id="m3" aria-label="聯絡專人"></div>
+  <label>服務說明（請放已核准的內容）</label><textarea id="info"></textarea><label>營業時間</label><input id="hours">
+  <label>真人接手提示</label><textarea id="human"></textarea><label>隱私告知（需含「輸入同意」的指示）</label><textarea id="priv"></textarea>
+  <label>完成訊息</label><input id="done"><label>未匹配時的回覆</label><input id="fb">
+  <h3>留資表單</h3><label>服務類型（逗號分隔）</label><input id="svc">
+  <label>欄位（每行一個：代號｜提問｜必填 1/0｜遇到此答案則轉專人）</label><textarea id="fields" style="min-height:150px;font-size:14px"></textarea>
+  <div class="row"><button id="save">儲存</button></div></div>
+  <div class="card"><h2>FAQ 固定問答</h2><p class="mut">關鍵字用逗號分隔；數字越大越優先比對。</p>
+  ${faq.map((f) => `<details data-f="${f.id}"><summary>${esc(f.keyword)} ${f.enabled ? '' : '<span class="chip">停用</span>'}</summary>
+  <label>關鍵字</label><input class="k" value="${esc(f.keyword)}"><label>固定答案</label><textarea class="r">${esc(f.response)}</textarea>
+  <label>優先順序</label><input class="p" type="number" value="${f.priority}"><div class="sw"><b>啟用</b><label class="toggle"><input class="e" type="checkbox" ${f.enabled ? 'checked' : ''}><i></i></label></div>
+  <div class="row"><button class="sec" data-a="s">儲存</button><button class="bad" data-a="d">刪除</button></div></details>`).join('') || empty('還沒有 FAQ')}
+  <h3>新增 FAQ</h3><input id="nk" placeholder="關鍵字，例如：營業時間,幾點"><label>固定答案</label><textarea id="nr"></textarea><div class="row"><button id="add">新增</button></div></div>`;
+  const set = (id, x) => $('#' + id).value = x ?? '';
   set('welcome', c.welcome); set('m1', c.menu.info); set('m2', c.menu.inquiry); set('m3', c.menu.human); set('info', c.serviceInfo); set('hours', c.businessHours);
   set('human', c.humanNotice); set('priv', c.privacyNotice); set('done', c.completeMessage); set('fb', c.fallback); set('svc', c.services.join(','));
-  set('fields', c.fields.map((f) => [f.key, f.label, f.required ? 1 : 0, f.blockIf || ''].join('|')).join('\n'));
-  $('#save').onclick = () => act(() => api('PUT', '/line-config', {
-    welcome: $('#welcome').value, menu: { info: $('#m1').value, inquiry: $('#m2').value, human: $('#m3').value }, serviceInfo: $('#info').value,
-    businessHours: $('#hours').value, humanNotice: $('#human').value, privacyNotice: $('#priv').value, completeMessage: $('#done').value, fallback: $('#fb').value,
-    services: $('#svc').value.split(/[,，]/).map((x) => x.trim()).filter(Boolean),
-    fields: $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => { const [key, label, req, blockIf] = l.split('|'); return { key: key.trim(), label: (label || '').trim(), required: req?.trim() !== '0', ...(blockIf?.trim() ? { blockIf: blockIf.trim() } : {}) }; }),
+  set('fields', c.fields.map((f) => [f.key, f.label, f.required ? 1 : 0, f.blockIf || ''].join('｜')).join('\n'));
+  $('#save').onclick = (e) => act(e.target, () => api('PUT', '/line-config', {
+    welcome: $('#welcome').value, menu: { info: $('#m1').value, inquiry: $('#m2').value, human: $('#m3').value }, serviceInfo: $('#info').value, businessHours: $('#hours').value,
+    humanNotice: $('#human').value, privacyNotice: $('#priv').value, completeMessage: $('#done').value, fallback: $('#fb').value, services: list($('#svc').value),
+    fields: $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => { const [key, label, req, blockIf] = l.split(/[｜|]/); return { key: key.trim(), label: (label || '').trim(), required: (req || '1').trim() !== '0', ...((blockIf || '').trim() ? { blockIf: blockIf.trim() } : {}) }; }),
   }), '已儲存');
-  app.querySelectorAll('[data-f] button').forEach((b) => b.onclick = () => act(async () => {
+  $$('[data-f] button', v).forEach((b) => b.onclick = () => act(b, async () => {
     const box = b.closest('[data-f]'), id = box.dataset.f;
-    if (b.dataset.a === 'd') { if (!confirm('確定刪除？')) return; await api('DELETE', '/faq/' + id); }
-    else await api('PUT', '/faq/' + id, { keyword: $('.k', box).value, response: $('.r', box).value, priority: +$('.p', box).value, enabled: $('.e', box).checked });
+    if (b.dataset.a === 'd') { if (!(await confirmSheet('確定刪除這則 FAQ？'))) return; await api('DELETE', '/faq/' + id); }
+    else { await api('PUT', '/faq/' + id, { keyword: $('.k', box).value, response: $('.r', box).value, priority: +$('.p', box).value, enabled: $('.e', box).checked }); toast('已儲存', 'ok'); }
     render();
   }));
-  $('#add').onclick = () => act(async () => { await api('POST', '/faq', { keyword: $('#nk').value, response: $('#nr').value }); render(); });
+  $('#add').onclick = (e) => act(e.target, async () => { await api('POST', '/faq', { keyword: $('#nk').value, response: $('#nr').value }); toast('已新增', 'ok'); render(); });
 }
 
-let leadFilter = { status: '', from: '' };
-async function leads(app) {
-  const q = new URLSearchParams(); if (leadFilter.status) q.set('status', leadFilter.status); if (leadFilter.from) q.set('from', leadFilter.from);
+// ---------------- 留資 ----------------
+const LABEL = { name: '稱呼', need: '需求', contact: '聯絡方式', extra: '補充', adult: '年滿 18 歲' };
+async function leadsView(v) {
+  const q = new URLSearchParams(); if (state.leadStatus) q.set('status', state.leadStatus); if (state.leadFrom) q.set('from', state.leadFrom);
   const rows = await api('GET', '/inquiries?' + q);
-  app.innerHTML = `<div class="card"><h2>留資紀錄</h2><div class="row"><select id="fs"><option value="">全部</option><option value="pending">未處理</option><option value="done">已處理</option></select>
-    <input id="ff" type="date"></div></div>` + rows.map((r) => `<div class="card"><div><b>${esc(r.answers.name || r.display_name || '（未填）')}</b> <span class="tag">${r.handling_status === 'done' ? '已處理' : '未處理'}</span></div>
-    <div class="mut">${esc(r.created_at.slice(0, 16).replace('T', ' '))} UTC · ${esc(r.service || '')}${r.line_user_id ? ` · ${esc(r.line_user_id)}` : ''}</div>
-    <pre>${Object.entries(r.answers).map(([k, v]) => `${esc(k)}：${esc(v)}`).join('\n')}</pre>
-    <div class="row"><button class="sec" data-id="${r.id}" data-to="${r.handling_status === 'done' ? 'pending' : 'done'}">標記為${r.handling_status === 'done' ? '未處理' : '已處理'}</button>
-    ${me.role === 'admin' ? `<button class="bad" data-del="${r.id}">刪除</button>` : ''}</div></div>`).join('') || '<div class="card mut">沒有資料</div>';
-  $('#fs').value = leadFilter.status; $('#ff').value = leadFilter.from;
-  $('#fs').onchange = () => { leadFilter.status = $('#fs').value; render(); };
-  $('#ff').onchange = () => { leadFilter.from = $('#ff').value; render(); };
-  app.querySelectorAll('[data-to]').forEach((b) => b.onclick = () => act(async () => { await api('PATCH', '/inquiries/' + b.dataset.id, { handling_status: b.dataset.to }); render(); }));
-  app.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => act(async () => { if (!confirm('確定永久刪除這筆留資？')) return; await api('DELETE', '/inquiries/' + b.dataset.del); render(); }));
+  v.innerHTML = `<div class="seg"><button data-s="" class="${!state.leadStatus ? 'on' : ''}">全部</button><button data-s="pending" class="${state.leadStatus === 'pending' ? 'on' : ''}">未處理</button><button data-s="done" class="${state.leadStatus === 'done' ? 'on' : ''}">已處理</button></div>
+  <div class="card" style="padding:10px 14px"><label style="margin:0 0 6px">從這天起</label><input id="ff" type="date"></div>
+  ${rows.map((r) => `<div class="card lead"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>${esc(r.answers.name || r.display_name || '（未填）')}</b><span class="chip ${r.handling_status === 'done' ? 'ok' : 'warn'}">${r.handling_status === 'done' ? '已處理' : '未處理'}</span></div>
+  <p class="mut">${fmt(r.created_at)} · ${esc(r.service || '')}</p>
+  <dl>${Object.entries(r.answers).filter(([k, x]) => k !== 'name' && x).map(([k, x]) => `<dt>${esc(LABEL[k] || k)}</dt><dd>${esc(x)}</dd>`).join('')}${r.line_user_id ? `<dt>LINE ID</dt><dd><code>${esc(r.line_user_id)}</code></dd>` : ''}</dl>
+  <div class="row"><button class="sec" data-id="${r.id}" data-to="${r.handling_status === 'done' ? 'pending' : 'done'}">標記為${r.handling_status === 'done' ? '未處理' : '已處理'}</button>${me.role === 'admin' ? `<button class="bad grow" style="flex:0 0 auto;min-width:0" data-del="${r.id}">刪除</button>` : ''}</div></div>`).join('') || `<div class="card">${empty('沒有符合條件的留資')}</div>`}`;
+  $('#ff').value = state.leadFrom; $('#ff').onchange = (e) => { state.leadFrom = e.target.value; render(); };
+  $$('.seg button', v).forEach((b) => b.onclick = () => { state.leadStatus = b.dataset.s; render(); });
+  $$('[data-to]', v).forEach((b) => b.onclick = () => act(b, async () => { await api('PATCH', '/inquiries/' + b.dataset.id, { handling_status: b.dataset.to }); render(); }));
+  $$('[data-del]', v).forEach((b) => b.onclick = () => act(b, async () => { if (!(await confirmSheet('永久刪除這筆留資？無法復原。'))) return; await api('DELETE', '/inquiries/' + b.dataset.del); render(); }));
 }
+
+// ---------------- 設定 ----------------
+async function settingsView(v) {
+  const [ig, st, users, logs] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/users'), api('GET', '/audit')]);
+  const badge = (ok) => `<span class="chip ${ok ? 'ok' : ''}">${ok ? '已連線' : '未設定'}</span>`;
+  v.innerHTML = `
+  <div class="card"><h2>連線</h2><p class="mut">憑證會加密保存，畫面不會顯示。</p>
+  <details open><summary><span>Threads ${badge(ig.threads.configured)}</span></summary>
+    ${ig.threads.configured ? `<p>已連結 <b>@${esc(ig.threads.username || '')}</b>${ig.threads.expires_at ? `<br><span class="mut">授權將於 ${fmt(ig.threads.expires_at)} 前自動續期</span>` : ''}</p>
+      <div class="row"><button class="sec" data-t="threads">測試連線</button><button class="bad" id="thOff">中斷連結</button></div>`
+    : `<p class="mut">按下按鈕後會前往 Threads 授權，完成後自動回到這裡。</p><div class="row"><button id="thOn" ${ig.threads.oauth_available ? '' : 'disabled'}>連結 Threads</button></div>${ig.threads.oauth_available ? '' : '<p class="mut">系統尚未設定 Threads App，請聯絡開發者。</p>'}`}</details>
+  <details><summary><span>LINE ${badge(ig.line.configured)}</span></summary>
+    ${ig.line.configured ? `<p>機器人：<b>${esc(ig.line.name || '已設定')}</b></p>` : ''}
+    <label>Channel secret</label><input id="lsec" autocomplete="off" placeholder="${ig.line.configured ? '已設定，重新輸入以更換' : ''}">
+    <label>Channel access token（long-lived）</label><input id="ltok" autocomplete="off">
+    <p class="mut">儲存時會自動驗證並把 Webhook 設為：<br><code>${esc(ig.line.webhook_url)}</code></p>
+    <div class="row"><button id="lsave">驗證並儲存</button>${ig.line.configured ? '<button class="sec" data-t="line">測試連線</button>' : ''}</div></details>
+  <details><summary><span>AI（Gemini） ${badge(ig.gemini.configured)}</span></summary>
+    <label>API key</label><input id="gkey" autocomplete="off" placeholder="${ig.gemini.configured ? '已設定，重新輸入以更換' : ''}">
+    <div class="row"><button id="gsave">驗證並儲存</button>${ig.gemini.configured ? '<button class="sec" data-t="gemini">測試連線</button>' : ''}</div></details></div>
+
+  <div class="card"><h2>品牌資訊</h2><label>品牌名稱</label><input id="bname"><label>品牌介紹（供 AI 撰寫貼文，只放公開資訊）</label><textarea id="bdesc"></textarea>
+  <label>產品與服務</label><textarea id="bsvc"></textarea><label>目標受眾</label><input id="baud"><label>時區</label><input id="btz">
+  <div class="row"><button id="bsave">儲存</button></div></div>
+
+  <div class="card"><h2>帳號</h2>${users.map((u) => `<div class="sw"><div><b>${esc(u.username)}</b><span class="mut">${u.role === 'admin' ? '管理員' : '客服'}${u.username === me.name ? ' · 你' : ''}</span></div>
+    ${u.username === me.name ? '' : `<label class="toggle"><input type="checkbox" data-u="${u.id}" ${u.enabled ? 'checked' : ''}><i></i></label>`}</div>`).join('')}
+  <details><summary>新增帳號</summary><label>帳號</label><input id="nu" autocapitalize="none"><label>角色</label><select id="nr2"><option value="staff">客服（只能處理留資）</option><option value="admin">管理員</option></select>
+  <label>初始密碼（至少 10 字元）</label><input id="np" type="password" autocomplete="new-password"><div class="row"><button id="nadd">建立帳號</button></div></details>
+  <details><summary>變更我的密碼</summary><label>目前密碼</label><input id="pc" type="password" autocomplete="current-password"><label>新密碼（至少 10 字元）</label><input id="pn" type="password" autocomplete="new-password">
+  <div class="row"><button id="pchg">變更密碼</button></div></details></div>
+
+  <div class="card"><h2>操作紀錄</h2>${logs.map((l) => `<div class="step" style="padding:8px 0"><div class="t"><b style="font-size:14px">${esc(l.action)}</b><span class="mut">${esc(l.actor || '系統')} · ${fmt(l.created_at)}</span></div></div>`).join('') || empty('尚無紀錄')}</div>
+  <p class="mut" style="text-align:center"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p>
+  <div class="row"><button class="sec" id="out">登出</button></div>`;
+  $('#bname').value = st.brand.name; $('#bdesc').value = st.brand.description; $('#bsvc').value = st.settings.services; $('#baud').value = st.settings.audience; $('#btz').value = st.brand.timezone;
+  const th = $('#thOn'); if (th) th.onclick = (e) => act(e.target, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
+  const off = $('#thOff'); if (off) off.onclick = (e) => act(e.target, async () => { if (!(await confirmSheet('中斷 Threads 連結？自動發文將無法發布。'))) return; await api('DELETE', '/integrations/threads'); render(); });
+  $$('[data-t]', v).forEach((b) => b.onclick = () => act(b, async () => { const r = await api('POST', '/integrations/test', { target: b.dataset.t }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+  $('#lsave').onclick = (e) => act(e.target, async () => {
+    const r = await api('POST', '/integrations/line', { channel_secret: $('#lsec').value, channel_access_token: $('#ltok').value });
+    toast(r.webhook_verified ? `LINE 已連線（${r.bot}），Webhook 驗證通過` : `已儲存（${r.bot}），但 Webhook 驗證未通過，請在 LINE 後台開啟 Use webhook`, r.webhook_verified ? 'ok' : '');
+    render();
+  });
+  $('#gsave').onclick = (e) => act(e.target, async () => { await api('POST', '/integrations/gemini', { api_key: $('#gkey').value }); toast('Gemini 已連線', 'ok'); render(); });
+  $('#bsave').onclick = (e) => act(e.target, () => api('PUT', '/settings', { name: $('#bname').value, description: $('#bdesc').value, services: $('#bsvc').value, audience: $('#baud').value, timezone: $('#btz').value }), '已儲存');
+  $$('[data-u]', v).forEach((c) => c.onchange = () => act(null, async () => { await api('PATCH', '/users/' + c.dataset.u, { enabled: c.checked }); toast(c.checked ? '已啟用' : '已停用', 'ok'); }));
+  $('#nadd').onclick = (e) => act(e.target, async () => { await api('POST', '/users', { username: $('#nu').value.trim(), role: $('#nr2').value, password: $('#np').value }); toast('帳號已建立', 'ok'); render(); });
+  $('#pchg').onclick = (e) => act(e.target, async () => { await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = ''; }, '密碼已變更');
+  $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); me = null; render(); };
+}
+
+const VIEWS = { home: homeView, posts: postsView, line: lineView, leads: leadsView, settings: settingsView };
 render();
 </script>
 </body>

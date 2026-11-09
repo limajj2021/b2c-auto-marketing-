@@ -12,7 +12,7 @@
 
 1. 客戶建立 Cloudflare 帳號，邀請開發者為成員（或開發者建立專用帳號後將 Super Administrator 轉給客戶）。
 2. 在該帳號執行 `npm run provision -- --brand <brand>`。
-3. 客戶自行取得並（透過 `.secrets` 檔或 `wrangler secret put`）設定 LINE、Threads、Gemini 憑證；**憑證持有方依合約寫明**。
+3. 客戶登入後台「設定 → 連線」：貼上 LINE 憑證與 Gemini key（系統自動驗證並設定 Webhook），按「連結 Threads」授權；**憑證持有方依合約寫明**。
 4. 開發者交付：管理網址、管理員帳號（客戶首次登入即改密碼）、專案原始碼版本標籤、`docs/`、最新 D1 備份。
 5. 客戶指派 LINE OA、Threads 帳號與 AI API 帳號的管理權（這些在各平台後台完成，系統無法代辦）。
 6. 驗收（PRD 10.3）：

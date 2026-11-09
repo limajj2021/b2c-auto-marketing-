@@ -6,7 +6,7 @@ compatibility_date = "2025-01-01"
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/line/*"]
+run_worker_first = ["/api/*", "/line/*", "/threads/*"]
 
 [triggers]
 crons = ["*/5 * * * *"]
