@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { hashPassword } from '../src/util/crypto';
 import type { Env } from '../src/types';
@@ -20,7 +20,7 @@ export function fakeD1(db: DatabaseSync): D1Database {
 
 export async function makeEnv(opts: { industry?: string } = {}): Promise<Env> {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(join(process.cwd(), 'migrations/0001_init.sql'), 'utf8'));
+  for (const f of readdirSync(join(process.cwd(), 'migrations')).sort()) db.exec(readFileSync(join(process.cwd(), 'migrations', f), 'utf8'));
   db.prepare("INSERT INTO brands(id,name,industry,description,timezone,created_at) VALUES('b1','測試品牌',?,'介紹','Asia/Taipei','2026-01-01')")
     .run(opts.industry ?? 'general');
   db.prepare("INSERT INTO brand_settings(brand_id,updated_at,line_add_url,cta_text) VALUES('b1','2026-01-01','https://line.me/R/ti/p/@test','加 LINE 諮詢')").run();
@@ -30,6 +30,7 @@ export async function makeEnv(opts: { industry?: string } = {}): Promise<Env> {
     DB: fakeD1(db), ASSETS: { fetch: async () => new Response('asset') } as unknown as Fetcher,
     SESSION_SECRET: 's'.repeat(32), LINE_CHANNEL_SECRET: 'line-secret', LINE_CHANNEL_ACCESS_TOKEN: 'lt',
     THREADS_ACCESS_TOKEN: 'tt', THREADS_USER_ID: '123', GEMINI_API_KEY: 'gk',
+    THREADS_APP_ID: 'app1', THREADS_APP_SECRET: 'appsecret',
   };
 }
 

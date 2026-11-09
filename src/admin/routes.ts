@@ -1,11 +1,13 @@
 import { generatePost, QuotaError } from '../ai/gemini';
 import { checkContent } from '../ai/compliance';
 import { audit, getBrand, getSettings, jsonArr } from '../db';
+import { getMeta } from '../integrations';
 import { validateLineConfig, parseLineConfig } from '../line/config';
 import { needsReview, publishOne } from '../threads/scheduler';
 import type { Env } from '../types';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
+import { registerExtra } from './extra';
 
 export interface Actor { id: number; name: string; role: 'admin' | 'staff' }
 const SESSION_SEC = 8 * 3600;
@@ -41,6 +43,7 @@ export async function handleApi(env: Env, req: Request): Promise<Response> {
     const ok = await env.DB.prepare('SELECT 1 x').first();
     return json({ ok: !!ok });
   }
+  if (url.pathname === '/api/public' && req.method === 'GET') return json({ name: brand.name });
   if (url.pathname === '/api/login' && req.method === 'POST') return login(env, req, brand.id);
 
   // 變更型請求必須帶自訂標頭（搭配 SameSite=Strict 作 CSRF 防護）
@@ -101,6 +104,7 @@ add('GET', '/dashboard', 'admin', async ({ env, brandId }) => {
     threads_status: s.threads_status,
     configured: {
       threads: !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID),
+      threads_username: (await getMeta(env, 'threads_access_token'))?.username ?? null,
       line: !!(env.LINE_CHANNEL_SECRET && env.LINE_CHANNEL_ACCESS_TOKEN),
       gemini: !!env.GEMINI_API_KEY,
     },
@@ -146,6 +150,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
 
 add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
+  let brandChanged = false;
   const sets: string[] = []; const vals: unknown[] = [];
   const put = (col: string, v: unknown) => { sets.push(`${col}=?`); vals.push(v); };
   for (const k of SETTING_FIELDS) if (typeof b[k] === 'string') { if (b[k].length > 2000) return err(400, `${k} 過長`); put(k, b[k]); }
@@ -169,7 +174,13 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
     if (!isValidTimezone(b.timezone)) return err(400, '時區不合法');
     await env.DB.prepare('UPDATE brands SET timezone=? WHERE id=?').bind(b.timezone, brandId).run();
   }
-  if (!sets.length && b.timezone === undefined) return err(400, 'nothing to update');
+  for (const k of ['name', 'description'] as const) if (typeof b[k] === 'string') {
+    if (!b[k].trim() && k === 'name') return err(400, '品牌名稱不可為空');
+    if (b[k].length > 2000) return err(400, `${k} 過長`);
+    await env.DB.prepare(`UPDATE brands SET ${k}=? WHERE id=?`).bind(b[k], brandId).run();
+    brandChanged = true;
+  }
+  if (!sets.length && b.timezone === undefined && !brandChanged) return err(400, 'nothing to update');
   if (sets.length) await env.DB.prepare(`UPDATE brand_settings SET ${sets.join(',')},updated_at=? WHERE brand_id=?`).bind(...vals, iso(), brandId).run();
   await audit(env, brandId, actor.name, 'settings_update', Object.keys(b).join(','));
   return json({ ok: true });
@@ -309,5 +320,7 @@ add('DELETE', '/inquiries/(\\d+)', 'admin', async ({ env, m, actor, brandId }) =
   await audit(env, brandId, actor.name, 'inquiry_delete', m[1]);
   return json({ ok: true });
 });
+
+registerExtra(add, json, err);
 
 export { publishOne };

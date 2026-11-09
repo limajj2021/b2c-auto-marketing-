@@ -10,6 +10,10 @@ export interface Env {
   GEMINI_API_KEY: string;
   // 非機密變數
   GEMINI_MODEL?: string;
+  // 加密憑證用金鑰（缺少時退回 SESSION_SECRET）；Threads App 為所有客戶共用的 Meta App
+  CRED_ENC_KEY?: string;
+  THREADS_APP_ID?: string;
+  THREADS_APP_SECRET?: string;
 }
 
 export interface Brand {
