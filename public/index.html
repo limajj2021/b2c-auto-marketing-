@@ -3,443 +3,659 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#35352f">
+<meta name="theme-color" content="#0c0c0b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <title>營運後台</title>
 <style>
-/* VUCA palette — sampled from the logo: champagne gold #C8B99B / charcoal #4C4C4A on white */
+/* ============ Design tokens ============
+   Palette from the VUCA logo: charcoal + champagne gold. Gold is reserved for primary CTA, selected state and brand marks.
+   Type scale: page 22/600 · section 16/600 · body 14.5/400 · secondary 12.5/400 · metric 26/500 · label 13.5/500
+   Spacing: 4px base. Page gutter 16. Section gap 28. Row padding 12/16. Min touch target 44. */
 :root{
-  --bg:#f5f3ee;--card:#fff;--fg:#2a2a27;--mut:#7b776c;--bd:#e3dfd3;--soft:#f1eee6;
-  --ink:#35352f;--ink-fg:#fff;--acc:#b9a679;--acc-d:#85733f;--acc-soft:#f0eadb;
-  --ok:#3f7a56;--ok-soft:#e6f0e9;--warn:#946510;--warn-soft:#f6ecd5;--bad:#a8392c;--bad-soft:#f7e4e0;
-  --pri:var(--acc-d);--pri-soft:var(--acc-soft);--pri-fg:var(--ink-fg);
-  --r:6px;--r2:4px;--sh:0 1px 0 rgba(40,38,30,.04)
-}
+  --bg0:#f6f5f1;--bg1:#fff;--bg2:#efede7;--bg3:#e6e3db;--line:#e4e1d8;
+  --text:#1b1a17;--text2:#5c5850;--text3:#726e64;
+  --gold:#c2ab78;--gold-ink:#16150f;--gold-text:#715f30;--gold-soft:#f0eadb;
+  --ok:#297347;--warn:#855a00;--bad:#b0372a;--ok-bg:#e4f0e8;--warn-bg:#f6ecd3;--bad-bg:#f8e5e1;
+  --r:6px;--r-lg:10px;--sh:0 8px 28px rgba(20,18,10,.16);
+  --nav-h:56px;--font:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{
-  --bg:#141412;--card:#1c1c1a;--fg:#ecebe5;--mut:#9a968a;--bd:#2f2e2a;--soft:#242421;
-  --ink:#cdbb92;--ink-fg:#1a1a18;--acc:#cdbb92;--acc-d:#cdbb92;--acc-soft:#2b271d;
-  --ok:#6fbf8b;--ok-soft:#16271d;--warn:#e0b25a;--warn-soft:#2e2512;--bad:#e57d6e;--bad-soft:#331b17;--sh:none}
-  html .logo,html .dot.ok{color:var(--ink-fg)}html .toggle input:checked+i:after{background:var(--ink-fg)}}
+  --bg0:#0c0c0b;--bg1:#141413;--bg2:#1c1c1a;--bg3:#262624;--line:#242422;
+  --text:#ecebe6;--text2:#a3a097;--text3:#88857d;
+  --gold:#cdb98d;--gold-ink:#16150f;--gold-text:#cdb98d;--gold-soft:#26231a;
+  --ok:#62b883;--warn:#dcab47;--bad:#ec7b6e;--ok-bg:#15241b;--warn-bg:#2a2210;--bad-bg:#2f1a17;--sh:0 12px 36px rgba(0,0,0,.55)}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:15.5px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue","Noto Sans TC","PingFang TC",system-ui,sans-serif;
-  letter-spacing:.015em;padding-bottom:calc(76px + env(safe-area-inset-bottom));font-variant-numeric:tabular-nums}
-header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px);
-  padding:calc(12px + env(safe-area-inset-top)) 16px 11px;border-bottom:1px solid var(--bd)}
-header .in{max-width:680px;margin:0 auto;display:flex;align-items:center;gap:12px}
-.logo{width:36px;height:36px;border-radius:var(--r2);background:var(--ink);color:var(--acc);display:grid;place-items:center;font-weight:700;font-size:17px;letter-spacing:0}
-header b{display:block;font-size:15px;line-height:1.25;letter-spacing:.06em;font-weight:600}
-header small{color:var(--mut);font-size:11.5px;letter-spacing:.08em}
-main{max-width:680px;margin:0 auto;padding:18px 16px}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:18px 16px;margin-bottom:14px;box-shadow:var(--sh)}
-h2{font-size:15px;margin:0 0 6px;letter-spacing:.1em;font-weight:700;display:flex;align-items:center;gap:10px}
-h2:before{content:"";width:3px;height:14px;background:var(--acc);flex:none}
-h3{font-size:12px;margin:20px 0 8px;color:var(--mut);font-weight:600;letter-spacing:.14em}
-p{margin:6px 0}.mut{color:var(--mut);font-size:13px}
-a{color:var(--acc-d);text-underline-offset:3px}
-label{display:block;font-size:12px;color:var(--mut);margin:16px 0 6px;font-weight:600;letter-spacing:.08em}
-input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--bd);border-radius:var(--r2);background:var(--card);color:var(--fg);font:inherit;font-size:16px;outline:none;transition:border-color .15s,box-shadow .15s}
-input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 28%,transparent)}
-textarea{min-height:96px;resize:vertical}
-button{font:inherit;font-weight:600;letter-spacing:.08em;border:1px solid var(--ink);border-radius:var(--r2);padding:11px 16px;min-height:46px;background:var(--ink);color:var(--ink-fg);cursor:pointer;transition:opacity .15s,transform .1s}
-button:active{transform:translateY(1px)}button:disabled{opacity:.4}
-button.sec{background:transparent;color:var(--fg);border-color:var(--bd)}button.sec:active{background:var(--soft)}
-button.bad{background:transparent;color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--bd))}
-button.ghost{background:none;border-color:transparent;color:var(--acc-d);padding:8px 10px;min-height:36px}
-.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.row>*{flex:1;min-width:120px}
-.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;letter-spacing:.06em;padding:2px 8px;border-radius:2px;background:var(--soft);color:var(--mut);border:1px solid var(--bd)}
-.chip.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}.chip.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
-.chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}.chip.pri{background:var(--acc-soft);color:var(--acc-d);border-color:transparent}
-.kpi{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden}
-.kpi div{padding:14px;border-right:1px solid var(--bd);border-bottom:1px solid var(--bd);background:var(--card)}
-.kpi div:nth-child(2n){border-right:0}.kpi div:nth-last-child(-n+2){border-bottom:0}
-.kpi b{display:block;font-size:30px;line-height:1.1;margin-top:4px;font-weight:300;letter-spacing:0}.kpi span{color:var(--mut);font-size:11.5px;letter-spacing:.1em}
-nav{position:fixed;left:0;right:0;bottom:0;z-index:6;background:color-mix(in srgb,var(--card) 94%,transparent);backdrop-filter:blur(14px);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom)}
-nav .in{max-width:680px;margin:0 auto;display:flex}
-nav button{flex:1;background:none;border:0;border-top:2px solid transparent;color:var(--mut);border-radius:0;font-size:10.5px;font-weight:600;letter-spacing:.1em;display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 0 8px;min-height:56px}
-nav button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter}
-nav button.on{color:var(--fg);border-top-color:var(--acc)}nav button.on svg{stroke:var(--acc-d)}
-.step{display:flex;gap:12px;align-items:center;padding:13px 0;border-top:1px solid var(--bd)}.step:first-of-type{border-top:0}
-.dot{flex:none;width:24px;height:24px;border-radius:2px;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--soft);color:var(--mut);border:1px solid var(--bd)}
-.dot.ok{background:var(--ink);color:var(--acc);border-color:var(--ink)}.step .t{flex:1;min-width:0}.step .t b{display:block;font-size:14.5px;font-weight:600}.step button{flex:none;min-height:36px;padding:7px 14px;font-size:13px}
-.bar{height:3px;background:var(--bd);overflow:hidden;margin:12px 0 6px}.bar i{display:block;height:100%;background:var(--acc);transition:width .4s}
-.sw{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-top:1px solid var(--bd)}.sw:first-of-type{border-top:0}
-.sw b{display:block;font-size:14.5px}.toggle{position:relative;flex:none;width:48px;height:26px}.toggle input{opacity:0;position:absolute;inset:0;width:100%;height:100%;margin:0;z-index:1;cursor:pointer}
-.toggle i{position:absolute;inset:0;border-radius:3px;background:var(--bd);transition:.2s}.toggle i:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:2px;background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:.2s}
-.toggle input:checked+i{background:var(--ink)}.toggle input:checked+i:after{left:25px;background:var(--acc)}
-.seg{display:flex;border:1px solid var(--bd);border-radius:var(--r2);margin-bottom:14px;background:var(--card);overflow:hidden}
-.seg button{flex:1;background:none;border:0;border-radius:0;color:var(--mut);min-height:40px;padding:6px;font-size:13px;border-right:1px solid var(--bd)}.seg button:last-child{border-right:0}
-.seg button.on{background:var(--ink);color:var(--ink-fg)}
-.post{border-top:1px solid var(--bd);padding:16px 0}.post:first-of-type{border-top:0}.post pre{white-space:pre-wrap;word-break:break-word;margin:8px 0;font:inherit;font-size:14.5px}
-.post .row>button{min-width:0;padding:10px 8px}
-.empty{text-align:center;color:var(--mut);padding:30px 8px;font-size:14px}.empty svg{width:36px;height:36px;stroke:var(--bd);fill:none;stroke-width:1.3;margin-bottom:8px}
-.sk{height:12px;background:linear-gradient(90deg,var(--soft),var(--bd),var(--soft));background-size:200% 100%;animation:sk 1.2s infinite;margin:12px 0}@keyframes sk{to{background-position:-200% 0}}
-details{border-top:1px solid var(--bd)}details:first-of-type{border-top:0}summary{list-style:none;cursor:pointer;padding:15px 0;font-weight:600;letter-spacing:.06em;display:flex;justify-content:space-between;align-items:center}
-summary::-webkit-details-marker{display:none}summary:after{content:"+";font-size:20px;font-weight:300;color:var(--acc-d);transition:transform .2s}details[open] summary:after{transform:rotate(45deg)}
-details.card{padding-top:2px;padding-bottom:6px}
-#toasts{position:fixed;left:0;right:0;top:calc(10px + env(safe-area-inset-top));z-index:20;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
-.toast{pointer-events:auto;background:var(--ink);color:var(--ink-fg);padding:11px 16px;border-radius:var(--r2);border-left:3px solid var(--acc);font-size:13.5px;font-weight:500;letter-spacing:.04em;max-width:90%;box-shadow:0 10px 30px rgba(0,0,0,.22);animation:in .25s}
-.toast.bad{background:var(--bad);color:#fff;border-left-color:#fff}.toast.ok{border-left-color:var(--ok)}@keyframes in{from{opacity:0;transform:translateY(-8px)}}
-.sheet{position:fixed;inset:0;z-index:30;background:rgba(18,18,14,.55);display:flex;align-items:flex-end;justify-content:center;animation:fade .2s}@keyframes fade{from{opacity:0}}
-.sheet>div{background:var(--card);width:100%;max-width:680px;border-top:2px solid var(--acc);padding:22px 18px calc(18px + env(safe-area-inset-bottom))}
-.sheet h2:before{display:none}
-.login{min-height:100dvh;display:grid;place-items:center;padding:20px}.login .card{width:100%;max-width:380px;padding:30px 24px}
-.login .logo{width:56px;height:56px;font-size:26px;margin:0 auto 18px}.login h2{justify-content:center;font-size:17px;letter-spacing:.18em}.login h2:before{display:none}
-.login .mut{text-align:center}
-code{background:var(--soft);padding:2px 6px;border-radius:2px;font-size:12.5px;word-break:break-all;border:1px solid var(--bd)}
-.hint{color:var(--mut);font-size:12.5px;margin:7px 0 0;line-height:1.55}.hint b{color:var(--fg)}
-.callout{display:flex;gap:10px;background:var(--acc-soft);border-left:3px solid var(--acc);border-radius:var(--r2);padding:12px 14px;font-size:13.5px;margin:14px 0}
-.callout.warn{background:var(--warn-soft);border-left-color:var(--warn)}.callout.bad{background:var(--bad-soft);border-left-color:var(--bad)}
-.help ol,.help ul{margin:8px 0 8px 4px;padding-left:20px}.help li{margin:7px 0}.help summary{font-size:14.5px}.help details>div{padding:0 0 16px}.help details{scroll-margin-top:84px}
-.back{display:inline-flex;align-items:center;gap:4px;color:var(--acc-d);font-weight:600;background:none;border:0;padding:6px 2px;min-height:0;margin-bottom:8px;letter-spacing:.08em}
-.q{flex:none;width:34px;min-height:34px;height:34px;padding:0;border-radius:var(--r2);background:transparent;color:var(--mut);border:1px solid var(--bd);font-size:15px}
-.err-field{border-color:var(--bad)!important;background:var(--bad-soft)!important}
-.hide{display:none!important}.grow{flex:1}.lead dl{margin:10px 0 0;display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:14px}.lead dt{color:var(--mut);font-size:12.5px}.lead dd{margin:0;word-break:break-word}
+body{margin:0;background:var(--bg0);color:var(--text);font:400 14.5px/1.6 var(--font);letter-spacing:.01em;font-variant-numeric:tabular-nums;min-height:100dvh}
+h1,h2,h3,p{margin:0}
+a{color:var(--gold-text);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:4px}
+button,input,select,textarea{font:inherit;color:inherit}
+.hide{display:none!important}.grow{flex:1;min-width:0}
+.t-page{font-size:22px;line-height:1.3;font-weight:600;letter-spacing:.02em}
+.t-sec{font-size:16px;font-weight:600}
+.t-sub{font-size:12.5px;color:var(--text2);line-height:1.5}
+.t-label{font-size:13.5px;font-weight:500}
+.mut{color:var(--text2)}.clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* ============ Shell ============ */
+#app{min-height:100dvh}
+.bar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg0) 90%,transparent);backdrop-filter:saturate(1.4) blur(14px);
+  padding:env(safe-area-inset-top) 8px 0 16px;border-bottom:1px solid var(--line)}
+.bar .in{max-width:720px;margin:0 auto;min-height:52px;display:flex;align-items:center;gap:4px}
+.bar .ttl{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
+.bar .ttl h1{font-size:17px;font-weight:600;letter-spacing:.03em}
+.bar .sub{font-size:12px;color:var(--text2)}
+main{max-width:720px;margin:0 auto;padding:20px 16px calc(var(--nav-h) + 28px + env(safe-area-inset-bottom))}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:color-mix(in srgb,var(--bg1) 94%,transparent);backdrop-filter:blur(16px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav.tabs .in{max-width:720px;margin:0 auto;display:flex}
+.tab{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:var(--nav-h);background:none;border:0;color:var(--text2);font-size:11px;font-weight:500;letter-spacing:.04em;cursor:pointer}
+.tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tab[aria-current=page]{color:var(--text)}.tab[aria-current=page] svg{stroke:var(--gold-text)}
+.tab[aria-current=page]:after{content:"";position:absolute;top:0;width:20px;height:2px;background:var(--gold)}
+.badge{position:absolute;top:6px;left:calc(50% + 6px);min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--gold);color:var(--gold-ink);font-size:10.5px;font-weight:700;line-height:16px;text-align:center}
+.icon{flex:none;width:44px;height:44px;display:grid;place-items:center;background:none;border:0;color:var(--text2);border-radius:var(--r);cursor:pointer}
+.icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ============ Primitives ============ */
+.page>*+*{margin-top:28px}.page>.tight+*{margin-top:12px}
+.sec-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;min-height:24px}
+.sec-h .lbl{font-size:12.5px;color:var(--text2);font-weight:500;letter-spacing:.06em}
+.link{background:none;border:0;padding:6px 0;min-height:32px;color:var(--gold-text);font-size:13.5px;font-weight:500;cursor:pointer}
+.list{background:var(--bg1);border-radius:var(--r-lg);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;min-height:52px;padding:10px 16px;width:100%;background:none;border:0;border-top:1px solid var(--line);text-align:left;cursor:pointer;color:inherit;text-decoration:none}
+.row:first-child{border-top:0}
+.row .main{flex:1;min-width:0}.row .ttl{font-size:14.5px;font-weight:500;line-height:1.4}.row .sub{font-size:12.5px;color:var(--text2);line-height:1.45;margin-top:1px}
+.row .end{flex:none;color:var(--text2);font-size:13px;display:flex;align-items:center;gap:8px}
+.row .chev{width:16px;height:16px;stroke:var(--text3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.row.static{cursor:default}
+@media (hover:hover){.row:not(.static):hover{background:var(--bg2)}.icon:hover,.tab:hover{color:var(--text)}.btn.sec:hover{background:var(--bg3)}.link:hover{text-decoration:underline}}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--text3)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.gold{background:var(--gold)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--text2)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}.pill.warn{background:var(--warn-bg);color:var(--warn)}.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:var(--r);border:1px solid transparent;font-size:14px;font-weight:600;letter-spacing:.03em;cursor:pointer;background:var(--gold);color:var(--gold-ink);transition:filter .12s,background .12s}
+.btn:active{filter:brightness(.92)}
+.btn.sec{background:var(--bg2);color:var(--text);font-weight:500}.btn.ghost{background:none;color:var(--text);border-color:var(--line);font-weight:500}
+.btn.dng{background:none;color:var(--bad);font-weight:500}.btn.sm{min-height:36px;padding:0 14px;font-size:13px}.btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.btn.block{width:100%}
+.btn[disabled],.btn[aria-busy=true]{opacity:.5;cursor:not-allowed}
+.btn[aria-busy=true]:before{content:"";width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.actions>.btn{flex:1;min-width:96px}
+.f{margin-top:16px}.f:first-child{margin-top:0}
+.f label,.f .lab{display:block;font-size:13px;font-weight:500;color:var(--text);margin-bottom:6px}
+.f .hint{font-size:12.5px;color:var(--text2);margin-top:6px;line-height:1.5}
+.f .hint.bad{color:var(--bad)}
+input[type=text],input[type=url],input[type=password],input[type=number],input[type=date],input:not([type]),select,textarea{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg1);color:var(--text);font-size:16px;line-height:1.45;outline:none;transition:border-color .12s}
+.page.form input,.page.form select,.page.form textarea,.panel input,.panel select,.panel textarea{background:var(--bg2);border-color:transparent}
+input:focus,select:focus,textarea:focus{border-color:var(--gold)}
+input::placeholder,textarea::placeholder{color:var(--text3)}
+textarea{min-height:104px;resize:vertical}
+.err{border-color:var(--bad)!important}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.switch{position:relative;flex:none;width:46px;height:28px}
+.switch input{position:absolute;inset:-8px;width:calc(100% + 16px);height:calc(100% + 16px);margin:0;opacity:0;cursor:pointer;z-index:1}
+.switch i{position:absolute;inset:0;border-radius:14px;background:var(--bg3);transition:background .15s}
+.switch i:after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--text2);transition:transform .15s,background .15s}
+.switch input:checked+i{background:var(--gold)}.switch input:checked+i:after{transform:translateX(18px);background:var(--gold-ink)}
+.switch input:focus-visible+i{outline:2px solid var(--gold);outline-offset:2px}
+.banner{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--r-lg);background:var(--gold-soft)}
+.banner .main{flex:1;min-width:0}.page>.banner+*{margin-top:24px}
+.note{padding:12px 14px;border-radius:var(--r);background:var(--bg2);font-size:13px;color:var(--text2);line-height:1.55}
+.note.warn{background:var(--warn-bg);color:var(--warn)}.note.bad{background:var(--bad-bg);color:var(--bad)}.note b{color:var(--text)}
+.tabs-h{display:flex;gap:20px;border-bottom:1px solid var(--line);margin:-4px 0 0}
+.tabs-h button{background:none;border:0;padding:12px 0;min-height:44px;color:var(--text2);font-size:14px;font-weight:500;cursor:pointer;position:relative}
+.tabs-h button[aria-selected=true]{color:var(--text)}.tabs-h button[aria-selected=true]:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--gold)}
+.tabs-h .n{color:var(--text3);margin-left:4px;font-weight:400}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;min-height:36px;padding:0 14px;border-radius:18px;border:1px solid var(--line);background:none;color:var(--text2);font-size:13.5px;cursor:pointer}
+.chip[aria-pressed=true]{background:var(--text);color:var(--bg0);border-color:var(--text)}
+.metrics{display:flex}.metrics>div{flex:1;min-width:0;padding:0 12px;border-left:1px solid var(--line)}.metrics>div:first-child{padding-left:0;border-left:0}
+.metrics b{display:block;font-size:26px;line-height:1.15;font-weight:500;letter-spacing:0}.metrics b.z{color:var(--text3)}.metrics b.bad{color:var(--bad)}
+.metrics span{font-size:12px;color:var(--text2)}
+.kv{display:grid;grid-template-columns:84px 1fr;gap:8px 12px;font-size:14px}.kv dt{color:var(--text2)}.kv dd{margin:0;word-break:break-word}
+code{background:var(--bg2);padding:1px 6px;border-radius:4px;font-size:12.5px;word-break:break-all}
+.empty{text-align:center;padding:36px 16px;color:var(--text2)}.empty svg{width:32px;height:32px;stroke:var(--text3);fill:none;stroke-width:1.4;margin-bottom:10px}
+.empty b{display:block;color:var(--text);font-size:15px;font-weight:500;margin-bottom:4px}.empty .btn{margin-top:16px}
+.sk{border-radius:6px;background:linear-gradient(90deg,var(--bg2),var(--bg3),var(--bg2));background-size:200% 100%;animation:sk 1.3s linear infinite}
+@keyframes sk{to{background-position:-200% 0}}
+.savebar{position:sticky;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));margin:24px -16px 0;padding:12px 16px;background:color-mix(in srgb,var(--bg0) 92%,transparent);backdrop-filter:blur(12px);border-top:1px solid var(--line)}
+.savebar .in{max-width:720px;margin:0 auto;display:flex;gap:8px;align-items:center}.savebar .in .t-sub{flex:1}
+details.acc{border-top:1px solid var(--line)}details.acc:first-child{border-top:0}
+details.acc summary{list-style:none;cursor:pointer;min-height:52px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:500}
+details.acc summary::-webkit-details-marker{display:none}
+details.acc summary:after{content:"";width:8px;height:8px;border-right:1.8px solid var(--text3);border-bottom:1.8px solid var(--text3);transform:rotate(45deg);transition:transform .15s;margin-right:4px}
+details.acc[open] summary:after{transform:rotate(-135deg)}
+details.acc .body{padding:0 16px 16px;color:var(--text2);line-height:1.75}.body ol,.body ul{margin:6px 0;padding-left:20px}.body li{margin:6px 0}.body b{color:var(--text)}
+
+/* ============ Overlays ============ */
+.sheet{position:fixed;inset:0;z-index:30;background:rgba(6,6,5,.6);display:flex;align-items:flex-end;justify-content:center;animation:fade .18s}
+.panel{width:100%;max-width:560px;max-height:92dvh;display:flex;flex-direction:column;background:var(--bg1);border-radius:14px 14px 0 0;box-shadow:var(--sh);animation:up .22s cubic-bezier(.2,.8,.2,1)}
+.panel .ph{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 0 20px;min-height:52px}.panel .ph h2{font-size:16px;font-weight:600}
+.panel .pb{padding:4px 20px calc(20px + env(safe-area-inset-bottom));overflow:auto;overscroll-behavior:contain}
+@keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(24px);opacity:.6}}
+#toasts{position:fixed;left:0;right:0;bottom:calc(var(--nav-h) + 16px + env(safe-area-inset-bottom));z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.toast{pointer-events:auto;display:flex;gap:10px;align-items:center;max-width:min(92vw,420px);padding:11px 14px;border-radius:var(--r);background:var(--text);color:var(--bg0);font-size:13.5px;font-weight:500;box-shadow:var(--sh);animation:up .2s}
+.toast.bad{background:var(--bad);color:#fff}.toast.ok:before{content:"✓";color:var(--ok);font-weight:700}
+.toast .u{margin-left:6px;background:none;border:0;color:inherit;text-decoration:underline;font:inherit;cursor:pointer;padding:0 0 0 4px}
+
+/* ============ Login ============ */
+.login{min-height:100dvh;display:flex;flex-direction:column;justify-content:center;max-width:380px;margin:0 auto;padding:24px 24px calc(24px + env(safe-area-inset-bottom))}
+.mark{width:40px;height:40px;border-radius:var(--r);background:var(--gold);color:var(--gold-ink);display:grid;place-items:center;font-weight:700;font-size:18px;margin-bottom:20px}
+
+/* ============ Desktop: sidebar layout ============ */
+@media (min-width:900px){
+  :root{--nav-h:0px}
+  nav.tabs{top:0;right:auto;width:216px;border-top:0;border-right:1px solid var(--line);background:var(--bg1);padding:20px 12px}
+  nav.tabs .in{flex-direction:column;gap:2px;max-width:none}
+  nav.tabs .brand{display:flex!important;align-items:center;gap:10px;padding:4px 10px 18px;font-weight:600}
+  .tab{flex:none;flex-direction:row;justify-content:flex-start;gap:12px;min-height:40px;padding:0 12px;border-radius:var(--r);font-size:14px}
+  .tab[aria-current=page]{background:var(--bg2)}.tab[aria-current=page]:after{display:none}
+  .badge{position:static;margin-left:auto}
+  .bar,main{margin-left:216px}.bar{padding:0 32px}.bar .in{max-width:696px;margin:0 auto}
+  main{max-width:none;padding:28px 32px 64px}#view>.page{max-width:696px;margin:0 auto}
+  .savebar{bottom:0;margin-left:0;margin-right:0;padding-left:0;padding-right:0;background:var(--bg0)}
+  .sheet{align-items:center}.panel{border-radius:14px;max-height:86dvh}
+  #toasts{bottom:24px}
+  .page.wide{max-width:none}
+}
+nav.tabs .brand{display:none}
+/* 觸控裝置：所有可點元件至少 44px（WCAG 2.2 AA 最低 24px，這裡採更嚴格的原生 App 標準） */
+@media (pointer:coarse){.btn.sm,.link,.chip,.tabs-h button{min-height:44px}.link{padding:10px 4px}.tabs-h button{min-width:44px;padding:0 2px}.chip input{min-height:32px!important}.foot a{display:inline-block;padding:12px 6px}}
+@media (prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
-<div id="toasts"></div>
-<div id="root"></div>
+<div id="toasts" aria-live="polite" role="status"></div>
+<div id="app"></div>
 <script>
+'use strict';
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const ICON = {
-  home: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
-  post: '<path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
-  line: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 10h6M9 13h4"/>',
-  lead: '<path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-4-6.3"/>',
-  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
-  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
+const IC = {
+  home: '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/>',
+  post: '<path d="M5 4h14v12H9l-4 4z"/><path d="M9 8.5h6M9 11.5h4"/>',
+  line: '<path d="M4 11.5a8 7 0 0 1 16 0 8 7 0 0 1-16 0z"/><path d="M8 18.5 6.5 21 11 19"/>',
+  lead: '<path d="M8.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6 6 0 0 1 12 0M16 4.2a3.5 3.5 0 0 1 0 6.6M18 14.3A6 6 0 0 1 21.5 20"/>',
+  gear: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>', back: '<path d="m15 6-6 6 6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', plus: '<path d="M12 5v14M5 12h14"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/>',
+  inbox: '<path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"/>',
 };
-const svg = (n) => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
+const svg = (n, c = '') => `<svg class="${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
+const chev = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
 
-let me = null, tab = 'home', TZ = 'Asia/Taipei', brandName = '營運後台';
-const state = { postSeg: 'draft', leadStatus: '', leadFrom: '', helpOpen: 'start', helpFrom: 'home' };
-let dirty = false;
-// 未儲存提醒：表單卡片(data-form)內任何輸入都會標記，儲存成功或重新渲染後清除
+/* ---------- state ---------- */
+let me = null, TZ = 'Asia/Taipei', BRAND = '營運後台', dirty = false, suppress = false, curHash = location.hash;
+const S = { postSeg: 'draft', leadStatus: '', leadFrom: '', helpOpen: 'start', cache: {} };
 document.addEventListener('input', (e) => { if (e.target.closest?.('[data-form]')) dirty = true; });
-async function leaveOk() { if (!dirty) return true; const ok = await confirmSheet('有尚未儲存的修改，確定要離開？', '離開不儲存'); if (ok) dirty = false; return ok; }
-const markField = (el, bad) => { el.classList.toggle('err-field', !!bad); if (bad) { el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } };
-function check(rules) { for (const [el, bad, msg] of rules) { markField(el, bad); if (bad) { toast(msg, 'bad'); return false; } } return true; }
 
-function toast(msg, kind = '') {
+/* ---------- helpers ---------- */
+const fmt = (iso) => iso ? new Intl.DateTimeFormat('zh-TW', { timeZone: TZ, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : '—';
+const list = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+function toast(msg, kind = '', undo) {
+  const box = $('#toasts');
+  for (const x of $$('.toast', box)) if (x.firstChild?.textContent === msg) x.hidden = true, x.className = 'hide'; // 相同訊息不重複堆疊
+  while ($$('.toast', box).length >= 3) box.querySelector('.toast').className = 'hide';                        // 最多同時 3 則
   const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
-  $('#toasts').append(t); setTimeout(() => t.remove(), kind === 'bad' ? 5000 : 2600);
-}
-function confirmSheet(msg, okText = '確定', danger = true) {
-  return new Promise((res) => {
-    const s = document.createElement('div'); s.className = 'sheet';
-    s.innerHTML = `<div><h2>${esc(msg)}</h2><div class="row"><button class="sec" data-v="0">取消</button><button class="${danger ? 'bad' : ''}" data-v="1">${esc(okText)}</button></div></div>`;
-    s.onclick = (e) => { const v = e.target.dataset?.v; if (v !== undefined || e.target === s) { s.remove(); res(v === '1'); } };
-    document.body.append(s);
-  });
+  if (undo) { const b = document.createElement('button'); b.className = 'u'; b.textContent = undo.label; b.onclick = () => { undo.fn(); t.remove(); }; t.append(b); }
+  $('#toasts').append(t); setTimeout(() => t.remove(), kind === 'bad' ? 6000 : 3200);
 }
 async function api(method, path, body) {
   const r = await fetch('/api' + path, { method, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui' }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401 && path !== '/login' && path !== '/me') { me = null; render(); throw new Error('登入已過期，請重新登入'); }
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || '操作失敗');
+  if (!r.ok) throw new Error(d.error || '操作失敗，請稍後再試');
   return d;
 }
+/** 按鈕載入狀態 + 錯誤回饋；成功回傳結果，失敗回傳 undefined 並顯示 toast */
 async function act(btn, fn, okMsg) {
-  if (btn) btn.disabled = true;
-  try { const r = await fn(); if (okMsg) toast(okMsg, 'ok'); return r; }
+  if (btn) { if (btn.getAttribute('aria-busy') === 'true') return; btn.setAttribute('aria-busy', 'true'); }
+  try { const r = await fn(); if (okMsg) toast(okMsg, 'ok'); return r ?? true; }
   catch (e) { toast(e.message, 'bad'); }
-  finally { if (btn) btn.disabled = false; }
+  finally { btn?.removeAttribute('aria-busy'); }
 }
-const fmt = (iso) => iso ? new Intl.DateTimeFormat('zh-TW', { timeZone: TZ, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : '—';
-const skeleton = '<div class="card"><div class="sk" style="width:40%"></div><div class="sk"></div><div class="sk" style="width:70%"></div></div>'.repeat(2);
-const empty = (t) => `<div class="empty">${svg('inbox').replace('<svg','<svg')}<div>${esc(t)}</div></div>`;
-const list = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+const markField = (el, bad) => { el.classList.toggle('err', !!bad); if (bad) { el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } };
+function check(rules) { for (const [el, bad, msg] of rules) { markField(el, bad); if (bad) { toast(msg, 'bad'); return false; } } return true; }
 
-const TABS = [['home', '首頁', 'home', 'admin'], ['posts', '貼文', 'post', 'admin'], ['line', 'LINE', 'line', 'admin'], ['leads', '留資', 'lead', 'staff'], ['settings', '設定', 'gear', 'admin']];
+/* ---------- ui builders ---------- */
+const field = (id, label, ctrl, hint = '') => `<div class="f"><label for="${id}">${label}</label>${ctrl}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+const input = (id, v = '', a = '') => `<input id="${id}" value="${esc(v)}" ${a}>`;
+const area = (id, v = '', a = '') => `<textarea id="${id}" ${a}>${esc(v)}</textarea>`;
+const sw = (id, on, label) => `<label class="switch"><input type="checkbox" role="switch" id="${id}" ${on ? 'checked' : ''} aria-label="${esc(label)}"><i></i></label>`;
+const row = ({ act: a, title, sub, end = '', dot = '', go = true, id = '', cls = '' }) =>
+  `<${go || a ? 'button' : 'div'} class="row ${go || a ? '' : 'static'} ${cls}" ${a ? `data-act="${a}"` : ''} ${id ? `data-id="${esc(id)}"` : ''}>${dot ? `<span class="dot ${dot}"></span>` : ''}<span class="main"><span class="ttl" style="display:block">${title}</span>${sub ? `<span class="sub" style="display:block">${sub}</span>` : ''}</span>${end || go ? `<span class="end">${end}${go && a ? chev : ''}</span>` : ''}</${go || a ? 'button' : 'div'}>`;
+const sec = (label, right = '') => `<div class="sec-h"><span class="lbl">${label}</span>${right}</div>`;
+const empty = (icon, title, desc, cta = '') => `<div class="empty">${svg(icon)}<b>${title}</b><div>${desc}</div>${cta}</div>`;
+const skeleton = () => `<div class="page"><div class="sk" style="height:26px;width:46%"></div><div class="sk" style="height:64px"></div><div class="sk" style="height:140px"></div><div class="sk" style="height:96px"></div></div>`;
+const errorState = (msg) => `<div class="page">${empty('help', '載入失敗', esc(msg), '<button class="btn sec" data-act="retry">重新載入</button>')}</div>`;
+
+function sheet(title, html, mount) {
+  const el = document.createElement('div'); el.className = 'sheet';
+  el.innerHTML = `<div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="ph"><h2>${esc(title)}</h2><button class="icon" data-close aria-label="關閉">${svg('x')}</button></div><div class="pb">${html}</div></div>`;
+  const prev = document.activeElement;
+  const close = () => { el.remove(); document.removeEventListener('keydown', onKey); prev?.focus?.(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  el.onclick = (e) => { if (e.target === el || e.target.closest('[data-close]')) close(); };
+  document.addEventListener('keydown', onKey); document.body.append(el);
+  setTimeout(() => $('input:not([type=checkbox]),textarea,button.btn', el)?.focus({ preventScroll: true }), 30);
+  mount?.(el, close); return close;
+}
+function confirmSheet(msg, okText = '確定', danger = true) {
+  return new Promise((res) => {
+    let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
+    const close = sheet(msg, `<div class="actions" style="margin-top:8px"><button class="btn sec" data-v="0">取消</button><button class="btn ${danger ? 'dng' : ''}" data-v="1" style="${danger ? 'background:var(--bad-bg)' : ''}">${esc(okText)}</button></div>`, (el, c) => {
+      el.addEventListener('click', (e) => { const v = e.target.closest('[data-v]')?.dataset.v; if (v !== undefined) { fin(v === '1'); c(); } });
+      new MutationObserver(() => { if (!document.body.contains(el)) fin(false); }).observe(document.body, { childList: true });
+    });
+  });
+}
+async function leaveOk() { if (!dirty) return true; const ok = await confirmSheet('有尚未儲存的修改，確定要離開？', '離開不儲存'); if (ok) dirty = false; return ok; }
+
+/* ---------- router ---------- */
+const route = () => { const p = (location.hash || '#/').slice(2).split('/'); return { tab: p[0] || 'home', sub: p[1] || '', arg: p[2] || '' }; };
+async function go(path) { if (!(await leaveOk())) return; if (location.hash === '#/' + path) render(); else location.hash = '#/' + path; }
+window.addEventListener('hashchange', async () => {
+  if (suppress) { suppress = false; return; }
+  if (dirty && !(await confirmSheet('有尚未儲存的修改，確定要離開？', '離開不儲存'))) { suppress = true; location.hash = curHash; return; }
+  dirty = false; curHash = location.hash; render();
+});
+const TABS = [['home', '首頁', 'home', 'admin'], ['posts', '貼文', 'post', 'admin'], ['line', 'LINE', 'line', 'admin'], ['leads', '留資', 'lead', 'staff'], ['settings', '設定', 'gear', 'admin'], ['account', '帳號', 'user', 'staff-only']];
+const tabsFor = () => TABS.filter((t) => me.role === 'admin' ? t[3] !== 'staff-only' : (t[3] === 'staff' || t[3] === 'staff-only'));
+
+function bar({ title, back, right = '', sub = '', dot = '' }) {
+  $('#bar').innerHTML = `<div class="in">${back ? `<button class="icon" data-act="back" data-to="${esc(back)}" aria-label="返回">${svg('back')}</button>` : ''}<div class="ttl" style="${back ? '' : 'padding:6px 0'}">${dot ? `<span class="dot ${dot}"></span>` : ''}<div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div></div>${right}<button class="icon" data-act="help" aria-label="說明">${svg('help')}</button></div>`;
+  document.title = title + ' · ' + BRAND;
+}
+const setView = (html, cls = '') => { $('#view').innerHTML = `<div class="page ${cls}">${html}</div>`; };
 
 async function render() {
-  dirty = false;
-  const root = $('#root');
+  dirty = false; curHash = location.hash;
   if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
-  if (!me) return loginView(root);
-  fetch('/api/public').then((r) => r.json()).then((d) => { brandName = d.name || brandName; const b = $('#bn'); if (b) b.textContent = brandName; }).catch(() => {});
-  const allowed = TABS.filter((t) => me.role === 'admin' || t[3] === 'staff');
-  if (tab !== 'help' && !allowed.some((t) => t[0] === tab)) tab = allowed[0][0];
-  root.innerHTML = `<header><div class="in"><div class="logo">${esc(brandName[0] || '營')}</div><div class="grow"><b id="bn">${esc(brandName)}</b><small>${me.role === 'admin' ? '管理員' : '客服'} · ${esc(me.name)}</small></div><button class="q" id="helpBtn" aria-label="說明">?</button></div></header>
-  <main id="view">${skeleton}</main>
-  <nav><div class="in">${allowed.map((t) => `<button data-t="${t[0]}" class="${t[0] === tab ? 'on' : ''}">${svg(t[2])}${t[1]}</button>`).join('')}</div></nav>`;
-  $$('nav button').forEach((b) => b.onclick = async () => { if (!(await leaveOk())) return; tab = b.dataset.t; scrollTo(0, 0); render(); });
-  $('#helpBtn').onclick = async () => { if (!(await leaveOk())) return; state.helpFrom = tab; tab = 'help'; scrollTo(0, 0); render(); };
-  try { await VIEWS[tab]($('#view')); } catch (e) { $('#view').innerHTML = `<div class="card"><b>載入失敗</b><p class="mut">${esc(e.message)}</p></div>`; }
+  if (!me) return loginView();
+  const r = route(), tabs = tabsFor();
+  const ok = r.tab === 'help' || r.tab === 'setup' || tabs.some((t) => t[0] === r.tab);
+  if (!ok) { suppress = true; location.hash = '#/' + tabs[0][0]; return render(); }
+  if (!$('#view')) {
+    $('#app').innerHTML = `<header class="bar" id="bar"></header><main id="view"></main><nav class="tabs" aria-label="主選單"><div class="in" id="tabs"></div></nav>`;
+  }
+  $('#tabs').innerHTML = `<div class="brand"><span class="mark" style="width:28px;height:28px;margin:0;font-size:14px" id="bm">${esc(BRAND[0])}</span><span class="clip">${esc(BRAND)}</span></div>` +
+    tabs.map((t) => `<button class="tab" data-tab="${t[0]}" ${t[0] === r.tab ? 'aria-current="page"' : ''}>${svg(t[2])}<span>${t[1]}</span><span class="badge hide" data-badge="${t[0]}"></span></button>`).join('');
+  $('#view').innerHTML = skeleton();
+  try { await PAGES[r.tab]?.(r); } catch (e) { $('#view').innerHTML = errorState(e.message); }
+  window.scrollTo(0, 0); refreshBadges();
+}
+async function refreshBadges() {
+  try {
+    let d = 0, l = 0;
+    if (me.role === 'admin') { const x = await api('GET', '/dashboard'); d = x.pending_drafts; l = x.inquiries_pending; }
+    else l = (await api('GET', '/inquiries?status=pending')).length;
+    for (const [k, n] of [['posts', d], ['leads', l]]) { const b = $(`[data-badge="${k}"]`); if (b) { b.textContent = n > 99 ? '99+' : n; b.classList.toggle('hide', !n); } }
+  } catch { /* 徽章為次要資訊，失敗不打擾 */ }
 }
 
-function loginView(root) {
-  root.innerHTML = `<div class="login"><div class="card"><div class="logo" id="lg">營</div><h2 id="lt">登入後台</h2><p class="mut">請輸入管理員提供的帳號</p>
-  <label>帳號</label><input id="u" autocomplete="username" autocapitalize="none"><label>密碼</label><input id="p" type="password" autocomplete="current-password">
-  <div class="row"><button id="go">登入</button></div></div></div>`;
-  fetch('/api/public').then((r) => r.json()).then((d) => { if (d.name) { $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; } }).catch(() => {});
-  const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); me = null; await render(); });
-  $('#go').onclick = (e) => go(e.target); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
+/* ---------- global click delegation ---------- */
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-tab],[data-act],[data-go]'); if (!t) return;
+  if (t.dataset.tab) return go(t.dataset.tab);
+  if (t.dataset.go) return go(t.dataset.go);
+  const a = t.dataset.act;
+  if (a === 'back') return go(t.dataset.to);
+  if (a === 'help') return go('help');
+  if (a === 'retry') return render();
+});
+
+/* ---------- login ---------- */
+function loginView() {
+  $('#app').innerHTML = `<div class="login"><div class="mark" id="lg">營</div><h1 class="t-page" id="lt">登入後台</h1><p class="t-sub" style="margin:6px 0 24px">請使用管理員提供的帳號</p>
+  ${field('u', '帳號', input('u', '', 'autocomplete="username" autocapitalize="none" autocorrect="off"'))}${field('p', '密碼', input('p', '', 'type="password" autocomplete="current-password"'))}
+  <button class="btn block" id="go" style="margin-top:24px">登入</button></div>`;
+  fetch('/api/public').then((r) => r.json()).then((d) => { if (d.name) { BRAND = d.name; $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; } }).catch(() => {});
+  const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); me = null; $('#app').innerHTML = ''; await render(); });
+  $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
 }
 
+/* ======================================================================
+   首頁：現在需要處理什麼 → 今日摘要 → 快速操作 → 自動化 → 最近活動
+   ====================================================================== */
+const ACTION = { settings_update: '更新設定', post_approve: '核准貼文', post_generate: 'AI 生成貼文', post_edit: '編輯貼文', post_delete: '刪除貼文', post_retry: '重試發布', inquiry_status: '更新留資狀態', inquiry_delete: '刪除留資', line_config_update: '更新 LINE 接待設定', faq_create: '新增 FAQ', faq_update: '更新 FAQ', faq_delete: '刪除 FAQ', toggle: '切換自動化', integration_line: '設定 LINE 連線', integration_gemini: '設定 AI 連線', threads_connected: '連結 Threads', threads_disconnect: '中斷 Threads', threads_token_refreshed: 'Threads 授權自動續期', threads_deauthorize: 'Threads 解除授權', threads_delete: 'Threads 資料刪除', user_create: '新增帳號', user_update: '更新帳號', password_change: '變更密碼' };
+const rel = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.floor(m / 60)} 小時前` : fmt(iso); };
 
-// ---------------- 說明中心 ----------------
-const HELP = [
-  ['start', '🚀 第一次使用，照這 5 步', `<ol><li><b>設定 → 連線 → LINE：</b>貼上 Channel secret 與 access token，按「驗證並儲存」。</li><li><b>設定 → 連線 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → 連線 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE 頁：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」開關。</li></ol><p class="hint">首頁的「開通進度」會幫你打勾，沒完成的項目旁邊有按鈕可直接前往。</p>`],
-  ['line', '💬 如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 Provider → 你的 channel。</li><li><b>Basic settings</b> 分頁複製 <b>Channel secret</b>（32 位英數字）。</li><li><b>Messaging API</b> 分頁按 <b>Issue</b> 產生 <b>Channel access token (long-lived)</b> 並複製。</li><li>貼到後台「設定 → 連線 → LINE」，按「驗證並儲存」。系統會自動設定 Webhook 並測試。</li><li>回到 LINE Developers 的 Messaging API 分頁，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，把<b>「自動回應訊息」與「加入好友的歡迎訊息」關閉</b>，否則會和系統重複回覆。</li></ol><div class="callout warn">憑證請只貼在這個後台，不要貼到聊天或社群。換新憑證請回到 LINE Developers 重新核發後再貼。</div>`],
-  ['gemini', '🤖 如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b>，複製。</li><li>貼到「設定 → 連線 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p class="hint">AI 只用來寫 Threads 貼文，不會讀取顧客資料。每日生成次數與每月額度有上限，用完會自動停止，不會多收費。</p>`],
-  ['threads', '🧵 如何連結 Threads', `<ol><li>到「設定 → 連線 → Threads」按<b>連結 Threads</b>。</li><li>在 Threads 頁面登入要發文的帳號並按同意。</li><li>完成後會自動回到後台，顯示「已連結 @帳號」。</li></ol><div class="callout">授權約 60 天到期，系統會在到期前自動續期，不需要處理。若首頁出現「授權已失效」，再按一次「連結 Threads」即可。</div><div class="callout warn">若按下後出現「無法使用此應用程式」之類訊息，代表帳號還沒被加為測試人員，請聯絡開發者。</div>`],
-  ['modes', '📝 三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接依排程發布，不經人工。適合低風險內容。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，你核准後才會發。</li><li><b>C 指定主題：</b>依「本週主題」產生文章；可選擇是否需要審核。</li></ul><div class="callout bad">金融、放款等受監管產業，系統會<b>強制人工審核</b>，不論選哪個模式都不會自動發布。</div><p class="hint">內容檢查會擋下「保證核貸」「免審」這類字眼。被擋的草稿需要先修改才能核准。</p>`],
-  ['leads', '📥 顧客留資怎麼運作', `<ol><li>顧客在 LINE 點「立即詢問」→ 看到隱私告知 → 輸入「同意」。</li><li>依序回答服務類型與表單問題 → 確認送出。</li><li>你在後台「留資」頁看到新紀錄（未處理）。</li><li>聯絡完顧客後，按「標記為已處理」。</li></ol><p class="hint">顧客可以隨時輸入「查詢我的資料」或「刪除我的資料」。留資超過保存期限（預設 180 天）會自動刪除。</p>`],
-  ['human', '🙋 真人接手怎麼運作', `<ul><li>顧客點「聯絡專人」或輸入「真人／客服」後，<b>系統暫停對該顧客的自動回覆</b>。</li><li>請到 <b>LINE Official Account Manager</b> 的聊天介面親自回覆。</li><li>顧客輸入「選單」或滿 24 小時，自動回覆才會恢復。</li></ul>`],
-  ['faq', '🧰 常見問題排除', `<ul><li><b>LINE 傳訊息沒有回應：</b>① 首頁「LINE 自動接待」是否打開 ② Developers Console 的 Use webhook 是否開啟 ③ 設定 → 連線 → LINE 按「測試連線」。</li><li><b>LINE 回了兩次：</b>到 Official Account Manager 關閉自動回應訊息與歡迎訊息。</li><li><b>草稿「內容檢查未通過」：</b>貼文含有禁止宣稱或禁用詞，請改寫後再核准。</li><li><b>開不了自動發文：</b>需要先連好 Gemini 與 Threads。</li><li><b>貼文卡在「待核對」：</b>系統正在向 Threads 確認是否已發出，會自動處理，請勿重複建立。</li><li><b>貼文「失敗」：</b>可按「重試」；若一直失敗請查看錯誤訊息或聯絡開發者。</li><li><b>忘記密碼：</b>請管理員到「設定 → 帳號」重設，或聯絡開發者。</li></ul>`],
-  ['safe', '🔒 安全小提醒', `<ul><li>第一次登入後請立刻改密碼（設定 → 帳號 → 變更我的密碼）。</li><li>客服人員請用「客服」角色，只能看與處理留資。</li><li>離職或不再需要的帳號，請在「設定 → 帳號」把開關關掉。</li><li>不要把憑證、密碼貼到聊天軟體。</li></ul>`],
-];
-async function helpView(v) {
-  v.innerHTML = `<button class="back" id="bk">‹ 返回</button><div class="card help"><h2>說明中心</h2><p class="mut">點開各項查看步驟。</p>
-  ${HELP.map(([id, t, body]) => `<details id="h-${id}" ${state.helpOpen === id ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`).join('')}</div>`;
-  $('#bk').onclick = () => { tab = state.helpFrom || 'home'; render(); };
-  const el = $('#h-' + state.helpOpen); if (el && state.helpJump) setTimeout(() => el.scrollIntoView({ block: 'start' }), 50);
-  state.helpJump = false;
-}
-const openHelp = (id) => { state.helpOpen = id; state.helpJump = true; state.helpFrom = tab; tab = 'help'; render(); };
-
-// ---------------- 首頁 ----------------
-async function homeView(v) {
-  const [d, ig, st] = await Promise.all([api('GET', '/dashboard'), api('GET', '/integrations'), api('GET', '/settings')]);
-  TZ = st.brand.timezone;
-  const qs = new URLSearchParams(location.search);
-  if (qs.get('threads') === 'connected') { toast('Threads 已連結成功', 'ok'); history.replaceState(null, '', '/'); }
-  else if (qs.get('threads') === 'error') { toast('Threads 連結失敗：' + (qs.get('reason') || ''), 'bad'); history.replaceState(null, '', '/'); }
-  const s = st.settings;
-  const steps = [
-    ['填寫品牌資料', !!(st.brand.description && s.services && !s.services.startsWith('（')), '設定', 'settings', 'start'],
-    ['設定 LINE 連線', ig.line.configured, '去設定', 'settings', 'line'],
-    ['設定 AI（Gemini）', ig.gemini.configured, '去設定', 'settings', 'gemini'],
-    ['連結 Threads 帳號', ig.threads.configured, ig.threads.oauth_available ? '連結' : '設定', 'settings', 'threads'],
-    ['編輯 LINE 服務說明', !!(s.line_ready), '編輯', 'line', 'start'],
+async function getSetup() {
+  const [ig, st] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings')]);
+  TZ = st.brand.timezone; BRAND = st.brand.name;
+  const s = st.settings, steps = [
+    { id: 'brand', t: '填寫品牌資料', d: '品牌介紹與服務內容，AI 會依此撰寫貼文', ok: !!(st.brand.description && s.services && !s.services.startsWith('（')), to: 'settings/brand', help: 'start' },
+    { id: 'line', t: '連接 LINE 官方帳號', d: '貼上 Channel secret 與 access token', ok: ig.line.configured, to: 'settings/line', help: 'line' },
+    { id: 'gemini', t: '連接 AI（Gemini）', d: '貼上 API key', ok: ig.gemini.configured, to: 'settings/gemini', help: 'gemini' },
+    { id: 'threads', t: '連結 Threads 帳號', d: '授權後即可自動發文', ok: ig.threads.configured, to: 'settings/threads', help: 'threads' },
+    { id: 'linecontent', t: '編輯 LINE 服務說明', d: '顧客點「了解服務」時看到的內容', ok: !!s.line_ready, to: 'line/content', help: 'start' },
   ];
-  const done = steps.filter((x) => x[1]).length;
-  const warn = d.threads_status === 'token_invalid' ? '<p><span class="chip bad">Threads 授權已失效</span> 請到「設定」重新連結</p>' : '';
-  v.innerHTML = `
-  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>系統狀態</h2><span class="chip ${d.healthy ? 'ok' : 'bad'}">${d.healthy ? '運作正常' : '需要處理'}</span></div>${warn}
-  <div class="kpi" style="margin-top:12px"><div><span>今日發文</span><b>${d.posted_today}</b></div><div><span>待審核草稿</span><b>${d.pending_drafts}</b></div>
-  <div><span>今日留資</span><b>${d.inquiries_today}</b></div><div><span>未處理留資</span><b>${d.inquiries_pending}</b></div></div>
-  <p class="mut" style="margin-top:10px">今日 AI 生成 ${d.gen_today} / ${d.gen_limit}</p></div>
-  ${done < steps.length ? `<div class="card"><h2>開通進度 ${done}/${steps.length}</h2><div class="bar"><i style="width:${done / steps.length * 100}%"></i></div>
-  ${steps.map((x, i) => `<div class="step"><div class="dot ${x[1] ? 'ok' : ''}">${x[1] ? '✓' : i + 1}</div><div class="t"><b>${x[0]}</b>${x[1] ? '' : `<a href="#" class="mut" data-help="${x[4]}">怎麼做？</a>`}</div>${x[1] ? '' : `<button class="sec" data-go="${x[3]}">${x[2]}</button>`}</div>`).join('')}</div>` : ''}
-  <div class="card"><h2>自動化開關</h2>
-  <div class="sw"><div><b>自動發文</b><span class="mut">${d.auto_post_enabled ? '依排程生成並發布' : '已暫停，不會生成也不會發布'}</span></div><label class="toggle"><input type="checkbox" id="t1" ${d.auto_post_enabled ? 'checked' : ''}><i></i></label></div>
-  <div class="sw"><div><b>LINE 自動接待</b><span class="mut">${d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停，不會自動回覆'}</span></div><label class="toggle"><input type="checkbox" id="t2" ${d.line_auto_reply_enabled ? 'checked' : ''}><i></i></label></div></div>
-  <div class="row"><button class="sec" data-go="leads">查看留資 ${d.inquiries_pending ? `（${d.inquiries_pending} 筆未處理）` : ''}</button></div>`;
-  $$('[data-go]', v).forEach((b) => b.onclick = () => { tab = b.dataset.go; render(); });
-  $$('[data-help]', v).forEach((a) => a.onclick = (e) => { e.preventDefault(); openHelp(a.dataset.help); });
+  return { ig, st, steps, done: steps.filter((x) => x.ok).length };
+}
+
+async function homePage() {
+  const [d, setup, posts, audit] = await Promise.all([api('GET', '/dashboard'), getSetup(), api('GET', '/posts'), api('GET', '/audit')]);
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('threads')) { qs.get('threads') === 'connected' ? toast('Threads 已連結成功', 'ok') : toast('Threads 連結失敗：' + (qs.get('reason') || '請重試'), 'bad'); history.replaceState(null, '', '/'); }
+  const failed = posts.filter((p) => p.status === 'failed' || p.status === 'gen_failed').length, unknown = posts.filter((p) => p.status === 'unknown').length;
+  const next = posts.filter((p) => p.status === 'scheduled' && p.scheduled_at && new Date(p.scheduled_at) > new Date()).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))[0];
+  const todo = [];
+  if (d.threads_status === 'token_invalid') todo.push({ dot: 'bad', t: 'Threads 授權已失效', s: '自動發文已暫停，請重新連結', to: 'settings/threads' });
+  if (failed) todo.push({ dot: 'bad', t: `${failed} 則貼文處理失敗`, s: '查看原因並重試', to: 'posts', seg: 'hist' });
+  if (unknown) todo.push({ dot: 'warn', t: `${unknown} 則貼文狀態待核對`, s: '系統正在向 Threads 確認，通常幾分鐘內自動完成', to: 'posts', seg: 'queue' });
+  if (d.pending_drafts) todo.push({ dot: 'gold', t: `${d.pending_drafts} 則草稿待審核`, s: '核准後才會依排程發布', to: 'posts', seg: 'draft' });
+  if (d.inquiries_pending) todo.push({ dot: 'gold', t: `${d.inquiries_pending} 筆留資尚未處理`, s: '聯絡顧客後標記為已處理', to: 'leads', lead: 'pending' });
+  const pct = d.gen_limit ? d.gen_today / d.gen_limit : 0;
+  if (pct >= 1) todo.push({ dot: 'warn', t: '今日 AI 生成額度已用完', s: '明天自動恢復；既有草稿不受影響', to: 'posts' });
+  else if (pct >= 0.8) todo.push({ dot: 'warn', t: `今日 AI 額度即將用完（${d.gen_today}/${d.gen_limit}）`, s: '', to: 'posts' });
+  bar({ title: BRAND, dot: d.healthy ? 'ok' : 'bad', sub: d.healthy ? '' : '需要處理' });
+  const m = (n, l, bad) => `<div><b class="${n === 0 ? 'z' : bad ? 'bad' : ''}">${n}</b><span>${l}</span></div>`;
+  setView(`
+    ${setup.done < setup.steps.length ? (() => { const nx = setup.steps.find((x) => !x.ok); return `<div class="banner"><div class="main"><div class="t-label">開通進度 ${setup.done}/${setup.steps.length}</div><div class="t-sub">下一步：${esc(nx.t)}</div></div><button class="btn sm" data-go="setup">繼續設定</button></div>`; })() : ''}
+    <section>${sec('今日')}
+      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${m(d.inquiries_today, '新留資')}${m(d.inquiries_pending, '未處理')}</div>
+      <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停'}</p></section>
+    <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
+    <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button><button class="btn sec" data-go="leads">查看留資</button></section>
+    <section>${sec('自動化')}<div class="list">
+      ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程生成並發布' : '已暫停', end: sw('t1', d.auto_post_enabled, '自動發文') })}
+      ${row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') })}</div></section>
+    <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 5).map((a) => row({ go: false, title: esc(ACTION[a.action] || a.action), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
+      <p class="t-sub" style="margin-top:12px">今日 AI 生成 ${d.gen_today}/${d.gen_limit}${audit.length > 5 ? ' · <a href="#/settings/audit">全部紀錄</a>' : ''}</p></section>`);
+  S.todo = todo;
+  $$('[data-act=todo]').forEach((b) => b.onclick = () => { const x = todo[+b.dataset.id]; if (x.seg) S.postSeg = x.seg; if (x.lead) { S.leadStatus = x.lead; } go(x.to); });
+  $('[data-act=gen]').onclick = openGenerate;
   const flip = (key, label) => async (e) => {
     const on = e.target.checked;
-    if (!on && !(await confirmSheet(`確定要暫停「${label}」？`, '暫停', false))) { e.target.checked = true; return; }
-    try { await api('POST', '/pause', { [key]: on }); toast(on ? `已開啟${label}` : `已暫停${label}`, 'ok'); }
-    catch (err) { toast(err.message, 'bad'); }
-    render(); // 失敗時會還原開關狀態
-  };
-  $('#t1').onchange = flip('auto_post_enabled', '自動發文');
-  $('#t2').onchange = flip('line_auto_reply_enabled', 'LINE 自動接待');
-}
-
-// ---------------- 貼文 ----------------
-const STATUS = { draft: ['待審核', 'warn'], scheduled: ['已排程', 'pri'], publishing: ['發布中', 'pri'], published: ['已發布', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
-async function postsView(v) {
-  const [{ settings: s, brand }, posts] = await Promise.all([api('GET', '/settings'), api('GET', '/posts')]);
-  TZ = brand.timezone;
-  const groups = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
-  const seg = state.postSeg;
-  const card = (p) => `<div class="post" data-id="${p.id}"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="chip ${STATUS[p.status]?.[1] || ''}">${STATUS[p.status]?.[0] || p.status}</span><span class="mut">${fmt(p.published_at || p.scheduled_at)}</span></div>
-    ${p.status === 'draft' ? `<textarea>${esc(p.content)}</textarea><div class="hint">${[...p.content].length} / 500 字</div>` : `<pre>${esc(p.content)}</pre>`}
-    ${p.error_message ? `<p class="mut" style="color:var(--bad)">${esc(p.error_message)}</p>` : ''}
-    <div class="row" style="margin-top:8px">${p.status === 'draft' ? '<button class="sec" data-a="save">儲存</button><button data-a="ok">核准發布</button><button class="bad" data-a="del">刪除</button>' : ''}
-    ${p.status === 'failed' ? '<button class="sec" data-a="retry">重試</button>' : ''}${p.status === 'scheduled' ? '<button class="bad" data-a="del">取消排程</button>' : ''}</div></div>`;
-  v.innerHTML = `
-  <div class="seg"><button data-s="draft" class="${seg === 'draft' ? 'on' : ''}">待審核 ${groups.draft.length}</button><button data-s="queue" class="${seg === 'queue' ? 'on' : ''}">排程 ${groups.queue.length}</button><button data-s="hist" class="${seg === 'hist' ? 'on' : ''}">歷史</button></div>
-  <div class="card">${groups[seg].map(card).join('') || empty(seg === 'draft' ? '沒有待審核的草稿' : '目前沒有項目')}</div>
-  <details class="card" open><summary>立即生成草稿</summary><label>指定主題（可空白，由 AI 依品牌設定發想）</label><input id="gt" placeholder="例如：本週活動、常見問題">
-    <div class="row"><button id="gen">生成一則草稿</button></div><p class="mut">生成後會先放進待審核，核准後才會發布。</p></details>
-  <details class="card" data-form><summary>發文設定</summary>
-    ${s.regulated ? '<p class="chip warn">受監管產業：所有貼文強制人工審核</p>' : ''}
-    <label>發文模式</label><select id="mode"><option value="A">A　全自動（通過內容檢查才自動發）</option><option value="B">B　審核後發布</option><option value="C">C　指定主題生成</option></select><div class="hint" id="modeHint"></div>
-    <label>本週主題（模式 C 使用）</label><textarea id="topic"></textarea>
-    <div class="sw"><div><b>模式 C 需審核</b></div><label class="toggle"><input type="checkbox" id="rr"><i></i></label></div>
-    <label>每日發文數（1–5）</label><input id="ppd" type="number" min="1" max="5" inputmode="numeric"><div class="hint">發布時間的數量要和每日發文數對應，例如 2 篇請填 2 個時間。</div>
-    <label>發布時間（24 小時制，逗號分隔，依序對應每篇）</label><input id="times" placeholder="10:00,14:00,20:00" inputmode="numeric"><div class="hint">時間以品牌時區計算，格式 <b>HH:MM</b>，例如 <b>09:30</b>。</div>
-    <label>品牌語氣</label><input id="tone"><label>內容主題（逗號分隔）</label><input id="tops"><label>禁用詞（逗號分隔）</label><input id="ban">
-    <label>CTA 文字</label><input id="cta"><label>LINE 加好友網址（https）</label><input id="url" inputmode="url" placeholder="https://line.me/R/ti/p/@你的ID"><div class="hint">貼文結尾會自動附上「CTA 文字 + 這個網址」。請先用手機點開確認能加入好友。</div>
-    <div class="row"><button id="save">儲存發文設定</button></div></details>`;
-  $('#mode').value = s.posting_mode; $('#topic').value = s.weekly_topic; $('#rr').checked = s.require_review; $('#ppd').value = s.posts_per_day;
-  $('#times').value = s.publishing_times.join(','); $('#tone').value = s.content_tone; $('#tops').value = s.content_topics.join(','); $('#ban').value = s.banned_words.join(',');
-  $('#cta').value = s.cta_text; $('#url').value = s.line_add_url;
-  const MODE = { A: '<b>全自動：</b>通過內容檢查就直接發，不經人工。', B: '<b>審核後發布：</b>先產生草稿，你核准才發。建議使用。', C: '<b>指定主題：</b>依「本週主題」產生；可選擇是否需審核。' };
-  const showMode = () => { $('#modeHint').innerHTML = (MODE[$('#mode').value] || '') + (s.regulated ? ' <b>（受監管產業已強制人工審核）</b>' : ''); };
-  $('#mode').onchange = showMode; showMode();
-  $$('.seg button', v).forEach((b) => b.onclick = () => { state.postSeg = b.dataset.s; render(); });
-  $('#save').onclick = async (e) => {
-    const t = list($('#times').value).map((x) => x.replace('：', ':')); $('#times').value = t.join(',');
-    const url = $('#url').value.trim(); $('#url').value = url;
-    if (!check([
-      [$('#ppd'), !(+$('#ppd').value >= 1 && +$('#ppd').value <= 5), '每日發文數需為 1 到 5'],
-      [$('#times'), !t.length || t.some((x) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)), '發布時間格式需為 HH:MM，例如 09:30,14:00'],
-      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`],
-      [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭'],
-    ])) return;
-    if (url && !/line\.me/.test(url) && !(await confirmSheet('這個網址看起來不是 LINE 的加好友連結，確定要使用？', '確定使用', false))) return;
-    if ($('#mode').value === 'A' && s.posting_mode !== 'A' && !s.regulated && !(await confirmSheet('全自動模式不會經過人工審核就直接發布，確定要切換？', '確定切換', false))) return;
-    const r = await act(e.target, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value,
-    publishing_times: list($('#times').value), content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url }), '已儲存');
-    if (r) dirty = false;
-  };
-  $('#gen').onclick = (e) => act(e.target, async () => { const r = await api('POST', '/posts/generate', { topic: $('#gt').value }); toast(r.issues?.length ? '已生成，但內容檢查有警示，請修改' : '草稿已生成', r.issues?.length ? '' : 'ok'); state.postSeg = 'draft'; render(); });
-  $$('.post button', v).forEach((b) => b.onclick = () => act(b, async () => {
-    const box = b.closest('.post'), id = box.dataset.id, a = b.dataset.a, content = $('textarea', box)?.value;
-    if (a === 'save') { await api('PUT', '/posts/' + id, { content }); toast('已儲存', 'ok'); return; }
-    if (a === 'ok') {
-      if ([...content].length > 500) throw new Error('超過 500 字，Threads 會拒收，請先縮短');
-      await api('PUT', '/posts/' + id, { content });
-      const r = await api('POST', `/posts/${id}/approve`, {});
-      toast(r.warning || '已核准，將依排程發布', r.warning ? '' : 'ok');
-    }
-    if (a === 'del') { if (!(await confirmSheet('確定要刪除這則貼文？'))) return; await api('DELETE', '/posts/' + id); }
-    if (a === 'retry') await api('POST', `/posts/${id}/retry`, {});
+    if (!on && !(await confirmSheet(`暫停「${label}」？`, '暫停', false))) { e.target.checked = true; return; }
+    try { await api('POST', '/pause', { [key]: on }); toast(on ? `已開啟${label}` : `已暫停${label}`, 'ok'); } catch (err) { toast(err.message, 'bad'); }
     render();
-  }));
-}
-
-// ---------------- LINE ----------------
-async function lineView(v) {
-  const [c, faq] = await Promise.all([api('GET', '/line-config'), api('GET', '/faq')]);
-  v.innerHTML = `
-  <div class="card" data-form><h2>接待內容</h2><p class="mut">顧客在 LINE 看到的文字。留空會使用預設值。<a href="#" data-help="line">需要幫助？</a></p>
-  <label>歡迎訊息</label><textarea id="welcome"></textarea>
-  <label>選單按鈕名稱</label><div class="row" style="margin-top:0"><input id="m1" aria-label="了解服務"><input id="m2" aria-label="立即詢問"><input id="m3" aria-label="聯絡專人"></div>
-  <label>服務說明（請放已核准的內容）</label><textarea id="info"></textarea><label>營業時間</label><input id="hours">
-  <label>真人接手提示</label><textarea id="human"></textarea><label>隱私告知（需含「輸入同意」的指示）</label><div class="hint">顧客必須輸入「<b>同意</b>」才能繼續，請保留這個指示。</div><textarea id="priv"></textarea>
-  <label>完成訊息</label><input id="done"><label>未匹配時的回覆</label><input id="fb">
-  <h3>留資表單</h3><label>服務類型（逗號分隔）</label><input id="svc">
-  <label>欄位（每行一個：代號｜提問｜必填 1/0｜遇到此答案則轉專人）</label><div class="hint">範例：<code>need｜請簡述您的需求｜1</code><br>代號需為英文小寫（可含數字與底線），不可重複。請勿設計收集身分證、銀行帳密等敏感資料的欄位。</div><textarea id="fields" style="min-height:150px;font-size:14px"></textarea>
-  <div class="row"><button id="save">儲存</button></div></div>
-  <div class="card"><h2>FAQ 固定問答</h2><p class="mut">關鍵字用逗號分隔；數字越大越優先比對。</p>
-  ${faq.map((f) => `<details data-f="${f.id}"><summary>${esc(f.keyword)} ${f.enabled ? '' : '<span class="chip">停用</span>'}</summary>
-  <label>關鍵字</label><input class="k" value="${esc(f.keyword)}"><label>固定答案</label><textarea class="r">${esc(f.response)}</textarea>
-  <label>優先順序</label><input class="p" type="number" value="${f.priority}"><div class="sw"><b>啟用</b><label class="toggle"><input class="e" type="checkbox" ${f.enabled ? 'checked' : ''}><i></i></label></div>
-  <div class="row"><button class="sec" data-a="s">儲存</button><button class="bad" data-a="d">刪除</button></div></details>`).join('') || empty('還沒有 FAQ')}
-  <h3>新增 FAQ</h3><input id="nk" placeholder="關鍵字，例如：營業時間,幾點"><label>固定答案</label><textarea id="nr"></textarea><div class="row"><button id="add">新增</button></div></div>`;
-  const set = (id, x) => $('#' + id).value = x ?? '';
-  set('welcome', c.welcome); set('m1', c.menu.info); set('m2', c.menu.inquiry); set('m3', c.menu.human); set('info', c.serviceInfo); set('hours', c.businessHours);
-  set('human', c.humanNotice); set('priv', c.privacyNotice); set('done', c.completeMessage); set('fb', c.fallback); set('svc', c.services.join(','));
-  set('fields', c.fields.map((f) => [f.key, f.label, f.required ? 1 : 0, f.blockIf || ''].join('｜')).join('\n'));
-  $$('[data-help]', v).forEach((a) => a.onclick = (e) => { e.preventDefault(); openHelp(a.dataset.help); });
-  $('#save').onclick = async (e) => {
-    const rows = $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => l.split(/[｜|]/).map((x) => x.trim()));
-    const keys = rows.map((r) => r[0]);
-    const bad = rows.findIndex((r) => !/^[a-z][a-z0-9_]{0,20}$/.test(r[0]) || !r[1]);
-    if (!check([
-      [$('#priv'), !$('#priv').value.includes('同意'), '隱私告知需包含「同意」的指示，顧客才知道要輸入什麼'],
-      [$('#svc'), !list($('#svc').value).length, '至少需要一個服務類型'],
-      [$('#fields'), !rows.length, '至少需要一個表單欄位'],
-      [$('#fields'), bad >= 0, `第 ${bad + 1} 行格式不對：需要「英文小寫代號｜提問文字」`],
-      [$('#fields'), new Set(keys).size !== keys.length, '欄位代號不可重複'],
-      [$('#m1'), new Set([$('#m1').value, $('#m2').value, $('#m3').value]).size < 3 || [$('#m1'), $('#m2'), $('#m3')].some((x) => !x.value.trim()), '三個選單名稱都需填寫且不能相同'],
-    ])) return;
-    const r = await act(e.target, () => api('PUT', '/line-config', {
-    welcome: $('#welcome').value, menu: { info: $('#m1').value, inquiry: $('#m2').value, human: $('#m3').value }, serviceInfo: $('#info').value, businessHours: $('#hours').value,
-    humanNotice: $('#human').value, privacyNotice: $('#priv').value, completeMessage: $('#done').value, fallback: $('#fb').value, services: list($('#svc').value),
-    fields: $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => { const [key, label, req, blockIf] = l.split(/[｜|]/); return { key: key.trim(), label: (label || '').trim(), required: (req || '1').trim() !== '0', ...((blockIf || '').trim() ? { blockIf: blockIf.trim() } : {}) }; }),
-  }), '已儲存');
-    if (r) dirty = false;
   };
-  $$('[data-f] button', v).forEach((b) => b.onclick = () => act(b, async () => {
-    const box = b.closest('[data-f]'), id = box.dataset.f;
-    if (b.dataset.a === 'd') { if (!(await confirmSheet('確定刪除這則 FAQ？'))) return; await api('DELETE', '/faq/' + id); }
-    else { await api('PUT', '/faq/' + id, { keyword: $('.k', box).value, response: $('.r', box).value, priority: +$('.p', box).value, enabled: $('.e', box).checked }); toast('已儲存', 'ok'); }
-    render();
-  }));
-  $('#add').onclick = (e) => act(e.target, async () => { await api('POST', '/faq', { keyword: $('#nk').value, response: $('#nr').value }); toast('已新增', 'ok'); render(); });
+  $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2').onchange = flip('line_auto_reply_enabled', 'LINE 自動接待');
 }
 
-// ---------------- 留資 ----------------
-const LABEL = { name: '稱呼', need: '需求', contact: '聯絡方式', extra: '補充', adult: '年滿 18 歲' };
-async function leadsView(v) {
-  const q = new URLSearchParams(); if (state.leadStatus) q.set('status', state.leadStatus); if (state.leadFrom) q.set('from', state.leadFrom);
-  const rows = await api('GET', '/inquiries?' + q);
-  v.innerHTML = `<div class="seg"><button data-s="" class="${!state.leadStatus ? 'on' : ''}">全部</button><button data-s="pending" class="${state.leadStatus === 'pending' ? 'on' : ''}">未處理</button><button data-s="done" class="${state.leadStatus === 'done' ? 'on' : ''}">已處理</button></div>
-  <div class="card" style="padding:10px 14px"><label style="margin:0 0 6px">從這天起</label><input id="ff" type="date"></div>
-  ${rows.map((r) => `<div class="card lead"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>${esc(r.answers.name || r.display_name || '（未填）')}</b><span class="chip ${r.handling_status === 'done' ? 'ok' : 'warn'}">${r.handling_status === 'done' ? '已處理' : '未處理'}</span></div>
-  <p class="mut">${fmt(r.created_at)} · ${esc(r.service || '')}</p>
-  <dl>${Object.entries(r.answers).filter(([k, x]) => k !== 'name' && x).map(([k, x]) => `<dt>${esc(LABEL[k] || k)}</dt><dd>${esc(x)}</dd>`).join('')}${r.line_user_id ? `<dt>LINE ID</dt><dd><code>${esc(r.line_user_id)}</code></dd>` : ''}</dl>
-  <div class="row"><button class="sec" data-id="${r.id}" data-to="${r.handling_status === 'done' ? 'pending' : 'done'}">標記為${r.handling_status === 'done' ? '未處理' : '已處理'}</button>${me.role === 'admin' ? `<button class="bad grow" style="flex:0 0 auto;min-width:0" data-del="${r.id}">刪除</button>` : ''}</div></div>`).join('') || `<div class="card">${empty('沒有符合條件的留資')}</div>`}`;
-  $('#ff').value = state.leadFrom; $('#ff').onchange = (e) => { state.leadFrom = e.target.value; render(); };
-  $$('.seg button', v).forEach((b) => b.onclick = () => { state.leadStatus = b.dataset.s; render(); });
-  $$('[data-to]', v).forEach((b) => b.onclick = () => act(b, async () => { await api('PATCH', '/inquiries/' + b.dataset.id, { handling_status: b.dataset.to }); render(); }));
-  $$('[data-del]', v).forEach((b) => b.onclick = () => act(b, async () => { if (!(await confirmSheet('永久刪除這筆留資？無法復原。'))) return; await api('DELETE', '/inquiries/' + b.dataset.del); render(); }));
-}
-
-// ---------------- 設定 ----------------
-async function settingsView(v) {
-  const [ig, st, users, logs] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/users'), api('GET', '/audit')]);
-  const badge = (ok) => `<span class="chip ${ok ? 'ok' : ''}">${ok ? '已連線' : '未設定'}</span>`;
-  v.innerHTML = `
-  <div class="card"><h2>連線</h2><p class="mut">憑證會加密保存，畫面不會顯示。</p>
-  <details open><summary><span>Threads ${badge(ig.threads.configured)}</span></summary>
-    ${ig.threads.configured ? `<p>已連結 <b>@${esc(ig.threads.username || '')}</b>${ig.threads.expires_at ? `<br><span class="mut">授權將於 ${fmt(ig.threads.expires_at)} 前自動續期</span>` : ''}</p>
-      <div class="row"><button class="sec" data-t="threads">測試連線</button><button class="bad" id="thOff">中斷連結</button></div>`
-    : `<p class="mut">按下按鈕後會前往 Threads 授權，完成後自動回到這裡。</p><div class="row"><button id="thOn" ${ig.threads.oauth_available ? '' : 'disabled'}>連結 Threads</button></div>${ig.threads.oauth_available ? '' : '<p class="mut">系統尚未設定 Threads App，請聯絡開發者。</p>'}`}</details>
-  <details><summary><span>LINE ${badge(ig.line.configured)}</span></summary>
-    ${ig.line.configured ? `<p>機器人：<b>${esc(ig.line.name || '已設定')}</b></p>` : ''}
-    <label>Channel secret</label><input id="lsec" autocomplete="off" autocapitalize="none" placeholder="${ig.line.configured ? '已設定，重新輸入以更換' : '32 位英數字'}"><div class="hint">位置：LINE Developers → Basic settings。<a href="#" data-help="line">看圖文步驟</a></div>
-    <label>Channel access token（long-lived）</label><input id="ltok" autocomplete="off" autocapitalize="none"><div class="hint">位置：Messaging API 分頁 → Issue。請貼上完整內容，不要加空格或換行。</div>
-    <p class="mut">儲存時會自動驗證並把 Webhook 設為：<br><code>${esc(ig.line.webhook_url)}</code></p>
-    <div class="row"><button id="lsave">驗證並儲存</button>${ig.line.configured ? '<button class="sec" data-t="line">測試連線</button>' : ''}</div></details>
-  <details><summary><span>AI（Gemini） ${badge(ig.gemini.configured)}</span></summary>
-    <label>API key</label><input id="gkey" autocomplete="off" autocapitalize="none" placeholder="${ig.gemini.configured ? '已設定，重新輸入以更換' : ''}"><div class="hint"><a href="#" data-help="gemini">如何取得？</a></div>
-    <div class="row"><button id="gsave">驗證並儲存</button>${ig.gemini.configured ? '<button class="sec" data-t="gemini">測試連線</button>' : ''}</div></details></div>
-
-  <div class="card" data-form><h2>品牌資訊</h2><label>品牌名稱</label><input id="bname"><label>品牌介紹（供 AI 撰寫貼文，只放公開資訊）</label><textarea id="bdesc"></textarea>
-  <label>產品與服務</label><textarea id="bsvc"></textarea><label>目標受眾</label><input id="baud"><label>時區</label><input id="btz"><div class="hint">例如 <b>Asia/Taipei</b>。發布時間與「今日」的計算都依這個時區。</div>
-  <div class="row"><button id="bsave">儲存</button></div></div>
-
-  <div class="card"><h2>帳號</h2>${users.map((u) => `<div class="sw"><div><b>${esc(u.username)}</b><span class="mut">${u.role === 'admin' ? '管理員' : '客服'}${u.username === me.name ? ' · 你' : ''}</span></div>
-    ${u.username === me.name ? '' : `<label class="toggle"><input type="checkbox" data-u="${u.id}" ${u.enabled ? 'checked' : ''}><i></i></label>`}</div>`).join('')}
-  <details><summary>新增帳號</summary><label>帳號</label><input id="nu" autocapitalize="none"><label>角色</label><select id="nr2"><option value="staff">客服（只能處理留資）</option><option value="admin">管理員</option></select>
-  <label>初始密碼（至少 10 字元）</label><input id="np" type="password" autocomplete="new-password"><div class="row"><button id="nadd">建立帳號</button></div></details>
-  <details><summary>變更我的密碼</summary><label>目前密碼</label><input id="pc" type="password" autocomplete="current-password"><label>新密碼（至少 10 字元）</label><input id="pn" type="password" autocomplete="new-password">
-  <div class="row"><button id="pchg">變更密碼</button></div></details></div>
-
-  <div class="card"><h2>操作紀錄</h2>${logs.map((l) => `<div class="step" style="padding:8px 0"><div class="t"><b style="font-size:14px">${esc(l.action)}</b><span class="mut">${esc(l.actor || '系統')} · ${fmt(l.created_at)}</span></div></div>`).join('') || empty('尚無紀錄')}</div>
-  <p class="mut" style="text-align:center"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p>
-  <div class="row"><button class="sec" id="out">登出</button></div>`;
-  $('#bname').value = st.brand.name; $('#bdesc').value = st.brand.description; $('#bsvc').value = st.settings.services; $('#baud').value = st.settings.audience; $('#btz').value = st.brand.timezone;
-  $$('[data-help]', v).forEach((a) => a.onclick = (e) => { e.preventDefault(); openHelp(a.dataset.help); });
-  const th = $('#thOn'); if (th) th.onclick = (e) => act(e.target, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
-  const off = $('#thOff'); if (off) off.onclick = (e) => act(e.target, async () => { if (!(await confirmSheet('中斷 Threads 連結？自動發文將無法發布。'))) return; await api('DELETE', '/integrations/threads'); render(); });
-  $$('[data-t]', v).forEach((b) => b.onclick = () => act(b, async () => { const r = await api('POST', '/integrations/test', { target: b.dataset.t }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
-  $('#lsave').onclick = async (e) => {
-    $('#lsec').value = $('#lsec').value.replace(/\s+/g, ''); $('#ltok').value = $('#ltok').value.replace(/\s+/g, '');
-    if (!check([[$('#lsec'), !/^[0-9a-fA-F]{32}$/.test($('#lsec').value), 'Channel secret 應為 32 位英數字'], [$('#ltok'), $('#ltok').value.length < 50, 'Access token 看起來不完整，請重新複製']])) return;
-    await act(e.target, async () => {
-    const r = await api('POST', '/integrations/line', { channel_secret: $('#lsec').value, channel_access_token: $('#ltok').value });
-    toast(r.webhook_verified ? `LINE 已連線（${r.bot}），Webhook 驗證通過` : `已儲存（${r.bot}），但 Webhook 驗證未通過，請在 LINE 後台開啟 Use webhook`, r.webhook_verified ? 'ok' : '');
-    render();
+function openGenerate() {
+  sheet('AI 生成貼文', `${field('gt', '指定主題（可留空）', input('gt', '', 'placeholder="例如：本週活動、常見問題"'), '留空時，AI 會依品牌設定自行發想。生成後先成為草稿，核准才會發布。')}
+    <div class="actions" style="margin-top:20px"><button class="btn" id="gg">生成草稿</button></div>`, (el, close) => {
+    $('#gg', el).onclick = (e) => act(e.currentTarget, async () => {
+      const r = await api('POST', '/posts/generate', { topic: $('#gt', el).value });
+      close(); S.postSeg = 'draft'; toast(r.issues?.length ? '草稿已生成，內容檢查有警示，請修改後再核准' : '草稿已生成', r.issues?.length ? '' : 'ok'); go('posts');
     });
-  };
-  $('#gsave').onclick = async (e) => {
-    $('#gkey').value = $('#gkey').value.replace(/\s+/g, '');
-    if (!check([[$('#gkey'), $('#gkey').value.length < 20, 'API key 看起來不完整，請重新複製']])) return;
-    await act(e.target, async () => { await api('POST', '/integrations/gemini', { api_key: $('#gkey').value }); toast('Gemini 已連線', 'ok'); render(); });
-  };
-  $('#bsave').onclick = async (e) => {
-    if (!check([[$('#bname'), !$('#bname').value.trim(), '品牌名稱不可為空'], [$('#btz'), !(() => { try { new Intl.DateTimeFormat('en', { timeZone: $('#btz').value.trim() }); return true; } catch { return false; } })(), '時區格式不對，例如 Asia/Taipei']])) return;
-    const r = await act(e.target, () => api('PUT', '/settings', { name: $('#bname').value.trim(), description: $('#bdesc').value, services: $('#bsvc').value, audience: $('#baud').value, timezone: $('#btz').value.trim() }), '已儲存');
-    if (r) { dirty = false; TZ = $('#btz').value.trim(); }
-  };
-  $$('[data-u]', v).forEach((c) => c.onchange = async () => { if (!c.checked && !(await confirmSheet('停用這個帳號？對方將立即無法登入。', '停用'))) { c.checked = true; return; } act(null, async () => { await api('PATCH', '/users/' + c.dataset.u, { enabled: c.checked }); toast(c.checked ? '已啟用' : '已停用', 'ok'); }); });
-  $('#nadd').onclick = (e) => !check([[$('#nu'), !/^[a-zA-Z0-9_.-]{3,32}$/.test($('#nu').value.trim()), '帳號需為 3–32 字英數（可含 . _ -）'], [$('#np'), $('#np').value.length < 10, '密碼至少 10 字元']]) || act(e.target, async () => { await api('POST', '/users', { username: $('#nu').value.trim(), role: $('#nr2').value, password: $('#np').value }); toast('帳號已建立', 'ok'); render(); });
-  $('#pchg').onclick = (e) => !check([[$('#pn'), $('#pn').value.length < 10, '新密碼至少 10 字元'], [$('#pn'), $('#pn').value === $('#pc').value, '新密碼不能和目前密碼相同']]) || act(e.target, async () => { await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = ''; }, '密碼已變更');
-  $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); me = null; render(); };
+  });
 }
 
-const VIEWS = { help: helpView, home: homeView, posts: postsView, line: lineView, leads: leadsView, settings: settingsView };
+/* ======================================================================
+   開通引導（獨立頁）
+   ====================================================================== */
+async function setupPage() {
+  const s = await getSetup(); bar({ title: '開通設定', back: 'home', sub: `已完成 ${s.done}/${s.steps.length}` });
+  setView(`<div class="list">${s.steps.map((x, i) => row({ act: 'step', id: x.id, dot: x.ok ? 'ok' : '', title: `${i + 1}. ${esc(x.t)}`, sub: x.ok ? '已完成' : esc(x.d), end: x.ok ? '' : '<span class="pill">待設定</span>' })).join('')}</div>
+    <p class="t-sub">全部完成後，首頁不再顯示這個提醒。之後仍可在「設定」查看各服務的連接狀態。</p>
+    <button class="link" data-go="help">需要幫助？查看說明</button>`);
+  $$('[data-act=step]').forEach((b) => b.onclick = () => go(s.steps.find((x) => x.id === b.dataset.id).to));
+}
+
+/* ======================================================================
+   貼文
+   ====================================================================== */
+const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publishing: ['發布中', ''], published: ['已發布', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
+async function postsPage(r) {
+  if (r.sub === 'settings') return postSettingsPage();
+  const [posts, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings')]); TZ = st.brand.timezone;
+  const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
+  bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
+  $('[data-act=gen3]').onclick = openGenerate;
+  const seg = S.postSeg, items = G[seg];
+  const copy = { draft: ['沒有待審核的草稿', '開啟自動發文或按「AI 生成」後，草稿會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿或開啟自動發文後，排程會顯示在這裡。'], hist: ['還沒有發布紀錄', '貼文發布後會顯示在這裡。'] }[seg];
+  setView(`<div class="tight" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px"><div class="grow"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div></div>
+    ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${esc(p.content.split('\n')[0] || '（空白）')}</span>`, sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成貼文</button>' : '')}`);
+  $$('[data-seg]').forEach((b) => b.onclick = () => { S.postSeg = b.dataset.seg; render(); });
+  $('[data-act=gen2]')?.addEventListener('click', openGenerate);
+  $$('[data-act=post]').forEach((b) => b.onclick = () => openPost(posts.find((p) => p.id == b.dataset.id)));
+}
+function openPost(p) {
+  const draft = p.status === 'draft';
+  sheet(PST[p.status]?.[0] || '貼文', `${p.error_message ? `<div class="note ${p.status === 'draft' ? 'warn' : 'bad'}" style="margin-bottom:12px">${esc(p.error_message)}</div>` : ''}
+    <p class="t-sub" style="margin-bottom:8px">${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>
+    ${draft ? `${area('pc', p.content, 'style="min-height:200px"')}<div class="hint t-sub" id="cc" style="margin-top:6px"></div>` : `<div class="note" style="white-space:pre-wrap;color:var(--text)">${esc(p.content)}</div>`}
+    <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="ok">核准發布</button><button class="btn sec" data-a="save">儲存修改</button><button class="btn dng" data-a="del">刪除</button>' : ''}
+    ${p.status === 'failed' ? '<button class="btn" data-a="retry">重試發布</button><button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn dng" data-a="del">取消排程</button>' : ''}</div>`, (el, close) => {
+    const cc = $('#cc', el), ta = $('#pc', el); const upd = () => { if (cc) { const n = [...ta.value].length; cc.textContent = `${n} / 500 字`; cc.style.color = n > 500 ? 'var(--bad)' : ''; } }; if (ta) { ta.oninput = upd; upd(); }
+    $$('[data-a]', el).forEach((b) => b.onclick = () => act(b, async () => {
+      const a = b.dataset.a, content = ta?.value;
+      if (a === 'save') { await api('PUT', '/posts/' + p.id, { content }); toast('已儲存', 'ok'); return; }
+      if (a === 'ok') {
+        if ([...content].length > 500) throw new Error('超過 500 字，Threads 會拒收，請先縮短內容');
+        await api('PUT', '/posts/' + p.id, { content }); const r = await api('POST', `/posts/${p.id}/approve`, {});
+        toast(r.warning || '已核准，將依排程發布', r.warning ? '' : 'ok');
+      }
+      if (a === 'del') { if (!(await confirmSheet(p.status === 'scheduled' ? '取消這則排程？' : '刪除這則貼文？'))) return; await api('DELETE', '/posts/' + p.id); toast('已刪除', 'ok'); }
+      if (a === 'retry') { await api('POST', `/posts/${p.id}/retry`, {}); toast('已重新排入發布', 'ok'); }
+      close(); render();
+    }));
+  });
+}
+async function postSettingsPage() {
+  const { settings: s, brand } = await api('GET', '/settings'); TZ = brand.timezone;
+  bar({ title: '發文設定', back: 'posts' });
+  const MODE = { A: '通過內容檢查就直接依排程發布，不經人工。', B: '先產生草稿，你核准後才發布。建議使用。', C: '依「本週主題」產生；可選擇是否需審核。' };
+  setView(`<div data-form>
+    ${s.regulated ? '<div class="note warn" style="margin-bottom:16px">此產業受監管：所有貼文強制人工審核，不會自動發布。</div>' : ''}
+    ${field('mode', '發文模式', `<select id="mode"><option value="A">A　全自動</option><option value="B">B　審核後發布</option><option value="C">C　指定主題</option></select>`, '<span id="mh"></span>')}
+    ${field('topic', '本週主題（模式 C）', area('topic', s.weekly_topic))}
+    <div class="list" style="margin-top:16px">${row({ go: false, title: '模式 C 需審核', end: sw('rr', s.require_review, '模式 C 需審核') })}</div>
+    ${field('ppd', '每日發文數', input('ppd', s.posts_per_day, 'type="number" min="1" max="5" inputmode="numeric"'), '1 到 5 篇。')}
+    ${field('times', '發布時間', input('times', s.publishing_times.join(','), 'inputmode="numeric" placeholder="10:00,14:00,20:00"'), '24 小時制 HH:MM，依品牌時區，數量需不少於每日篇數。')}
+    ${field('tone', '品牌語氣', input('tone', s.content_tone))}${field('tops', '內容主題', input('tops', s.content_topics.join(',')), '逗號分隔。')}${field('ban', '禁用詞', input('ban', s.banned_words.join(',')), '逗號分隔；貼文含這些詞時會被擋下。')}
+    ${field('cta', 'CTA 文字', input('cta', s.cta_text))}${field('url', 'LINE 加好友網址', input('url', s.line_add_url, 'inputmode="url" placeholder="https://line.me/R/ti/p/@你的ID"'), '貼文結尾會自動附上「CTA 文字 + 網址」。請先用手機點開確認可加入好友。')}
+    <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存設定</button></div></div></div>`, 'form');
+  $('#mode').value = s.posting_mode;
+  const showMode = () => { $('#mh').textContent = MODE[$('#mode').value]; }; $('#mode').onchange = showMode; showMode();
+  $('#save').onclick = async (e) => {
+    const btn = e.currentTarget, t = list($('#times').value).map((x) => x.replace('：', ':')); $('#times').value = t.join(',');
+    const url = $('#url').value.trim(); $('#url').value = url;
+    if (!check([[$('#ppd'), !(+$('#ppd').value >= 1 && +$('#ppd').value <= 5), '每日發文數需為 1 到 5'], [$('#times'), !t.length || t.some((x) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)), '發布時間格式需為 HH:MM，例如 09:30,14:00'],
+      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`], [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭']])) return;
+    if (url && !/line\.me/.test(url) && !(await confirmSheet('這個網址看起來不是 LINE 的加好友連結，仍要使用？', '仍要使用', false))) return;
+    if ($('#mode').value === 'A' && s.posting_mode !== 'A' && !s.regulated && !(await confirmSheet('全自動模式不會經過人工審核就直接發布，確定切換？', '確定切換', false))) return;
+    const ok = await act(btn, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: t, content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url }), '已儲存');
+    if (ok) dirty = false;
+  };
+}
+
+/* ======================================================================
+   LINE
+   ====================================================================== */
+async function linePage(r) {
+  if (r.sub === 'content') return lineContentPage();
+  if (r.sub === 'form') return lineFormPage();
+  const [c, faq] = await Promise.all([api('GET', '/line-config'), api('GET', '/faq')]);
+  bar({ title: 'LINE 接待' });
+  setView(`<section><div class="list">${row({ act: 'lc', title: '接待內容', sub: '歡迎訊息、服務說明、營業時間、轉專人提示' })}${row({ act: 'lf', title: '留資表單', sub: `${c.services.length} 種服務類型 · ${c.fields.length} 個欄位` })}</div></section>
+    <section>${sec('FAQ 固定問答', '<button class="link" data-act="faqnew">新增</button>')}
+      ${faq.length ? `<div class="list">${faq.map((f) => row({ act: 'faq', id: f.id, dot: f.enabled ? 'ok' : '', title: esc(f.keyword), sub: `<span class="clip" style="display:block">${esc(f.response)}</span>` })).join('')}</div><p class="t-sub" style="margin-top:8px">顧客訊息包含關鍵字時自動回覆；數字越大越優先比對。</p>` : empty('line', '還沒有 FAQ', '常被問到的問題（例如營業時間）可以設成固定答案，顧客不用等人回覆。', '<button class="btn" data-act="faqnew2">新增第一則 FAQ</button>')}</section>`);
+  $('[data-act=lc]').onclick = () => go('line/content'); $('[data-act=lf]').onclick = () => go('line/form');
+  const openFaq = (f) => sheet(f ? '編輯 FAQ' : '新增 FAQ', `${field('fk', '關鍵字', input('fk', f?.keyword || '', 'placeholder="營業時間,幾點"'), '用逗號分隔多個關鍵字，包含任一個就會觸發。')}${field('fr', '固定答案', area('fr', f?.response || ''))}${field('fp', '優先順序', input('fp', f?.priority ?? 0, 'type="number" inputmode="numeric"'), '數字越大越優先。')}
+      ${f ? `<div class="list" style="margin-top:16px">${row({ go: false, title: '啟用', end: sw('fe', f.enabled, '啟用') })}</div>` : ''}
+      <div class="actions" style="margin-top:20px"><button class="btn" id="fs">儲存</button>${f ? '<button class="btn dng" id="fd">刪除</button>' : ''}</div>`, (el, close) => {
+      $('#fs', el).onclick = (e) => { if (!check([[$('#fk', el), !$('#fk', el).value.trim(), '請輸入關鍵字'], [$('#fr', el), !$('#fr', el).value.trim(), '請輸入固定答案']])) return;
+        act(e.currentTarget, async () => { const b = { keyword: $('#fk', el).value, response: $('#fr', el).value, priority: +$('#fp', el).value || 0, enabled: f ? $('#fe', el).checked : true }; f ? await api('PUT', '/faq/' + f.id, b) : await api('POST', '/faq', b); close(); render(); }, '已儲存'); };
+      $('#fd', el)?.addEventListener('click', (e) => act(e.currentTarget, async () => { if (!(await confirmSheet('刪除這則 FAQ？'))) return; await api('DELETE', '/faq/' + f.id); close(); render(); toast('已刪除', 'ok'); }));
+    });
+  $$('[data-act=faq]').forEach((b) => b.onclick = () => openFaq(faq.find((f) => f.id == b.dataset.id)));
+  $$('[data-act=faqnew],[data-act=faqnew2]').forEach((b) => b.onclick = () => openFaq(null));
+}
+async function lineContentPage() {
+  const c = await api('GET', '/line-config'); bar({ title: '接待內容', back: 'line' });
+  setView(`<div data-form>${field('welcome', '歡迎訊息', area('welcome', c.welcome))}
+    ${field('m1', '選單按鈕名稱', `<div class="two"><input id="m1" aria-label="了解服務" value="${esc(c.menu.info)}"><input id="m2" aria-label="立即詢問" value="${esc(c.menu.inquiry)}"></div><input id="m3" aria-label="聯絡專人" value="${esc(c.menu.human)}" style="margin-top:8px">`, '依序為：了解服務／立即詢問／聯絡專人，三個名稱不可相同。')}
+    ${field('info', '服務說明', area('info', c.serviceInfo), '請放已核准的內容。顧客點「了解服務」時顯示。')}${field('hours', '營業時間', input('hours', c.businessHours))}
+    ${field('human', '轉專人提示', area('human', c.humanNotice))}${field('priv', '隱私告知', area('priv', c.privacyNotice, 'style="min-height:140px"'), '顧客必須輸入「<b>同意</b>」才能繼續，請保留這個指示。')}
+    ${field('done', '留資完成訊息', input('done', c.completeMessage))}${field('fb', '無法辨識時的回覆', input('fb', c.fallback))}
+    <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存</button></div></div></div>`, 'form');
+  $('#save').onclick = async (e) => {
+    if (!check([[$('#priv'), !$('#priv').value.includes('同意'), '隱私告知需包含「同意」的指示'], [$('#m1'), new Set([$('#m1').value.trim(), $('#m2').value.trim(), $('#m3').value.trim()]).size < 3 || [$('#m1'), $('#m2'), $('#m3')].some((x) => !x.value.trim()), '三個選單名稱都需填寫且不能相同']])) return;
+    const ok = await act(e.currentTarget, () => api('PUT', '/line-config', { ...c, welcome: $('#welcome').value, menu: { info: $('#m1').value.trim(), inquiry: $('#m2').value.trim(), human: $('#m3').value.trim() }, serviceInfo: $('#info').value, businessHours: $('#hours').value, humanNotice: $('#human').value, privacyNotice: $('#priv').value, completeMessage: $('#done').value, fallback: $('#fb').value }), '已儲存');
+    if (ok) dirty = false;
+  };
+}
+async function lineFormPage() {
+  const c = await api('GET', '/line-config'); bar({ title: '留資表單', back: 'line' });
+  setView(`<div data-form>${field('svc', '服務類型', input('svc', c.services.join(',')), '逗號分隔；顧客會從這些選項中挑選。')}
+    ${field('fields', '表單欄位', area('fields', c.fields.map((f) => [f.key, f.label, f.required ? 1 : 0, f.blockIf || ''].join('｜')).join('\n'), 'style="min-height:180px;font-size:14px"'), '每行一個：<code>代號｜提問｜必填 1/0｜遇到此答案則轉專人</code><br>代號為英文小寫且不可重複。請勿設計收集身分證、銀行帳密等敏感資料的欄位。')}
+    <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存</button></div></div></div>`, 'form');
+  $('#save').onclick = async (e) => {
+    const rows = $('#fields').value.split('\n').filter((l) => l.trim()).map((l) => l.split(/[｜|]/).map((x) => x.trim())), keys = rows.map((x) => x[0]), bad = rows.findIndex((x) => !/^[a-z][a-z0-9_]{0,20}$/.test(x[0]) || !x[1]);
+    if (!check([[$('#svc'), !list($('#svc').value).length, '至少需要一個服務類型'], [$('#fields'), !rows.length, '至少需要一個表單欄位'], [$('#fields'), bad >= 0, `第 ${bad + 1} 行格式不對：需要「英文小寫代號｜提問文字」`], [$('#fields'), new Set(keys).size !== keys.length, '欄位代號不可重複']])) return;
+    const ok = await act(e.currentTarget, () => api('PUT', '/line-config', { ...c, services: list($('#svc').value), fields: rows.map(([key, label, req, blockIf]) => ({ key, label, required: (req || '1') !== '0', ...(blockIf ? { blockIf } : {}) })) }), '已儲存');
+    if (ok) dirty = false;
+  };
+}
+
+/* ======================================================================
+   留資
+   ====================================================================== */
+const LABEL = { name: '稱呼', need: '需求', contact: '聯絡方式', extra: '補充', adult: '年滿 18 歲' };
+async function leadsPage() {
+  const q = new URLSearchParams(); if (S.leadStatus) q.set('status', S.leadStatus); if (S.leadFrom) q.set('from', S.leadFrom);
+  const rows = await api('GET', '/inquiries?' + q);
+  if (me.role === 'admin') { const st = await api('GET', '/settings').catch(() => null); if (st) TZ = st.brand.timezone; }
+  bar({ title: '留資' });
+  const ch = (v, l) => `<button class="chip" data-s="${v}" aria-pressed="${S.leadStatus === v}">${l}</button>`;
+  setView(`<div class="chips tight" style="align-items:center">${ch('', '全部')}${ch('pending', '未處理')}${ch('done', '已處理')}<label class="chip" style="display:flex;align-items:center;gap:6px;padding:0 10px" aria-label="起始日期">起 <input type="date" id="ff" value="${esc(S.leadFrom)}" style="width:auto;min-height:32px;padding:0;border:0;background:none;font-size:13.5px;color:var(--text2)"></label></div>
+    ${rows.length ? `<div class="list">${rows.map((x) => row({ act: 'lead', id: x.id, dot: x.handling_status === 'done' ? 'ok' : 'gold', title: `${esc(x.answers.name || x.display_name || '（未填寫稱呼）')} <span class="mut" style="font-weight:400">· ${esc(x.service || '')}</span>`, sub: `<span class="clamp2">${esc(x.answers.need || '')}</span>${fmt(x.created_at)}`, end: '' })).join('')}</div>`
+      : empty('inbox', S.leadStatus || S.leadFrom ? '沒有符合條件的留資' : '還沒有留資', S.leadStatus || S.leadFrom ? '換個篩選條件試試。' : '顧客在 LINE 點「立即詢問」並完成表單後，會出現在這裡。', S.leadStatus || S.leadFrom ? '<button class="btn sec" data-act="clr">清除篩選</button>' : '')}`);
+  $$('[data-s]').forEach((b) => b.onclick = () => { S.leadStatus = b.dataset.s; render(); }); $('#ff').onchange = (e) => { S.leadFrom = e.target.value; render(); };
+  $('[data-act=clr]')?.addEventListener('click', () => { S.leadStatus = S.leadFrom = ''; render(); });
+  $$('[data-act=lead]').forEach((b) => b.onclick = () => {
+    const x = rows.find((y) => y.id == b.dataset.id), done = x.handling_status === 'done';
+    sheet(x.answers.name || x.display_name || '留資詳情', `<p class="t-sub" style="margin-bottom:12px">${fmt(x.created_at)} · ${esc(x.service || '')} · <span class="pill ${done ? 'ok' : 'warn'}">${done ? '已處理' : '未處理'}</span></p>
+      <dl class="kv">${Object.entries(x.answers).filter(([k, v]) => k !== 'name' && v).map(([k, v]) => `<dt>${esc(LABEL[k] || k)}</dt><dd>${esc(v)}</dd>`).join('')}${x.line_user_id ? `<dt>LINE ID</dt><dd><code>${esc(x.line_user_id)}</code></dd>` : ''}</dl>
+      <div class="actions" style="margin-top:20px"><button class="btn ${done ? 'sec' : ''}" data-a="t">${done ? '標記為未處理' : '標記為已處理'}</button>${me.role === 'admin' ? '<button class="btn dng" data-a="d">刪除</button>' : ''}</div>`, (el, close) => {
+      $('[data-a=t]', el).onclick = (e) => act(e.currentTarget, async () => { const to = done ? 'pending' : 'done'; await api('PATCH', '/inquiries/' + x.id, { handling_status: to }); close(); render();
+        toast(done ? '已改為未處理' : '已標記為已處理', 'ok'); });
+      $('[data-a=d]', el)?.addEventListener('click', (e) => act(e.currentTarget, async () => { if (!(await confirmSheet('永久刪除這筆留資？無法復原。'))) return; await api('DELETE', '/inquiries/' + x.id); close(); render(); toast('已刪除', 'ok'); }));
+    });
+  });
+}
+
+/* ======================================================================
+   設定（分組清單 + 子頁）
+   ====================================================================== */
+async function settingsPage(r) {
+  const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage }[r.sub];
+  if (sub) return sub();
+  const [ig, st, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/dashboard')]);
+  TZ = st.brand.timezone; bar({ title: '設定' });
+  const stat = (ok, warn) => `<span class="pill ${ok ? 'ok' : warn ? 'warn' : ''}">${ok ? '已連線' : warn || '未設定'}</span>`;
+  setView(`<section>${sec('連線')}<div class="list">
+      ${row({ act: 'threads', title: 'Threads', sub: ig.threads.configured ? `@${esc(ig.threads.username || '')}` : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
+      ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
+      ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
+    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'audit', title: '操作紀錄' })}</div></section>
+    <section><div class="list">${row({ act: 'password', title: '變更我的密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
+      <p class="t-sub foot" style="margin-top:10px"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p></section>`);
+  for (const k of ['threads', 'line', 'gemini', 'brand', 'users', 'audit', 'password']) $(`[data-act=${k}]`).onclick = () => go('settings/' + k);
+  $('[data-act=out]').onclick = logout;
+}
+async function logout() { await api('POST', '/logout').catch(() => {}); me = null; $('#app').innerHTML = ''; render(); }
+async function threadsPage() {
+  const [ig, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/dashboard')]); const t = ig.threads; bar({ title: 'Threads', back: 'settings' });
+  setView(t.configured ? `<div class="list">${row({ go: false, dot: d.threads_status === 'ok' ? 'ok' : 'bad', title: `@${esc(t.username || '')}`, sub: d.threads_status === 'ok' ? '已連結' : '授權已失效，請重新連結' })}${t.expires_at ? row({ go: false, title: '授權效期', sub: `${fmt(t.expires_at)} 前由系統自動續期，無需處理` }) : ''}</div>
+    <div class="actions"><button class="btn sec" id="tt">測試連線</button><button class="btn ghost" id="tr">重新連結</button><button class="btn dng" id="toff">中斷連結</button></div>`
+    : `<p class="mut">按下按鈕後會前往 Threads 授權，完成後自動回到後台。</p>${t.oauth_available ? '' : '<div class="note warn">系統尚未設定 Threads App，請聯絡開發者。</div>'}<button class="btn block" id="tc" ${t.oauth_available ? '' : 'disabled'}>連結 Threads</button><button class="link" data-go="help">遇到問題？查看說明</button>`);
+  const connect = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
+  $('#tc')?.addEventListener('click', connect); $('#tr')?.addEventListener('click', connect);
+  $('#tt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+  $('#toff')?.addEventListener('click', (e) => act(e.currentTarget, async () => { if (!(await confirmSheet('中斷 Threads 連結？自動發文將無法發布。', '中斷連結'))) return; await api('DELETE', '/integrations/threads'); toast('已中斷連結', 'ok'); render(); }));
+}
+async function lineConnPage() {
+  const ig = await api('GET', '/integrations'); const l = ig.line; bar({ title: 'LINE 官方帳號', back: 'settings' });
+  setView(`<div data-form>${l.configured ? `<div class="list" style="margin-bottom:20px">${row({ go: false, dot: 'ok', title: esc(l.name || '已連線'), sub: '重新輸入並儲存即可更換憑證' })}</div>` : ''}
+    ${field('lsec', 'Channel secret', input('lsec', '', 'autocomplete="off" autocapitalize="none" placeholder="32 位英數字"'), 'LINE Developers → Basic settings。')}
+    ${field('ltok', 'Channel access token（long-lived）', input('ltok', '', 'autocomplete="off" autocapitalize="none"'), 'Messaging API 分頁 → Issue。請貼上完整內容。')}
+    <div class="note" style="margin-top:16px">儲存時會自動驗證，並把 Webhook 設為：<br><code>${esc(l.webhook_url)}</code></div>
+    <div class="actions" style="margin-top:20px"><button class="btn" id="ls">驗證並儲存</button>${l.configured ? '<button class="btn sec" id="lt">測試連線</button>' : ''}</div>
+    <button class="link" data-go="help">如何取得憑證？</button></div>`, 'form');
+  $('#ls').onclick = async (e) => {
+    const btn = e.currentTarget; $('#lsec').value = $('#lsec').value.replace(/\s+/g, ''); $('#ltok').value = $('#ltok').value.replace(/\s+/g, '');
+    if (!check([[$('#lsec'), !/^[0-9a-fA-F]{32}$/.test($('#lsec').value), 'Channel secret 應為 32 位英數字'], [$('#ltok'), $('#ltok').value.length < 50, 'Access token 看起來不完整，請重新複製']])) return;
+    const r = await act(btn, () => api('POST', '/integrations/line', { channel_secret: $('#lsec').value, channel_access_token: $('#ltok').value }));
+    if (r && r !== true) { dirty = false; toast(r.webhook_verified ? `已連線（${r.bot}），Webhook 驗證通過` : `已儲存（${r.bot}）；Webhook 驗證未通過，請到 LINE 後台開啟 Use webhook`, r.webhook_verified ? 'ok' : ''); render(); }
+  };
+  $('#lt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'line' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+}
+async function geminiPage() {
+  const ig = await api('GET', '/integrations'), d = await api('GET', '/dashboard'); bar({ title: 'AI（Gemini）', back: 'settings' });
+  setView(`<div data-form>${field('gk', 'API key', input('gk', '', `autocomplete="off" autocapitalize="none" placeholder="${ig.gemini.configured ? '已設定；重新輸入以更換' : ''}"`), 'AI 只用來撰寫 Threads 貼文，不會讀取顧客資料。')}
+    <div class="actions" style="margin-top:20px"><button class="btn" id="gs">驗證並儲存</button>${ig.gemini.configured ? '<button class="btn sec" id="gt">測試連線</button>' : ''}</div></div>
+    <section>${sec('用量')}<div class="list">${row({ go: false, title: '今日生成', end: `${d.gen_today} / ${d.gen_limit}` })}</div><p class="t-sub" style="margin-top:8px">達到上限後會停止生成並保留既有草稿，次日自動恢復，不會產生額外費用。</p></section>`, 'form');
+  $('#gs').onclick = async (e) => { $('#gk').value = $('#gk').value.replace(/\s+/g, ''); if (!check([[$('#gk'), $('#gk').value.length < 20, 'API key 看起來不完整，請重新複製']])) return;
+    if (await act(e.currentTarget, () => api('POST', '/integrations/gemini', { api_key: $('#gk').value }), 'AI 已連線')) { dirty = false; render(); } };
+  $('#gt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'gemini' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+}
+async function brandPage() {
+  const { brand: b, settings: s } = await api('GET', '/settings'); bar({ title: '品牌資訊', back: 'settings' });
+  setView(`<div data-form>${field('bn', '品牌名稱', input('bn', b.name))}${field('bd', '品牌介紹', area('bd', b.description), '供 AI 撰寫貼文，只放公開資訊。')}${field('bs', '產品與服務', area('bs', s.services))}${field('ba', '目標受眾', input('ba', s.audience))}${field('tz', '時區', input('tz', b.timezone), '例如 Asia/Taipei。發布時間與「今日」都依此計算。')}
+    <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存</button></div></div></div>`, 'form');
+  $('#save').onclick = async (e) => {
+    if (!check([[$('#bn'), !$('#bn').value.trim(), '品牌名稱不可為空'], [$('#tz'), !(() => { try { new Intl.DateTimeFormat('en', { timeZone: $('#tz').value.trim() }); return true; } catch { return false; } })(), '時區格式不對，例如 Asia/Taipei']])) return;
+    if (await act(e.currentTarget, () => api('PUT', '/settings', { name: $('#bn').value.trim(), description: $('#bd').value, services: $('#bs').value, audience: $('#ba').value, timezone: $('#tz').value.trim() }), '已儲存')) { dirty = false; BRAND = $('#bn').value.trim(); TZ = $('#tz').value.trim(); }
+  };
+}
+async function usersPage() {
+  const users = await api('GET', '/users'); bar({ title: '帳號與權限', back: 'settings', right: `<button class="btn sm" data-act="nu" style="margin-right:8px">新增</button>` });
+  setView(`<div class="list">${users.map((u) => row({ go: false, dot: u.enabled ? 'ok' : '', title: esc(u.username) + (u.username === me.name ? ' <span class="mut">（你）</span>' : ''), sub: u.role === 'admin' ? '管理員：可修改全部設定' : '客服：只能查看與處理留資', end: u.username === me.name ? '' : sw('u' + u.id, u.enabled, '啟用 ' + u.username) })).join('')}</div>
+    <p class="t-sub">停用帳號後，對方立即無法登入。離職或不再需要的帳號請停用。</p>`);
+  users.filter((u) => u.username !== me.name).forEach((u) => { $('#u' + u.id).onchange = async (e) => {
+    const on = e.target.checked; if (!on && !(await confirmSheet(`停用「${u.username}」？對方將立即無法登入。`, '停用'))) { e.target.checked = true; return; }
+    try { await api('PATCH', '/users/' + u.id, { enabled: on }); toast(on ? '已啟用' : '已停用', 'ok'); } catch (err) { toast(err.message, 'bad'); e.target.checked = !on; } }; });
+  $('[data-act=nu]').onclick = () => sheet('新增帳號', `${field('nu', '帳號', input('nu', '', 'autocapitalize="none" autocomplete="off"'), '3–32 字英數，可含 . _ -')}${field('nr', '角色', '<select id="nr"><option value="staff">客服（只處理留資）</option><option value="admin">管理員</option></select>')}${field('np', '初始密碼', input('np', '', 'type="password" autocomplete="new-password"'), '至少 10 字元，請告知對方登入後自行變更。')}
+    <div class="actions" style="margin-top:20px"><button class="btn" id="nb">建立帳號</button></div>`, (el, close) => {
+    $('#nb', el).onclick = (e) => { if (!check([[$('#nu', el), !/^[a-zA-Z0-9_.-]{3,32}$/.test($('#nu', el).value.trim()), '帳號需為 3–32 字英數'], [$('#np', el), $('#np', el).value.length < 10, '密碼至少 10 字元']])) return;
+      act(e.currentTarget, async () => { await api('POST', '/users', { username: $('#nu', el).value.trim(), role: $('#nr', el).value, password: $('#np', el).value }); close(); render(); }, '帳號已建立'); }; });
+}
+async function passwordPage() {
+  bar({ title: '變更密碼', back: me.role === 'admin' ? 'settings' : 'account' });
+  setView(`<div data-form>${field('pc', '目前密碼', input('pc', '', 'type="password" autocomplete="current-password"'))}${field('pn', '新密碼', input('pn', '', 'type="password" autocomplete="new-password"'), '至少 10 字元。')}<button class="btn block" id="pb" style="margin-top:24px">變更密碼</button></div>`, 'form');
+  $('#pb').onclick = async (e) => { if (!check([[$('#pn'), $('#pn').value.length < 10, '新密碼至少 10 字元'], [$('#pn'), $('#pn').value === $('#pc').value, '新密碼不能和目前密碼相同']])) return;
+    if (await act(e.currentTarget, () => api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }), '密碼已變更')) { dirty = false; $('#pc').value = $('#pn').value = ''; } };
+}
+async function auditPage() {
+  const logs = await api('GET', '/audit'); bar({ title: '操作紀錄', back: 'settings' });
+  setView(logs.length ? `<div class="list">${logs.map((l) => row({ go: false, title: esc(ACTION[l.action] || l.action), sub: `${esc(l.actor || '系統')} · ${fmt(l.created_at)}` })).join('')}</div><p class="t-sub">顯示最近 50 筆。</p>` : empty('inbox', '尚無紀錄', '設定與操作變更會記錄在這裡。'));
+}
+async function accountPage() {
+  bar({ title: '帳號' });
+  setView(`<div class="list">${row({ go: false, title: esc(me.name), sub: me.role === 'admin' ? '管理員' : '客服' })}${row({ act: 'pw', title: '變更密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>`);
+  $('[data-act=pw]').onclick = () => go('settings/password'); $('[data-act=out]').onclick = logout;
+}
+
+/* ======================================================================
+   說明中心
+   ====================================================================== */
+const HELP = [
+  ['start', '第一次使用，照這 5 步', `<ol><li><b>設定 → LINE 官方帳號：</b>貼上 Channel secret 與 access token。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」。</li></ol><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
+  ['line', '如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 複製 <b>Channel secret</b>（32 位英數字）。</li><li><b>Messaging API</b> 按 <b>Issue</b> 產生 <b>Channel access token (long-lived)</b> 並複製。</li><li>貼到「設定 → LINE 官方帳號」，按「驗證並儲存」，系統會自動設定 Webhook。</li><li>回到 LINE Developers，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，<b>關閉「自動回應訊息」與「加入好友的歡迎訊息」</b>，否則會重複回覆。</li></ol><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
+  ['gemini', '如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b> 並複製。</li><li>貼到「設定 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p>AI 只用來寫 Threads 貼文，不讀取顧客資料。每日生成次數有上限，用完自動停止，不會多收費。</p>`],
+  ['threads', '如何連結 Threads', `<ol><li>到「設定 → Threads」按<b>連結 Threads</b>。</li><li>登入要發文的帳號並按同意。</li><li>完成後自動回到後台，顯示「已連結」。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，再按一次「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡開發者。</div>`],
+  ['modes', '三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接發布。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，核准才發。</li><li><b>C 指定主題：</b>依「本週主題」生成，可選擇是否審核。</li></ul><div class="note bad">金融、放款等受監管產業一律強制人工審核。</div><p>內容檢查會擋下「保證核貸」「免審」等字眼，被擋的草稿需修改後才能核准。</p>`],
+  ['leads', '顧客留資怎麼運作', `<ol><li>顧客在 LINE 點「立即詢問」→ 看隱私告知 → 輸入「同意」。</li><li>回答服務類型與表單問題 → 確認送出。</li><li>你在「留資」看到新紀錄（未處理）。</li><li>聯絡後標記為「已處理」。</li></ol><p>顧客可輸入「查詢我的資料」「刪除我的資料」。超過保存期限（預設 180 天）自動刪除。</p>`],
+  ['human', '真人接手怎麼運作', `<ul><li>顧客點「聯絡專人」或輸入「真人／客服」後，系統<b>暫停對該顧客自動回覆</b>。</li><li>請到 <b>LINE Official Account Manager</b> 聊天介面親自回覆。</li><li>顧客輸入「選單」或滿 24 小時才會恢復自動回覆。</li></ul>`],
+  ['faq', '常見問題排除', `<ul><li><b>LINE 沒回應：</b>① 首頁「LINE 自動接待」是否開啟 ② Developers Console 的 Use webhook ③ 設定 → LINE 按「測試連線」。</li><li><b>LINE 回了兩次：</b>關閉 Official Account Manager 的自動回應訊息與歡迎訊息。</li><li><b>草稿「內容檢查未通過」：</b>含禁止宣稱或禁用詞，改寫後再核准。</li><li><b>開不了自動發文：</b>需要先連好 AI 與 Threads。</li><li><b>貼文「待核對」：</b>系統正在向 Threads 確認，會自動處理，請勿重複建立。</li><li><b>貼文「失敗」：</b>可重試；持續失敗請聯絡開發者。</li></ul>`],
+  ['safe', '安全小提醒', `<ul><li>第一次登入後請立刻改密碼。</li><li>客服請使用「客服」角色。</li><li>不再需要的帳號請在「帳號與權限」停用。</li><li>不要把憑證、密碼貼到聊天軟體。</li></ul>`],
+];
+async function helpPage() {
+  bar({ title: '說明中心', back: 'home' });
+  setView(`<div class="list">${HELP.map(([id, t, b]) => `<details class="acc" id="h-${id}" ${S.helpOpen === id ? 'open' : ''}><summary>${t}</summary><div class="body">${b}</div></details>`).join('')}</div>`);
+}
+
+const PAGES = { home: homePage, posts: postsPage, line: linePage, leads: leadsPage, settings: settingsPage, account: accountPage, help: helpPage, setup: setupPage };
+if (!location.hash) history.replaceState(null, '', '#/');
 render();
 </script>
 </body>

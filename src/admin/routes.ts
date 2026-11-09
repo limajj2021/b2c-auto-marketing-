@@ -226,7 +226,11 @@ add('POST', '/posts/generate', 'admin', async ({ env, req, actor, brandId }) => 
     return json({ id: r.meta.last_row_id, issues });
   } catch (e) {
     if (e instanceof QuotaError) return err(429, e.message);
-    return err(502, `生成失敗：${(e as Error).message}`);
+    const msg = (e as Error).message;
+    // 轉成使用者能採取行動的說明
+    if (/HTTP 4\d\d/.test(msg)) return err(502, 'AI 服務拒絕了請求，請到「設定 → AI」確認 API key 是否有效，或稍後再試。');
+    if (/HTTP 5\d\d/.test(msg)) return err(502, 'AI 服務暫時無法使用，請稍後再試。既有草稿不受影響。');
+    return err(502, `生成失敗：${msg}`);
   }
 });
 
