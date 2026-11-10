@@ -5,7 +5,7 @@
 
 | # | 項目 | 做法 | 結果 |
 |---|---|---|---|
-| 1 | Threads 官方 API 發文 | Meta 開發者建立 App → 加入 Threads 產品與 `threads_basic`、`threads_content_publish` 權限 → 取得 user id 與長效 token → 設為 `THREADS_*` → 後台產生草稿、核准 → 等 Cron 發布 | ☐ |
+| 1 | Threads 官方 API 發文 | 後台「連結 Threads」OAuth 授權 → 生成草稿 → 核准 → Cron 發布 | ✅ 2026-11-10：@vuca.canada 經後台一鍵授權（OAuth callback、長效 token 加密存入），AI 生成→核准→Cron 以官方 API 發布成功，Threads 貼文 ID 18090817271310140 |
 | 2 | Threads 連結行為 | 發一則含 LINE 加好友網址的貼文，確認是否可點；不可點則改個人檔案連結 | ☐ |
 | 3 | Threads 重啟後不重複 | 發布過程中重新部署，確認 `posts` 無重複、Threads 無重複貼文 | ☐ |
 | 4 | LINE Webhook + Reply | Messaging API channel，Webhook URL 設為 `<管理網址>/line/webhook`，按 Verify，加好友收到歡迎訊息 | ☐ |
