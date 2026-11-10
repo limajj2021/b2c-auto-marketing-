@@ -46,6 +46,10 @@ export interface Settings {
   prompt_version: string;
   line_config: string;
   threads_status: string;
+  style_preset: string;
+  thread_min: number;
+  thread_max: number;
+  fact_bank: string;
 }
 
 export interface Post {
@@ -63,6 +67,10 @@ export interface Post {
   attempts: number;
   gen_attempts: number;
   error_message: string | null;
+  account_id: number | null;
+  parts: string | null;
+  part_ids: string | null;
+  source_post_id: number | null;
 }
 
 /** 受監管產業：一律強制人工審核，不得自動發布。 */

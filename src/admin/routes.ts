@@ -1,9 +1,9 @@
-import { generatePost, QuotaError } from '../ai/gemini';
-import { checkContent } from '../ai/compliance';
+import { generateThread, QuotaError } from '../ai/gemini';
+import { checkParts } from '../ai/compliance';
+import { getAccount, listAccounts } from '../threads/accounts';
 import { audit, getBrand, getSettings, jsonArr } from '../db';
-import { getMeta } from '../integrations';
 import { validateLineConfig, parseLineConfig } from '../line/config';
-import { needsReview, publishOne } from '../threads/scheduler';
+import { needsReview, partsOf, publishOne } from '../threads/scheduler';
 import type { Env } from '../types';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
@@ -99,12 +99,15 @@ add('GET', '/dashboard', 'admin', async ({ env, brandId }) => {
   const s = await getSettings(env, brandId);
   const dayStart = zonedToUtc(localDate(new Date(), brand.timezone), '00:00', brand.timezone).toISOString();
   const n = async (sql: string, ...a: unknown[]) => (await env.DB.prepare(sql).bind(...a).first<{ c: number }>())?.c ?? 0;
+  const accts = await listAccounts(env);
+  const invalid = accts.some((a) => a.status !== 'ok') || (!accts.length && s.threads_status !== 'ok');
   return json({
-    healthy: s.threads_status === 'ok',
-    threads_status: s.threads_status,
+    healthy: !invalid,
+    threads_status: invalid ? 'token_invalid' : 'ok',
+    threads_accounts: accts.map((a) => ({ id: a.id, username: a.username, status: a.status })),
     configured: {
-      threads: !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID),
-      threads_username: (await getMeta(env, 'threads_access_token'))?.username ?? null,
+      threads: accts.length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID),
+      threads_username: accts[0]?.username ?? null,
       line: !!(env.LINE_CHANNEL_SECRET && env.LINE_CHANNEL_ACCESS_TOKEN),
       gemini: !!env.GEMINI_API_KEY,
     },
@@ -128,10 +131,11 @@ add('POST', '/pause', 'admin', async ({ env, req, actor, brandId }) => {
   // 防呆：必要連線未完成時不允許開啟自動化
   if (b.auto_post_enabled === true) {
     const s = await getSettings(env, brandId);
+    const accts = await listAccounts(env);
+    const ok = accts.filter((a) => a.status === 'ok');
     const missing = [
       !env.GEMINI_API_KEY && 'Gemini（AI）',
-      !(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID) && 'Threads',
-      s.threads_status !== 'ok' && 'Threads 授權已失效，請重新連結',
+      accts.length ? !ok.length && 'Threads 授權已失效，請重新連結' : !(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID) ? 'Threads' : s.threads_status !== 'ok' && 'Threads 授權已失效，請重新連結',
     ].filter(Boolean);
     if (missing.length) return err(409, `無法開啟自動發文，請先完成：${missing.join('、')}（設定 → 連線）`);
   }
@@ -157,6 +161,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
       posting_mode: s.posting_mode, require_review: !!s.require_review, posts_per_day: s.posts_per_day,
       publishing_times: jsonArr(s.publishing_times), daily_gen_limit: s.daily_gen_limit,
       regulated: needsReview(brand.industry, { posting_mode: 'A', require_review: 0 }),
+      style_preset: s.style_preset, thread_min: s.thread_min, thread_max: s.thread_max, fact_bank: s.fact_bank,
       line_ready: !!parseLineConfig(s.line_config).serviceInfo && !parseLineConfig(s.line_config).serviceInfo.startsWith('（'),
     },
   });
@@ -169,6 +174,13 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
   const put = (col: string, v: unknown) => { sets.push(`${col}=?`); vals.push(v); };
   for (const k of SETTING_FIELDS) if (typeof b[k] === 'string') { if (b[k].length > 2000) return err(400, `${k} 過長`); put(k, b[k]); }
   if (b.line_add_url && !/^https:\/\//.test(b.line_add_url)) return err(400, 'LINE 連結需為 https');
+  if (b.style_preset !== undefined) { if (typeof b.style_preset !== 'string' || b.style_preset.length > 500) return err(400, '寫作原則過長'); put('style_preset', b.style_preset); }
+  if (b.fact_bank !== undefined) { if (typeof b.fact_bank !== 'string' || b.fact_bank.length > 5000) return err(400, '數據庫不可超過 5000 字'); put('fact_bank', b.fact_bank); }
+  if (b.thread_min !== undefined || b.thread_max !== undefined) {
+    const mn = Number(b.thread_min), mx = Number(b.thread_max);
+    if (!Number.isInteger(mn) || !Number.isInteger(mx) || mn < 1 || mx > 10 || mn > mx) return err(400, '串文則數需為 1 到 10，且最少不可大於最多');
+    put('thread_min', mn); put('thread_max', mx);
+  }
   if (b.posting_mode !== undefined) { if (!['A', 'B', 'C'].includes(b.posting_mode)) return err(400, '發文模式不合法'); put('posting_mode', b.posting_mode); }
   if (typeof b.require_review === 'boolean') put('require_review', b.require_review ? 1 : 0);
   if (b.posts_per_day !== undefined) {
@@ -204,26 +216,26 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
 add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
-    `SELECT id,content,status,scheduled_at,published_at,threads_post_id,error_message,approved_by FROM posts
-     WHERE brand_id=? AND status<>'deleted' AND (? IS NULL OR status=?) ORDER BY COALESCE(scheduled_at,created_at) DESC LIMIT 100`,
-  ).bind(brandId, st, st).all();
-  return json(rows.results);
+    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,a.username
+     FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id
+     WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,
+  ).bind(brandId, st, st).all<any>();
+  return json(rows.results.map((r) => ({ ...r, parts: partsOf(r), part_ids: r.part_ids ? JSON.parse(r.part_ids) : [] })));
 });
 
 add('POST', '/posts/generate', 'admin', async ({ env, req, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
   const topic = String(b.topic ?? '').slice(0, 300);
+  const account = b.account_id ? await getAccount(env, Number(b.account_id)) : (await listAccounts(env))[0] ?? null;
+  if (b.account_id && !account) return err(404, '找不到這個 Threads 帳號');
   try {
-    const g = await generatePost(env, topic);
-    const brand = await getBrand(env);
-    const s = await getSettings(env, brandId);
-    const issues = checkContent(g.text, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
+    const g = await generateThread(env, { topic, account });
     // 手動生成一律先成為草稿，待管理員核准
     const r = await env.DB.prepare(
-      `INSERT INTO posts(brand_id,content,status,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,?,?)`,
-    ).bind(brandId, g.text, 'draft', g.generationId, issues.length ? `內容檢查未通過：${issues.join('；')}` : null, iso(), iso()).run();
+      `INSERT INTO posts(brand_id,account_id,content,parts,status,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+    ).bind(brandId, account?.id ?? null, g.parts[0], JSON.stringify(g.parts), 'draft', g.generationId, g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(), iso()).run();
     await audit(env, brandId, actor.name, 'post_generate');
-    return json({ id: r.meta.last_row_id, issues });
+    return json({ id: r.meta.last_row_id, issues: g.issues, parts: g.parts.length });
   } catch (e) {
     if (e instanceof QuotaError) return err(429, e.message);
     const msg = (e as Error).message;
@@ -236,9 +248,11 @@ add('POST', '/posts/generate', 'admin', async ({ env, req, actor, brandId }) => 
 
 add('PUT', '/posts/(\\d+)', 'admin', async ({ env, req, m, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
-  if (typeof b.content !== 'string' || !b.content.trim()) return err(400, '內容不可為空');
-  const r = await env.DB.prepare(`UPDATE posts SET content=?,error_message=NULL,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
-    .bind(b.content, iso(), m[1], brandId).run();
+  const parts: string[] = Array.isArray(b.parts) ? b.parts.map((x: unknown) => String(x ?? '').trim()) : typeof b.content === 'string' ? [b.content.trim()] : [];
+  if (!parts.length || parts.some((x) => !x)) return err(400, '每一則內容都不可為空');
+  if (parts.length > 10) return err(400, '串文最多 10 則');
+  const r = await env.DB.prepare(`UPDATE posts SET content=?,parts=?,error_message=NULL,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
+    .bind(parts[0], JSON.stringify(parts), iso(), m[1], brandId).run();
   if (r.meta.changes !== 1) return err(409, '只有草稿可以修改');
   await audit(env, brandId, actor.name, 'post_edit', m[1]);
   return json({ ok: true });
@@ -247,9 +261,9 @@ add('PUT', '/posts/(\\d+)', 'admin', async ({ env, req, m, actor, brandId }) => 
 add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brandId }) => {
   const brand = await getBrand(env);
   const s = await getSettings(env, brandId);
-  const post = await env.DB.prepare(`SELECT content,scheduled_at FROM posts WHERE id=? AND brand_id=? AND status='draft'`).bind(m[1], brandId).first<any>();
+  const post = await env.DB.prepare(`SELECT content,parts,scheduled_at,account_id FROM posts WHERE id=? AND brand_id=? AND status='draft'`).bind(m[1], brandId).first<any>();
   if (!post) return err(409, '找不到草稿');
-  const issues = checkContent(post.content, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
+  const issues = checkParts(partsOf(post), { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
   if (issues.length) return err(422, `內容檢查未通過，請先修改：${issues.join('；')}`);
   const b: any = await req.json().catch(() => ({}));
   const at = b.scheduled_at ? new Date(b.scheduled_at) : post.scheduled_at ? new Date(post.scheduled_at) : new Date();
@@ -257,7 +271,8 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   await env.DB.prepare(`UPDATE posts SET status='scheduled',approved_by=?,scheduled_at=?,error_message=NULL,updated_at=? WHERE id=? AND status='draft'`)
     .bind(actor.name, at.toISOString(), iso(), m[1]).run();
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
-  return json({ ok: true, warning: env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
+  const hasAcct = (await listAccounts(env)).length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID);
+  return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
 });
 
 add('POST', '/posts/(\\d+)/retry', 'admin', async ({ env, m, actor, brandId }) => {
@@ -266,6 +281,35 @@ add('POST', '/posts/(\\d+)/retry', 'admin', async ({ env, m, actor, brandId }) =
   if (r.meta.changes !== 1) return err(409, '無法重試');
   await audit(env, brandId, actor.name, 'post_retry', m[1]);
   return json({ ok: true });
+});
+
+// 改寫分發：以目標帳號的人設改寫同一串內容，建立各自的草稿並錯開發布時間
+add('POST', '/posts/(\\d+)/distribute', 'admin', async ({ env, req, m, actor, brandId }) => {
+  const b: any = await req.json().catch(() => ({}));
+  const src = await env.DB.prepare(`SELECT * FROM posts WHERE id=? AND brand_id=? AND status<>'deleted'`).bind(m[1], brandId).first<any>();
+  if (!src) return err(404, '找不到來源貼文');
+  const ids: number[] = Array.isArray(b.account_ids) ? [...new Set(b.account_ids.map(Number))].filter((x) => x !== src.account_id) as number[] : [];
+  if (!ids.length) return err(400, '請選擇至少一個其他帳號');
+  const base = new Date(src.scheduled_at ?? Date.now()).getTime();
+  const created: number[] = []; const issues: string[] = [];
+  for (const [k, id] of ids.entries()) {
+    const account = await getAccount(env, id);
+    if (!account) continue;
+    try {
+      const g = await generateThread(env, { account, rewriteOf: partsOf(src) });
+      const at = new Date(Math.max(base, Date.now()) + (k + 1) * 45 * 60000).toISOString();
+      const r = await env.DB.prepare(
+        `INSERT INTO posts(brand_id,account_id,source_post_id,content,parts,status,scheduled_at,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,'draft',?,?,?,?,?)`,
+      ).bind(brandId, id, src.id, g.parts[0], JSON.stringify(g.parts), at, g.generationId, g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(), iso()).run();
+      created.push(r.meta.last_row_id as number);
+      if (g.issues.length) issues.push(`@${account.username}`);
+    } catch (e) {
+      if (e instanceof QuotaError) return json({ created: created.length, stopped: e.message, flagged: issues });
+      return err(502, created.length ? `已建立 ${created.length} 則後中斷：AI 服務暫時無法使用` : 'AI 服務暫時無法使用，請稍後再試');
+    }
+  }
+  await audit(env, brandId, actor.name, 'post_distribute', `${src.id}->${created.join(',')}`);
+  return json({ created: created.length, flagged: issues });
 });
 
 add('DELETE', '/posts/(\\d+)', 'admin', async ({ env, m, actor, brandId }) => {

@@ -378,12 +378,17 @@ async function homePage() {
   $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2').onchange = flip('line_auto_reply_enabled', 'LINE 自動接待');
 }
 
-function openGenerate() {
-  sheet('AI 生成貼文', `${field('gt', '指定主題（可留空）', input('gt', '', 'placeholder="例如：本週活動、常見問題"'), '留空時，AI 會依品牌設定自行發想。生成後先成為草稿，核准才會發布。')}
+let ACCTS = [];
+async function loadAccounts() { try { ACCTS = (await api('GET', '/integrations')).threads.accounts || []; } catch { ACCTS = []; } return ACCTS; }
+const acctName = (id) => { const a = ACCTS.find((x) => x.id === id); return a ? '@' + (a.username || a.id) : ''; };
+async function openGenerate() {
+  await loadAccounts();
+  const pick = ACCTS.length > 1 ? field('ga', '發文帳號', `<select id="ga">${ACCTS.map((a) => `<option value="${a.id}">@${esc(a.username || a.id)}${a.persona ? '　' + esc(a.persona.slice(0, 16)) : ''}</option>`).join('')}</select>`, 'AI 會用這個帳號的人設來寫。') : '';
+  sheet('AI 生成串文', `${pick}${field('gt', '指定主題（可留空）', input('gt', '', 'placeholder="例如：活動贊助、剪輯小知識"'), '會依「爭議化、數據化、具體化」寫成一整串：第一則是鉤子，最後一則是 CTA。生成後先成為草稿，核准才發布。')}
     <div class="actions" style="margin-top:20px"><button class="btn" id="gg">生成草稿</button></div>`, (el, close) => {
     $('#gg', el).onclick = (e) => act(e.currentTarget, async () => {
-      const r = await api('POST', '/posts/generate', { topic: $('#gt', el).value });
-      close(); S.postSeg = 'draft'; toast(r.issues?.length ? '草稿已生成，內容檢查有警示，請修改後再核准' : '草稿已生成', r.issues?.length ? '' : 'ok'); go('posts');
+      const r = await api('POST', '/posts/generate', { topic: $('#gt', el).value, account_id: $('#ga', el) ? +$('#ga', el).value : undefined });
+      close(); S.postSeg = 'draft'; toast(r.issues?.length ? `已生成 ${r.parts} 則串文，內容檢查有提醒，請修改後再核准` : `已生成 ${r.parts} 則串文`, r.issues?.length ? '' : 'ok'); go('posts');
     });
   });
 }
@@ -405,38 +410,73 @@ async function setupPage() {
 const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publishing: ['發布中', ''], published: ['已發布', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
 async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
-  const [posts, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings')]); TZ = st.brand.timezone;
+  const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone;
+  const multi = ACCTS.length > 1, posts = S.postAcct ? all.filter((p) => p.account_id === S.postAcct) : all;
   const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
   bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
   $('[data-act=gen3]').onclick = openGenerate;
   const seg = S.postSeg, items = G[seg];
   const copy = { draft: ['沒有待審核的草稿', '開啟自動發文或按「AI 生成」後，草稿會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿或開啟自動發文後，排程會顯示在這裡。'], hist: ['還沒有發布紀錄', '貼文發布後會顯示在這裡。'] }[seg];
-  setView(`<div class="tight" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px"><div class="grow"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div></div>
-    ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${esc(p.content.split('\n')[0] || '（空白）')}</span>`, sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成貼文</button>' : '')}`);
+  const chip = (v, l) => `<button class="chip" data-acct="${v}" aria-pressed="${(S.postAcct || 0) === v}">${l}</button>`;
+  setView(`${multi ? `<div class="chips tight">${chip(0, '全部帳號')}${ACCTS.map((a) => chip(a.id, '@' + esc(a.username || a.id))).join('')}</div>` : ''}
+    <div class="tight"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div>
+    ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${esc((p.parts?.[0] || p.content).split('\n')[0] || '（空白）')}</span>`,
+      sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.parts?.length > 1 ? ` · 串文 ${p.parts.length} 則` : ''}${multi && p.account_id ? ` · ${esc(acctName(p.account_id))}` : ''}${p.source_post_id ? ' · 改寫' : ''}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '')}`);
   $$('[data-seg]').forEach((b) => b.onclick = () => { S.postSeg = b.dataset.seg; render(); });
+  $$('[data-acct]').forEach((b) => b.onclick = () => { S.postAcct = +b.dataset.acct || 0; render(); });
   $('[data-act=gen2]')?.addEventListener('click', openGenerate);
-  $$('[data-act=post]').forEach((b) => b.onclick = () => openPost(posts.find((p) => p.id == b.dataset.id)));
+  $$('[data-act=post]').forEach((b) => b.onclick = () => openPost(all.find((p) => p.id == b.dataset.id)));
 }
 function openPost(p) {
-  const draft = p.status === 'draft';
-  sheet(PST[p.status]?.[0] || '貼文', `${p.error_message ? `<div class="note ${p.status === 'draft' ? 'warn' : 'bad'}" style="margin-bottom:12px">${esc(p.error_message)}</div>` : ''}
-    <p class="t-sub" style="margin-bottom:8px">${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>
-    ${draft ? `${area('pc', p.content, 'style="min-height:200px"')}<div class="hint t-sub" id="cc" style="margin-top:6px"></div>` : `<div class="note" style="white-space:pre-wrap;color:var(--text)">${esc(p.content)}</div>`}
-    <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="ok">核准發布</button><button class="btn sec" data-a="save">儲存修改</button><button class="btn dng" data-a="del">刪除</button>' : ''}
-    ${p.status === 'failed' ? '<button class="btn" data-a="retry">重試發布</button><button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn dng" data-a="del">取消排程</button>' : ''}</div>`, (el, close) => {
-    const cc = $('#cc', el), ta = $('#pc', el); const upd = () => { if (cc) { const n = [...ta.value].length; cc.textContent = `${n} / 500 字`; cc.style.color = n > 500 ? 'var(--bad)' : ''; } }; if (ta) { ta.oninput = upd; upd(); }
-    $$('[data-a]', el).forEach((b) => b.onclick = () => act(b, async () => {
-      const a = b.dataset.a, content = ta?.value;
-      if (a === 'save') { await api('PUT', '/posts/' + p.id, { content }); toast('已儲存', 'ok'); return; }
-      if (a === 'ok') {
-        if ([...content].length > 500) throw new Error('超過 500 字，Threads 會拒收，請先縮短內容');
-        await api('PUT', '/posts/' + p.id, { content }); const r = await api('POST', `/posts/${p.id}/approve`, {});
-        toast(r.warning || '已核准，將依排程發布', r.warning ? '' : 'ok');
-      }
-      if (a === 'del') { if (!(await confirmSheet(p.status === 'scheduled' ? '取消這則排程？' : '刪除這則貼文？'))) return; await api('DELETE', '/posts/' + p.id); toast('已刪除', 'ok'); }
-      if (a === 'retry') { await api('POST', `/posts/${p.id}/retry`, {}); toast('已重新排入發布', 'ok'); }
-      close(); render();
-    }));
+  const draft = p.status === 'draft', parts = p.parts?.length ? [...p.parts] : [p.content], done = p.part_ids?.length || 0;
+  const role = (i, n) => n === 1 ? '' : i === 0 ? '鉤子' : i === n - 1 ? 'CTA' : '';
+  const editor = () => parts.map((t, i) => `<div class="f"><div class="lab" style="display:flex;justify-content:space-between;align-items:center"><span>第 ${i + 1} 則${role(i, parts.length) ? `<span class="mut" style="font-weight:400">　${role(i, parts.length)}</span>` : ''}</span>${parts.length > 1 ? `<button class="link" data-rm="${i}" style="color:var(--bad)">移除</button>` : ''}</div>
+      ${area('pp' + i, t, 'data-i="' + i + '" style="min-height:' + (i === 0 ? 88 : 130) + 'px"')}<div class="hint" data-cc="${i}"></div></div>`).join('') + '<button class="link" data-add>＋ 新增一則</button>';
+  const view = () => parts.map((t, i) => `<div class="f"><div class="lab">第 ${i + 1} 則${i < done ? ' <span class="pill ok">已發出</span>' : ''}</div><div class="note" style="white-space:pre-wrap;color:var(--text)">${esc(t)}</div></div>`).join('');
+  const others = ACCTS.filter((a) => a.id !== p.account_id && a.status === 'ok');
+  sheet(`${PST[p.status]?.[0] || '貼文'}${parts.length > 1 ? `・串文 ${parts.length} 則` : ''}`, `${p.error_message ? `<div class="note ${draft ? 'warn' : 'bad'}" style="margin-bottom:12px">${esc(p.error_message)}</div>` : ''}
+    <p class="t-sub" style="margin-bottom:12px">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>
+    <div id="parts">${draft ? editor() : view()}</div>
+    <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="ok">核准發布</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}
+    ${p.status === 'failed' ? `<button class="btn" data-a="retry">${done ? `從第 ${done + 1} 則接續發布` : '重試發布'}</button>` : ''}
+    ${others.length ? '<button class="btn sec" data-a="dist">改寫分發</button>' : ''}
+    ${draft || p.status === 'failed' ? '<button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn dng" data-a="del">取消排程</button>' : ''}</div>`, (el, close) => {
+    const sync = () => $$('[data-i]', el).forEach((t) => { parts[+t.dataset.i] = t.value; });
+    const bind = () => {
+      $$('[data-i]', el).forEach((t) => { const cc = $(`[data-cc="${t.dataset.i}"]`, el); const u = () => { const n = [...t.value].length; cc.textContent = `${n} / 500 字`; cc.className = 'hint' + (n > 500 ? ' bad' : ''); }; t.oninput = u; u(); });
+      $$('[data-rm]', el).forEach((b) => b.onclick = () => { sync(); parts.splice(+b.dataset.rm, 1); $('#parts', el).innerHTML = editor(); bind(); });
+      $('[data-add]', el)?.addEventListener('click', () => { sync(); parts.push(''); $('#parts', el).innerHTML = editor(); bind(); $(`#pp${parts.length - 1}`, el).focus(); });
+    };
+    if (draft) bind();
+    $$('[data-a]', el).forEach((b) => b.onclick = () => {
+      if (b.dataset.a === 'dist') { close(); return openDistribute(p, others, () => {}); }
+      act(b, async () => {
+        const a = b.dataset.a; if (draft) sync();
+        const body = { parts: parts.map((x) => x.trim()) };
+        if ((a === 'save' || a === 'ok') && body.parts.some((x) => !x)) throw new Error('有空白的則數，請填寫或移除');
+        if (a === 'save') { await api('PUT', '/posts/' + p.id, body); toast('已儲存', 'ok'); return; }
+        if (a === 'ok') {
+          const over = body.parts.findIndex((x) => [...x].length > 500); if (over >= 0) throw new Error(`第 ${over + 1} 則超過 500 字，Threads 會拒收`);
+          await api('PUT', '/posts/' + p.id, body); const r = await api('POST', `/posts/${p.id}/approve`, {});
+          toast(r.warning || '已核准，將依排程發布', r.warning ? '' : 'ok');
+        }
+        if (a === 'del') { if (!(await confirmSheet(p.status === 'scheduled' ? '取消這則排程？' : '刪除這則貼文？'))) return; await api('DELETE', '/posts/' + p.id); toast('已刪除', 'ok'); }
+        if (a === 'retry') { await api('POST', `/posts/${p.id}/retry`, {}); toast(done ? `將從第 ${done + 1} 則接續發布` : '已重新排入發布', 'ok'); }
+        close(); render();
+      });
+    });
+  });
+}
+function openDistribute(p, others, closeParent) {
+  sheet('改寫分發', `<p class="t-sub" style="margin-bottom:12px">AI 會用各帳號的人設重寫這串內容（鉤子與用字都會不同），建立成草稿並錯開 45 分鐘發布，避免內容雷同。</p>
+    <div class="list">${others.map((a) => row({ go: false, title: '@' + esc(a.username || a.id), sub: esc(a.persona || '未設定人設'), end: sw('d' + a.id, true, '分發到 @' + (a.username || a.id)) })).join('')}</div>
+    <div class="actions" style="margin-top:20px"><button class="btn" id="dg">開始改寫</button></div>`, (el, close) => {
+    $('#dg', el).onclick = (e) => act(e.currentTarget, async () => {
+      const ids = others.filter((a) => $('#d' + a.id, el).checked).map((a) => a.id); if (!ids.length) throw new Error('請至少選擇一個帳號');
+      const r = await api('POST', `/posts/${p.id}/distribute`, { account_ids: ids });
+      close(); closeParent(); S.postSeg = 'draft'; S.postAcct = 0;
+      toast(r.stopped ? `已建立 ${r.created} 則，之後因額度停止：${r.stopped}` : `已建立 ${r.created} 則改寫草稿，請到「待審核」確認`, r.stopped ? '' : 'ok'); render();
+    });
   });
 }
 async function postSettingsPage() {
@@ -450,6 +490,11 @@ async function postSettingsPage() {
     <div class="list" style="margin-top:16px">${row({ go: false, title: '模式 C 需審核', end: sw('rr', s.require_review, '模式 C 需審核') })}</div>
     ${field('ppd', '每日發文數', input('ppd', s.posts_per_day, 'type="number" min="1" max="5" inputmode="numeric"'), '1 到 5 篇。')}
     ${field('times', '發布時間', input('times', s.publishing_times.join(','), 'inputmode="numeric" placeholder="10:00,14:00,20:00"'), '24 小時制 HH:MM，依品牌時區，數量需不少於每日篇數。')}
+    <h2 class="t-sec" style="margin-top:32px">內容策略</h2>
+    ${field('style', '寫作原則', input('style', s.style_preset), '套用到每一串貼文。預設「爭議化、數據化、具體化」。')}
+    ${field('tmin', '每串則數', `<div class="two"><input id="tmin" type="number" min="1" max="10" inputmode="numeric" value="${s.thread_min}" aria-label="最少則數"><input id="tmax" type="number" min="1" max="10" inputmode="numeric" value="${s.thread_max}" aria-label="最多則數"></div>`, '最少／最多，1 到 10。第一則固定是鉤子，最後一則固定是 CTA。設 1 則代表單篇貼文。')}
+    ${field('facts', '可引用數據', area('facts', s.fact_bank, 'style="min-height:140px" placeholder="每行一筆，附上出處，例如：\n台灣大學社團活動贊助平均約 3 萬元（2025 某某調查）"'), 'AI 只能使用這裡的數字；需要數據但這裡沒有時，會寫成【待補數據】，補上真實數字前無法核准。')}
+    <h2 class="t-sec" style="margin-top:32px">預設語氣與導流</h2>
     ${field('tone', '品牌語氣', input('tone', s.content_tone))}${field('tops', '內容主題', input('tops', s.content_topics.join(',')), '逗號分隔。')}${field('ban', '禁用詞', input('ban', s.banned_words.join(',')), '逗號分隔；貼文含這些詞時會被擋下。')}
     ${field('cta', 'CTA 文字', input('cta', s.cta_text))}${field('url', 'LINE 加好友網址', input('url', s.line_add_url, 'inputmode="url" placeholder="https://line.me/R/ti/p/@你的ID"'), '貼文結尾會自動附上「CTA 文字 + 網址」。請先用手機點開確認可加入好友。')}
     <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存設定</button></div></div></div>`, 'form');
@@ -459,10 +504,11 @@ async function postSettingsPage() {
     const btn = e.currentTarget, t = list($('#times').value).map((x) => x.replace('：', ':')); $('#times').value = t.join(',');
     const url = $('#url').value.trim(); $('#url').value = url;
     if (!check([[$('#ppd'), !(+$('#ppd').value >= 1 && +$('#ppd').value <= 5), '每日發文數需為 1 到 5'], [$('#times'), !t.length || t.some((x) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)), '發布時間格式需為 HH:MM，例如 09:30,14:00'],
-      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`], [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭']])) return;
+      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`], [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭'],
+      [$('#tmin'), !(+$('#tmin').value >= 1 && +$('#tmax').value <= 10 && +$('#tmin').value <= +$('#tmax').value), '每串則數需為 1 到 10，且最少不可大於最多']])) return;
     if (url && !/line\.me/.test(url) && !(await confirmSheet('這個網址看起來不是 LINE 的加好友連結，仍要使用？', '仍要使用', false))) return;
     if ($('#mode').value === 'A' && s.posting_mode !== 'A' && !s.regulated && !(await confirmSheet('全自動模式不會經過人工審核就直接發布，確定切換？', '確定切換', false))) return;
-    const ok = await act(btn, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: t, content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url }), '已儲存');
+    const ok = await act(btn, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: t, content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url, style_preset: $('#style').value.trim(), thread_min: +$('#tmin').value, thread_max: +$('#tmax').value, fact_bank: $('#facts').value }), '已儲存');
     if (ok) dirty = false;
   };
 }
@@ -547,13 +593,14 @@ async function leadsPage() {
    設定（分組清單 + 子頁）
    ====================================================================== */
 async function settingsPage(r) {
+  if (r.sub === 'threads' && r.arg) return threadsAccountPage(+r.arg);
   const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage }[r.sub];
   if (sub) return sub();
   const [ig, st, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/dashboard')]);
   TZ = st.brand.timezone; bar({ title: '設定' });
   const stat = (ok, warn) => `<span class="pill ${ok ? 'ok' : warn ? 'warn' : ''}">${ok ? '已連線' : warn || '未設定'}</span>`;
   setView(`<section>${sec('連線')}<div class="list">
-      ${row({ act: 'threads', title: 'Threads', sub: ig.threads.configured ? `@${esc(ig.threads.username || '')}` : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
+      ${row({ act: 'threads', title: 'Threads 帳號', sub: ig.threads.accounts?.length ? ig.threads.accounts.map((a) => '@' + esc(a.username || '')).join('、') : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
       ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
     <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'audit', title: '操作紀錄' })}</div></section>
@@ -564,14 +611,44 @@ async function settingsPage(r) {
 }
 async function logout() { await api('POST', '/logout').catch(() => {}); me = null; $('#app').innerHTML = ''; render(); }
 async function threadsPage() {
-  const [ig, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/dashboard')]); const t = ig.threads; bar({ title: 'Threads', back: 'settings' });
-  setView(t.configured ? `<div class="list">${row({ go: false, dot: d.threads_status === 'ok' ? 'ok' : 'bad', title: `@${esc(t.username || '')}`, sub: d.threads_status === 'ok' ? '已連結' : '授權已失效，請重新連結' })}${t.expires_at ? row({ go: false, title: '授權效期', sub: `${fmt(t.expires_at)} 前由系統自動續期，無需處理` }) : ''}</div>
-    <div class="actions"><button class="btn sec" id="tt">測試連線</button><button class="btn ghost" id="tr">重新連結</button><button class="btn dng" id="toff">中斷連結</button></div>`
-    : `<p class="mut">按下按鈕後會前往 Threads 授權，完成後自動回到後台。</p>${t.oauth_available ? '' : '<div class="note warn">系統尚未設定 Threads App，請聯絡開發者。</div>'}<button class="btn block" id="tc" ${t.oauth_available ? '' : 'disabled'}>連結 Threads</button><button class="link" data-go="help">遇到問題？查看說明</button>`);
+  const ig = await api('GET', '/integrations'); const t = ig.threads, accts = t.accounts || []; ACCTS = accts;
+  bar({ title: 'Threads 帳號', back: 'settings', right: accts.length && t.oauth_available ? '<button class="btn sm" id="tadd" style="margin-right:4px">新增帳號</button>' : '' });
+  setView(accts.length ? `<div class="list">${accts.map((a) => row({ act: 'acct', id: a.id, dot: a.status === 'ok' ? (a.auto_post_enabled ? 'ok' : '') : 'bad', title: '@' + esc(a.username || a.id),
+      sub: a.status !== 'ok' ? '授權已失效，請重新連結' : `${esc(a.persona ? a.persona.slice(0, 24) : '未設定人設')}${a.auto_post_enabled ? '' : ' · 自動發文已暫停'}` })).join('')}</div>
+    <p class="t-sub">每個帳號可以設定自己的人設、語氣與發文時段；沒設定的項目沿用「發文設定」的預設值。多個帳號共用預設時段時，系統會自動錯開 20 分鐘。</p>
+    <p class="t-sub">要新增帳號：先在 Threads App 登入那個帳號，再按右上角「新增帳號」。</p>
+    <div class="actions"><button class="btn sec" id="tt">測試所有帳號</button></div>`
+    : `<p class="mut">連結後即可自動發文。可以連結多個帳號，各自設定人設，經營帳號矩陣。</p>${t.oauth_available ? '' : '<div class="note warn" style="margin-top:12px">系統尚未設定 Threads App，請聯絡服務商。</div>'}
+      <button class="btn block" id="tc" style="margin-top:16px" ${t.oauth_available ? '' : 'disabled'}>連結 Threads 帳號</button><button class="link" data-go="help">遇到問題？查看說明</button>`);
   const connect = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
-  $('#tc')?.addEventListener('click', connect); $('#tr')?.addEventListener('click', connect);
+  $('#tc')?.addEventListener('click', connect); $('#tadd')?.addEventListener('click', connect);
+  $$('[data-act=acct]').forEach((b) => b.onclick = () => go('settings/threads/' + b.dataset.id));
   $('#tt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
-  $('#toff')?.addEventListener('click', (e) => act(e.currentTarget, async () => { if (!(await confirmSheet('中斷 Threads 連結？自動發文將無法發布。', '中斷連結'))) return; await api('DELETE', '/integrations/threads'); toast('已中斷連結', 'ok'); render(); }));
+}
+async function threadsAccountPage(id) {
+  const [ig, st] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings')]); TZ = st.brand.timezone;
+  const a = (ig.threads.accounts || []).find((x) => x.id === id); if (!a) return go('settings/threads');
+  const s = st.settings;
+  bar({ title: '@' + (a.username || a.id), back: 'settings/threads', dot: a.status === 'ok' ? 'ok' : 'bad' });
+  setView(`<div data-form>
+    ${a.status !== 'ok' ? '<div class="note bad" style="margin-bottom:16px">授權已失效。請在 Threads App 登入這個帳號後按「重新連結」。</div>' : ''}
+    <div class="list">${row({ go: false, title: '自動發文', sub: '關閉後這個帳號不會自動生成與發布', end: sw('aon', a.auto_post_enabled, '這個帳號自動發文') })}${a.expires_at ? row({ go: false, title: '授權效期', sub: `${fmt(a.expires_at)} 前由系統自動續期` }) : ''}</div>
+    ${field('persona', '人設', area('persona', a.persona, 'placeholder="例如：說話直接的活動贊助顧問，用第一人稱分享踩過的坑"'), 'AI 會用這個身分寫這個帳號的貼文。矩陣帳號建議每個人設都不同，避免內容雷同。')}
+    ${field('atone', '語氣', input('atone', a.tone || '', `placeholder="沿用預設：${esc(s.content_tone)}"`))}
+    ${field('atopics', '內容主題', input('atopics', (a.topics || []).join(','), `placeholder="${s.content_topics.length ? '沿用預設：' + esc(s.content_topics.join(',')) : '例如：活動贊助,企業合作,提案技巧'}"`), '逗號分隔。')}
+    ${field('appd', '每日發文數', input('appd', a.posts_per_day ?? '', `type="number" min="1" max="5" inputmode="numeric" placeholder="沿用預設：${s.posts_per_day}"`))}
+    ${field('atimes', '發布時間', input('atimes', (a.publishing_times || []).join(','), `inputmode="numeric" placeholder="沿用預設：${esc(s.publishing_times.join(','))}"`), '留空則沿用預設並自動與其他帳號錯開。')}
+    ${field('acta', 'CTA 文字', input('acta', a.cta_text || '', `placeholder="沿用預設：${esc(s.cta_text)}"`))}
+    <div class="actions" style="margin-top:24px"><button class="btn sec" id="at">測試連線</button><button class="btn ghost" id="ar">重新連結</button><button class="btn dng" id="aoff">中斷連結</button></div>
+    <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存</button></div></div></div>`, 'form');
+  $('#save').onclick = async (e) => {
+    const t = list($('#atimes').value).map((x) => x.replace('：', ':')), n = $('#appd').value.trim();
+    if (!check([[$('#appd'), n && !(+n >= 1 && +n <= 5), '每日發文數需為 1 到 5，或留空沿用預設'], [$('#atimes'), t.some((x) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)), '發布時間格式需為 HH:MM'], [$('#atimes'), t.length && t.length < (+n || s.posts_per_day), '發布時間數量少於每日篇數']])) return;
+    if (await act(e.currentTarget, () => api('PATCH', '/accounts/' + a.id, { persona: $('#persona').value.trim(), tone: $('#atone').value.trim(), topics: list($('#atopics').value), posts_per_day: n ? +n : null, publishing_times: t.length ? t : null, cta_text: $('#acta').value.trim(), auto_post_enabled: $('#aon').checked }), '已儲存')) dirty = false;
+  };
+  $('#at').onclick = (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads', account_id: a.id }); toast(r.message, r.ok ? 'ok' : 'bad'); });
+  $('#ar').onclick = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
+  $('#aoff').onclick = (e) => act(e.currentTarget, async () => { if (!(await confirmSheet(`中斷 @${a.username} 的連結？尚未發出的排程會改回草稿。`, '中斷連結'))) return; await api('DELETE', '/accounts/' + a.id); dirty = false; toast('已中斷連結', 'ok'); go('settings/threads'); });
 }
 async function lineConnPage() {
   const ig = await api('GET', '/integrations'); const l = ig.line; bar({ title: 'LINE 官方帳號', back: 'settings' });
@@ -642,7 +719,8 @@ const HELP = [
   ['start', '第一次使用，照這 5 步', `<ol><li><b>設定 → LINE 官方帳號：</b>貼上 Channel secret 與 access token。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」。</li></ol><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
   ['line', '如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 複製 <b>Channel secret</b>（32 位英數字）。</li><li><b>Messaging API</b> 按 <b>Issue</b> 產生 <b>Channel access token (long-lived)</b> 並複製。</li><li>貼到「設定 → LINE 官方帳號」，按「驗證並儲存」，系統會自動設定 Webhook。</li><li>回到 LINE Developers，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，<b>關閉「自動回應訊息」與「加入好友的歡迎訊息」</b>，否則會重複回覆。</li></ol><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
   ['gemini', '如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b> 並複製。</li><li>貼到「設定 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p>AI 只用來寫 Threads 貼文，不讀取顧客資料。每日生成次數有上限，用完自動停止，不會多收費。</p>`],
-  ['threads', '如何連結 Threads', `<ol><li>到「設定 → Threads」按<b>連結 Threads</b>。</li><li>登入要發文的帳號並按同意。</li><li>完成後自動回到後台，顯示「已連結」。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，再按一次「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡開發者。</div>`],
+  ['threads', '如何連結 Threads（可多個帳號）', `<ol><li>先在 Threads App 登入要發文的帳號。</li><li>到「設定 → Threads 帳號」按<b>連結</b>（已有帳號時按右上角「新增帳號」），並按同意。</li><li>完成後自動回到後台，帳號會出現在清單裡。要再加一個帳號，就在 Threads App 切換帳號後重複一次。</li><li>點進每個帳號可以設定<b>人設</b>、語氣、主題與發文時段；沒填的沿用預設。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，在 Threads App 登入該帳號後按「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡服務商。</div>`],
+  ['thread', '串文、改寫分發與【待補數據】', `<ul><li><b>串文：</b>AI 依「爭議化、數據化、具體化」一次寫一整串，第一則是鉤子、最後一則是 CTA（自動附上 LINE 連結）。審核時可以逐則修改、新增或移除。</li><li><b>則數：</b>在「貼文 → 發文設定 → 內容策略」調整，設 1 則就是單篇貼文。</li><li><b>【待補數據】：</b>AI 只能引用你在「可引用數據」填的數字；需要數據但沒有時會留下【待補數據】，補上真實數字前無法核准，避免散布不實數據。</li><li><b>改寫分發：</b>打開一串貼文按「改寫分發」，AI 會用其他帳號的人設重寫，並錯開 45 分鐘發布。</li><li><b>發到一半中斷：</b>系統會記住發到第幾則，按「接續發布」只會補發剩下的，不會重複。</li></ul>`],
   ['modes', '三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接發布。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，核准才發。</li><li><b>C 指定主題：</b>依「本週主題」生成，可選擇是否審核。</li></ul><div class="note bad">金融、放款等受監管產業一律強制人工審核。</div><p>內容檢查會擋下「保證核貸」「免審」等字眼，被擋的草稿需修改後才能核准。</p>`],
   ['leads', '顧客留資怎麼運作', `<ol><li>顧客在 LINE 點「立即詢問」→ 看隱私告知 → 輸入「同意」。</li><li>回答服務類型與表單問題 → 確認送出。</li><li>你在「留資」看到新紀錄（未處理）。</li><li>聯絡後標記為「已處理」。</li></ol><p>顧客可輸入「查詢我的資料」「刪除我的資料」。超過保存期限（預設 180 天）自動刪除。</p>`],
   ['human', '真人接手怎麼運作', `<ul><li>顧客點「聯絡專人」或輸入「真人／客服」後，系統<b>暫停對該顧客自動回覆</b>。</li><li>請到 <b>LINE Official Account Manager</b> 聊天介面親自回覆。</li><li>顧客輸入「選單」或滿 24 小時才會恢復自動回覆。</li></ul>`],

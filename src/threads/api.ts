@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { Cred } from './accounts';
 
 const BASE = 'https://graph.threads.net/v1.0';
 
@@ -6,6 +6,8 @@ const BASE = 'https://graph.threads.net/v1.0';
 export class ThreadsApiError extends Error {
   constructor(public status: number, public code: number | undefined, msg: string) { super(msg); }
   get tokenInvalid() { return this.status === 401 || this.code === 190; }
+  /** 缺少權限（例如未授權 threads_manage_replies 卻嘗試串文） */
+  get permission() { return this.code === 10 || this.code === 200 || /permission/i.test(this.message); }
 }
 /** 請求送出後未取得回應（結果未知）。 */
 export class ThreadsUnknownError extends Error {}
@@ -17,30 +19,24 @@ async function call(url: string, init: RequestInit): Promise<any> {
   if (!res.ok) throw new ThreadsApiError(res.status, body?.error?.code, body?.error?.message ?? `HTTP ${res.status}`);
   return body;
 }
-
 const form = (o: Record<string, string>) => ({
   method: 'POST' as const,
   headers: { 'content-type': 'application/x-www-form-urlencoded' },
   body: new URLSearchParams(o).toString(),
 });
 
-/** 步驟 1：建立 media container（尚未公開） */
-export async function createContainer(env: Env, text: string): Promise<string> {
-  const r = await call(`${BASE}/${env.THREADS_USER_ID}/threads`,
-    form({ media_type: 'TEXT', text, access_token: env.THREADS_ACCESS_TOKEN }));
-  return r.id as string;
+/** 步驟 1：建立 media container；replyTo 有值時成為該則的回覆（串文） */
+export async function createContainer(c: Cred, text: string, replyTo?: string): Promise<string> {
+  const p: Record<string, string> = { media_type: 'TEXT', text, access_token: c.token };
+  if (replyTo) p.reply_to_id = replyTo;
+  return (await call(`${BASE}/${c.userId}/threads`, form(p))).id as string;
 }
-
 /** 步驟 2：發布 container，回傳平台貼文 ID */
-export async function publishContainer(env: Env, creationId: string): Promise<string> {
-  const r = await call(`${BASE}/${env.THREADS_USER_ID}/threads_publish`,
-    form({ creation_id: creationId, access_token: env.THREADS_ACCESS_TOKEN }));
-  return r.id as string;
+export async function publishContainer(c: Cred, creationId: string): Promise<string> {
+  return (await call(`${BASE}/${c.userId}/threads_publish`, form({ creation_id: creationId, access_token: c.token }))).id as string;
 }
-
 /** 核對用：取得近期已發布貼文 */
-export async function listRecent(env: Env, limit = 25): Promise<{ id: string; text?: string; timestamp?: string }[]> {
-  const u = `${BASE}/${env.THREADS_USER_ID}/threads?fields=id,text,timestamp&limit=${limit}&access_token=${encodeURIComponent(env.THREADS_ACCESS_TOKEN)}`;
-  const r = await call(u, { method: 'GET' });
+export async function listRecent(c: Cred, limit = 25): Promise<{ id: string; text?: string; timestamp?: string }[]> {
+  const r = await call(`${BASE}/${c.userId}/threads?fields=id,text,timestamp&limit=${limit}&access_token=${encodeURIComponent(c.token)}`, { method: 'GET' });
   return r.data ?? [];
 }

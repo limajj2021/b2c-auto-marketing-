@@ -1,10 +1,11 @@
 import { audit, getBrand } from '../db';
-import { deleteCreds, getMeta, setCred, withCreds } from '../integrations';
+import { credFor, listAccounts, markAccount, setAccountToken, upsertAccount } from './accounts';
 import type { Env } from '../types';
 import { hmacBase64, signToken, timingSafeEqual, verifyToken } from '../util/crypto';
 
 const OAUTH = 'https://graph.threads.net';
-export const SCOPES = 'threads_basic,threads_content_publish';
+// threads_manage_replies：串文（回覆自己上一則）需要
+export const SCOPES = 'threads_basic,threads_content_publish,threads_manage_replies';
 const STATE_TTL = 600;
 const REFRESH_BEFORE_DAYS = 10;
 
@@ -52,8 +53,7 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
     const me = await jget(`${OAUTH}/v1.0/me?fields=id,username&access_token=${encodeURIComponent(long.access_token)}`);
     const brand = await getBrand(env);
     const expiresAt = new Date(now + (long.expires_in ?? 5184000) * 1000).toISOString();
-    await setCred(env, brand.id, 'threads_access_token', long.access_token, { username: me.username, expires_at: expiresAt });
-    await setCred(env, brand.id, 'threads_user_id', String(me.id), { username: me.username });
+    await upsertAccount(env, brand.id, { userId: String(me.id), username: me.username ?? null, token: long.access_token, expiresAt });
     await env.DB.prepare(`UPDATE brand_settings SET threads_status='ok' WHERE brand_id=?`).bind(brand.id).run();
     await audit(env, brand.id, null, 'threads_connected', me.username ?? '');
     return redirect('/?threads=connected');
@@ -63,22 +63,22 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
   }
 }
 
-/** 到期前自動續期（長效 token 約 60 天，需存活 24 小時以上才可續期）。 */
+/** 每個帳號到期前自動續期（長效 token 約 60 天，需存活 24 小時以上才可續期）。 */
 export async function refreshIfNeeded(env: Env, now = new Date()): Promise<void> {
-  const meta = await getMeta(env, 'threads_access_token');
-  if (!meta?.expires_at || !env.THREADS_ACCESS_TOKEN) return;
-  const left = new Date(meta.expires_at).getTime() - now.getTime();
-  if (left > REFRESH_BEFORE_DAYS * 86400000) return;
   const brand = await getBrand(env);
-  try {
-    const r = await jget(`${OAUTH}/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(env.THREADS_ACCESS_TOKEN)}`);
-    await setCred(env, brand.id, 'threads_access_token', r.access_token, {
-      ...meta, expires_at: new Date(now.getTime() + (r.expires_in ?? 5184000) * 1000).toISOString(),
-    });
-    await audit(env, brand.id, null, 'threads_token_refreshed');
-  } catch (e) {
-    console.error('threads:refresh', (e as Error).message);
-    if (left <= 0) await env.DB.prepare(`UPDATE brand_settings SET threads_status='token_invalid' WHERE brand_id=?`).bind(brand.id).run();
+  for (const a of await listAccounts(env)) {
+    if (!a.expires_at) continue;
+    const left = new Date(a.expires_at).getTime() - now.getTime();
+    if (left > REFRESH_BEFORE_DAYS * 86400000) continue;
+    try {
+      const c = await credFor(env, a);
+      const r = await jget(`${OAUTH}/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(c.token)}`);
+      await setAccountToken(env, a.id, r.access_token, new Date(now.getTime() + (r.expires_in ?? 5184000) * 1000).toISOString());
+      await audit(env, brand.id, null, 'threads_token_refreshed', a.username ?? '');
+    } catch (e) {
+      console.error('threads:refresh', (e as Error).message);
+      if (left <= 0) await markAccount(env, a.id, 'token_invalid');
+    }
   }
 }
 
@@ -98,13 +98,9 @@ export async function handleMetaCallback(env: Env, req: Request, kind: 'deauthor
   const data = await parseSignedRequest(env, req);
   if (!data) return new Response('invalid', { status: 400 });
   const brand = await getBrand(env);
-  const uid = await env.DB.prepare(`SELECT value_enc FROM integrations WHERE name='threads_user_id'`).first();
-  if (uid) {
-    const e2 = await withCreds(env);
-    if (!data.user_id || e2.THREADS_USER_ID === String(data.user_id)) {
-      await deleteCreds(env, ['threads_access_token', 'threads_user_id']);
-      await audit(env, brand.id, null, `threads_${kind}`);
-    }
+  if (data.user_id) {
+    const r = await env.DB.prepare('DELETE FROM threads_accounts WHERE brand_id=? AND threads_user_id=?').bind(brand.id, String(data.user_id)).run();
+    if (r.meta.changes) await audit(env, brand.id, null, `threads_${kind}`);
   }
   const code = crypto.randomUUID();
   return kind === 'delete'

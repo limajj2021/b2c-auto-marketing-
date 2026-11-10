@@ -59,6 +59,14 @@ npm run provision -- --brand acme
 ```
 詳見 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
+## 矩陣帳號與串文（2026-11-10 新增）
+
+- 一個企業可連結多個 Threads 帳號（`threads_accounts`），每個帳號有自己的人設、語氣、主題、發文時段；未設定的項目沿用品牌預設，共用預設時段時自動錯開 20 分鐘。
+- 貼文為串文（`posts.parts`），第一則鉤子、最後一則 CTA；以 `reply_to_id` 回覆上一則串起來，逐則記錄已發出的 ID（`posts.part_ids`），中斷後只補發剩下的。需要 Meta 權限 `threads_manage_replies`。
+- 「改寫分發」：以其他帳號的人設改寫同一串，建立草稿並錯開 45 分鐘。
+- 內容策略（品牌層級）：寫作原則（預設「爭議化、數據化、具體化」）、每串則數、可引用數據。AI 不得自行編造數字，缺數據時留下【待補數據】，補上前無法核准。
+- 舊版單帳號資料會在第一次讀取時自動搬入帳號表。
+
 ## 重要設計決定
 
 - **防重複發文**：`posts.slot_key` 唯一約束 + 原子狀態搶佔（`scheduled→publishing`）+ 保存 `creation_id` 重用；請求結果不明時標記 `unknown`，先向 Threads 列表核對文字再決定是否重試。

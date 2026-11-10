@@ -26,9 +26,17 @@ export function checkContent(text: string, opts: { industry: string; bannedWords
   if (!t) issues.push('內容為空');
   if ([...t].length > THREADS_MAX_CHARS) issues.push(`超過 ${THREADS_MAX_CHARS} 字`);
   for (const re of ALWAYS_BANNED) if (re.test(t)) issues.push(`禁止宣稱：${re.source}`);
+  if (/【待補數據/.test(t)) issues.push('含【待補數據】，請補上有出處的真實數字');
   if (REGULATED_INDUSTRIES.includes(opts.industry)) {
     for (const re of REGULATED_EXTRA) if (re.test(t)) issues.push(`受監管產業須人工填寫：${re.source}`);
   }
   for (const w of opts.bannedWords) if (w && t.includes(w)) issues.push(`企業禁用詞：${w}`);
   return issues;
+}
+
+/** 串文逐則檢查，回傳帶則數標示的問題清單。 */
+export function checkParts(parts: string[], opts: { industry: string; bannedWords: string[] }): string[] {
+  const out: string[] = [];
+  parts.forEach((p, i) => checkContent(p, opts).forEach((x) => out.push(parts.length > 1 ? `第 ${i + 1} 則：${x}` : x)));
+  return out;
 }

@@ -11,7 +11,7 @@
 ## Threads「一鍵連結」前置（開發者一次性）
 
 所有客戶共用同一個 Meta App（由開發者持有）：
-1. Meta for Developers 建立 App，加入 Threads 使用案例，權限 `threads_basic`、`threads_content_publish`。
+1. Meta for Developers 建立 App，加入 Threads 使用案例，權限 `threads_basic`、`threads_content_publish`、`threads_manage_replies`（串文需要）。
 2. 在 Threads 設定登記 **重新導向回呼網址**：`https://<管理網址>/threads/callback`；解除安裝與刪除回呼網址分別為 `https://<管理網址>/threads/deauthorize`、`https://<管理網址>/threads/delete`。
 3. 基本資料填入隱私政策 `https://<管理網址>/privacy`、服務條款 `/terms`、資料刪除說明 `/data-deletion`。
 4. 把 Threads App ID 寫進 `brands/<brand>.json` 的 `threadsAppId`，App secret 放 `.secrets/<brand>.env` 的 `THREADS_APP_SECRET`。
