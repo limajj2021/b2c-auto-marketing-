@@ -135,6 +135,22 @@ export function registerExtra(add: Add, json: J, err: E) {
     return json({ ok: true });
   });
 
+  // 唯讀：列出已連結 Threads 帳號自己發過的貼文（用於分析範本帳號的貼文架構），最多 150 則
+  add('GET', '/integrations/threads/posts', 'admin', async ({ env }) => {
+    if (!env.THREADS_ACCESS_TOKEN) return err(409, '尚未連結 Threads');
+    const fields = 'id,text,timestamp,permalink,media_type,is_quote_post';
+    let url: string | null = `https://graph.threads.net/v1.0/me/threads?fields=${fields}&limit=50&access_token=${encodeURIComponent(env.THREADS_ACCESS_TOKEN)}`;
+    const out: unknown[] = [];
+    for (let i = 0; i < 3 && url; i++) {
+      const r = await fetch(url);
+      const d: any = await r.json().catch(() => ({}));
+      if (!r.ok) return err(502, `Threads 回應錯誤：${d?.error?.message ?? r.status}`);
+      out.push(...(d.data ?? []));
+      url = d.paging?.next ?? null;
+    }
+    return json(out);
+  });
+
   add('GET', '/audit', 'admin', async ({ env, brandId }) =>
     json((await env.DB.prepare(`SELECT actor,action,detail,created_at FROM audit_logs WHERE brand_id=? AND action<>'login_fail' ORDER BY id DESC LIMIT 50`).bind(brandId).all()).results));
 

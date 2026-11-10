@@ -126,3 +126,16 @@ describe('Threads OAuth', () => {
   });
 });
 void signToken;
+
+describe('Threads own-posts export', () => {
+  it('pages through /me/threads and is admin-only', async () => {
+    const env = await makeEnv();
+    const admin = await loginAs(env);
+    const staff = await loginAs(env, 'cs', 'staff-password-1');
+    expect((await api(env, 'GET', '/api/integrations/threads/posts', undefined, staff)).status).toBe(403);
+    const m = mockFetch((u) => u.includes('after=p2') ? jres({ data: [{ id: '2', text: 'b' }] })
+      : jres({ data: [{ id: '1', text: 'a' }], paging: { next: 'https://graph.threads.net/v1.0/me/threads?after=p2' } })); restore = m.restore;
+    const r = await api(env, 'GET', '/api/integrations/threads/posts', undefined, admin);
+    expect(await r.json()).toEqual([{ id: '1', text: 'a' }, { id: '2', text: 'b' }]);
+  });
+});
