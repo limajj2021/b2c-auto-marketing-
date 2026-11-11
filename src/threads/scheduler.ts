@@ -41,7 +41,7 @@ async function housekeeping(env: Env, now: Date) {
   const s = await getSettings(env, brand.id);
   await env.DB.prepare('DELETE FROM inquiries WHERE brand_id=? AND created_at<?').bind(brand.id, new Date(now.getTime() - s.retention_days * 86400000).toISOString()).run();
   await env.DB.prepare('DELETE FROM processed_events WHERE brand_id=? AND processed_at<?').bind(brand.id, new Date(now.getTime() - 7 * 86400000).toISOString()).run();
-  await env.DB.prepare(`UPDATE posts SET status='gen_failed', updated_at=? WHERE status='generating' AND updated_at<?`).bind(iso(now), new Date(now.getTime() - STALE_MS).toISOString()).run();
+  await env.DB.prepare(`UPDATE posts SET status='gen_failed', updated_at=? WHERE brand_id=? AND status='generating' AND updated_at<?`).bind(iso(now), brand.id, new Date(now.getTime() - STALE_MS).toISOString()).run();
 }
 
 /** 為每個啟用中的帳號，在今天與明天的每個時段確保有一串貼文（slot_key 唯一約束防重複）。 */

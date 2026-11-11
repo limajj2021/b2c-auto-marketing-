@@ -14,10 +14,18 @@ export interface Env {
   CRED_ENC_KEY?: string;
   THREADS_APP_ID?: string;
   THREADS_APP_SECRET?: string;
+  /** "1" = 共用架構（多工作區）；未設定 = 單一企業獨立部署 */
+  MULTI_TENANT?: string;
+  /** 每次排程最多處理幾個工作區（輪替），預設 25 */
+  CRON_BATCH?: string;
+  /** 由請求解析出的工作區；只在程式內部設定 */
+  BRAND_ID?: string;
 }
 
 export interface Brand {
   id: string;
+  slug?: string;
+  status?: string;
   name: string;
   industry: string;
   description: string;

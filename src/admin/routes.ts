@@ -1,7 +1,9 @@
 import { generateThread, QuotaError } from '../ai/gemini';
 import { checkParts } from '../ai/compliance';
 import { getAccount, listAccounts } from '../threads/accounts';
-import { audit, getBrand, getSettings, jsonArr } from '../db';
+import { audit, brandBySlug, forBrand, getBrand, getSettings, isMulti, jsonArr } from '../db';
+import { withCreds } from '../integrations';
+import { handleOps } from './ops';
 import { validateLineConfig, parseLineConfig } from '../line/config';
 import { needsReview, partsOf, publishOne } from '../threads/scheduler';
 import type { Env } from '../types';
@@ -9,7 +11,7 @@ import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/cr
 import { isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
 import { registerExtra } from './extra';
 
-export interface Actor { id: number; name: string; role: 'admin' | 'staff' }
+export interface Actor { id: number; name: string; role: 'admin' | 'staff'; brandId: string }
 const SESSION_SEC = 8 * 3600;
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -26,8 +28,8 @@ export async function authenticate(env: Env, req: Request, now = Date.now()): Pr
   if (!tok) return null;
   const v = await verifyToken(env.SESSION_SECRET, tok, Math.floor(now / 1000));
   if (!v) return null;
-  const u = await env.DB.prepare('SELECT id,authentication_id,role FROM admin_users WHERE id=? AND enabled=1').bind(v.uid).first<any>();
-  return u ? { id: u.id, name: u.authentication_id, role: u.role } : null;
+  const u = await env.DB.prepare('SELECT id,authentication_id,role,brand_id FROM admin_users WHERE id=? AND enabled=1').bind(v.uid).first<any>();
+  return u ? { id: u.id, name: u.authentication_id, role: u.role, brandId: u.brand_id } : null;
 }
 
 type Handler = (c: { env: Env; req: Request; actor: Actor; m: RegExpMatchArray; url: URL; brandId: string }) => Promise<Response>;
@@ -35,22 +37,43 @@ const routes: { method: string; re: RegExp; role: 'admin' | 'staff'; h: Handler 
 const add = (method: string, path: string, role: 'admin' | 'staff', h: Handler) =>
   routes.push({ method, re: new RegExp(`^/api${path}$`), role, h });
 
-export async function handleApi(env: Env, req: Request): Promise<Response> {
+/** 依工作區代號找工作區；單一企業部署時可省略代號。 */
+async function resolveWorkspace(env: Env, slug: string | null | undefined) {
+  if (slug) return brandBySlug(env, slug.trim().toLowerCase());
+  return isMulti(env) ? null : getBrand(env).catch(() => null);
+}
+
+export async function handleApi(rawEnv: Env, req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const brand = await getBrand(env);
 
   if (url.pathname === '/api/health') {
-    const ok = await env.DB.prepare('SELECT 1 x').first();
+    const ok = await rawEnv.DB.prepare('SELECT 1 x').first();
     return json({ ok: !!ok });
   }
-  if (url.pathname === '/api/public' && req.method === 'GET') return json({ name: brand.name });
-  if (url.pathname === '/api/login' && req.method === 'POST') return login(env, req, brand.id);
+  if (url.pathname.startsWith('/api/op/')) return handleOps(rawEnv, req);
+  if (url.pathname === '/api/public' && req.method === 'GET') {
+    const me = await authenticate(rawEnv, req);
+    const b = me ? await getBrand(forBrand(rawEnv, me.brandId)) : await resolveWorkspace(rawEnv, url.searchParams.get('w'));
+    return json({ name: b?.name ?? null, multi: isMulti(rawEnv) });
+  }
 
   // 變更型請求必須帶自訂標頭（搭配 SameSite=Strict 作 CSRF 防護）
   if (req.method !== 'GET' && req.headers.get('x-requested-with') !== 'admin-ui') return err(403, 'forbidden');
 
-  const actor = await authenticate(env, req);
+  if (url.pathname === '/api/login' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const ws = await resolveWorkspace(rawEnv, b.workspace);
+    if (!ws) return err(401, isMulti(rawEnv) && !b.workspace ? '請輸入工作區代號' : '工作區、帳號或密碼錯誤');
+    if (ws.status === 'suspended') return err(403, '此工作區已暫停使用，請聯絡服務商');
+    return login(forBrand(rawEnv, ws.id), b, ws.id);
+  }
+
+  const actor = await authenticate(rawEnv, req);
   if (!actor) return err(401, 'unauthorized');
+  // 之後的每個操作都只作用在登入者所屬的工作區
+  const env = await withCreds(forBrand(rawEnv, actor.brandId));
+  const brand = await getBrand(env);
+  if (brand.status === 'suspended') return err(403, '此工作區已暫停使用，請聯絡服務商');
   if (url.pathname === '/api/logout') {
     return json({ ok: true }, 200, { 'set-cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict' });
   }
@@ -65,8 +88,7 @@ export async function handleApi(env: Env, req: Request): Promise<Response> {
   return err(404, 'not found');
 }
 
-async function login(env: Env, req: Request, brandId: string): Promise<Response> {
-  const b: any = await req.json().catch(() => ({}));
+async function login(env: Env, b: any, brandId: string): Promise<Response> {
   const username = String(b.username ?? '').slice(0, 64);
   const since = new Date(Date.now() - 15 * 60000).toISOString();
   const fails = await env.DB.prepare(`SELECT COUNT(*) c FROM audit_logs WHERE brand_id=? AND action='login_fail' AND detail=? AND created_at>?`)
@@ -76,7 +98,7 @@ async function login(env: Env, req: Request, brandId: string): Promise<Response>
     .bind(brandId, username).first<any>();
   // 帳號不存在時仍做一次雜湊，降低帳號探測
   const ok = u ? await verifyPassword(String(b.password ?? ''), u.password_hash) : (await hashPassword('x'), false);
-  if (!ok) { await audit(env, brandId, null, 'login_fail', username); return err(401, '帳號或密碼錯誤'); }
+  if (!ok) { await audit(env, brandId, null, 'login_fail', username); return err(401, isMulti(env) ? '工作區、帳號或密碼錯誤' : '帳號或密碼錯誤'); }
   const tok = await signToken(env.SESSION_SECRET, { uid: u.id, exp: Math.floor(Date.now() / 1000) + SESSION_SEC });
   return json({ ok: true }, 200, { 'set-cookie': `sid=${tok}; Path=/; Max-Age=${SESSION_SEC}; HttpOnly; Secure; SameSite=Strict` });
 }
@@ -381,6 +403,25 @@ add('DELETE', '/inquiries/(\\d+)', 'admin', async ({ env, m, actor, brandId }) =
   await env.DB.prepare('DELETE FROM inquiries WHERE id=? AND brand_id=?').bind(m[1], brandId).run();
   await audit(env, brandId, actor.name, 'inquiry_delete', m[1]);
   return json({ ok: true });
+});
+
+// 資料可攜：工作區管理員可隨時匯出自己的全部資料（不含任何憑證）
+add('GET', '/export', 'admin', async ({ env, actor, brandId }) => {
+  const q = async (sql: string) => (await env.DB.prepare(sql).bind(brandId).all()).results;
+  const data = {
+    exported_at: iso(), workspace: await getBrand(env),
+    settings: await env.DB.prepare('SELECT * FROM brand_settings WHERE brand_id=?').bind(brandId).first(),
+    posts: await q('SELECT * FROM posts WHERE brand_id=?'),
+    faq: await q('SELECT * FROM faq_rules WHERE brand_id=?'),
+    contacts: await q('SELECT * FROM contacts WHERE brand_id=?'),
+    inquiries: await q('SELECT * FROM inquiries WHERE brand_id=?'),
+    threads_accounts: await q('SELECT id,threads_user_id,username,persona,tone,topics,posts_per_day,publishing_times,cta_text,auto_post_enabled,created_at FROM threads_accounts WHERE brand_id=?'),
+    users: await q('SELECT id,authentication_id,role,enabled FROM admin_users WHERE brand_id=?'),
+    audit_logs: await q('SELECT actor,action,detail,created_at FROM audit_logs WHERE brand_id=?'),
+  };
+  await audit(env, brandId, actor.name, 'data_export');
+  return new Response(JSON.stringify(data, null, 2), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store',
+    'content-disposition': `attachment; filename="export-${data.workspace.slug ?? brandId}-${iso().slice(0, 10)}.json"` } });
 });
 
 registerExtra(add, json, err);

@@ -1,4 +1,4 @@
-import { audit, getBrand } from '../db';
+import { audit, forBrand, getBrand } from '../db';
 import { credFor, listAccounts, markAccount, setAccountToken, upsertAccount } from './accounts';
 import type { Env } from '../types';
 import { hmacBase64, signToken, timingSafeEqual, verifyToken } from '../util/crypto';
@@ -38,7 +38,12 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
   if (url.searchParams.get('error')) return fail('已取消授權');
   const code = (url.searchParams.get('code') ?? '').replace(/#_$/, '');
   const state = url.searchParams.get('state') ?? '';
-  if (!code || !(await verifyToken(env.SESSION_SECRET, state, Math.floor(now / 1000)))) return fail('授權已逾時，請重新操作');
+  const st = code ? await verifyToken(env.SESSION_SECRET, state, Math.floor(now / 1000)) : null;
+  if (!st) return fail('授權已逾時，請重新操作');
+  // 授權結果歸屬於發起連結的管理員所在的工作區（固定一個回呼網址即可服務所有工作區）
+  const owner = await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>();
+  if (!owner) return fail('授權已逾時，請重新操作');
+  env = forBrand(env, owner.brand_id);
   if (!oauthConfigured(env)) return fail('系統尚未設定 Threads App');
   try {
     const short = await jget(`${OAUTH}/oauth/access_token`, {
@@ -97,10 +102,13 @@ async function parseSignedRequest(env: Env, req: Request): Promise<{ user_id?: s
 export async function handleMetaCallback(env: Env, req: Request, kind: 'deauthorize' | 'delete'): Promise<Response> {
   const data = await parseSignedRequest(env, req);
   if (!data) return new Response('invalid', { status: 400 });
-  const brand = await getBrand(env);
   if (data.user_id) {
-    const r = await env.DB.prepare('DELETE FROM threads_accounts WHERE brand_id=? AND threads_user_id=?').bind(brand.id, String(data.user_id)).run();
-    if (r.meta.changes) await audit(env, brand.id, null, `threads_${kind}`);
+    // 使用者在 Threads 撤銷授權：從所有工作區移除這個帳號
+    const rows = (await env.DB.prepare('SELECT id,brand_id FROM threads_accounts WHERE threads_user_id=?').bind(String(data.user_id)).all<{ id: number; brand_id: string }>()).results;
+    for (const r of rows) {
+      await env.DB.prepare('DELETE FROM threads_accounts WHERE id=?').bind(r.id).run();
+      await audit(env, r.brand_id, null, `threads_${kind}`);
+    }
   }
   const code = crypto.randomUUID();
   return kind === 'delete'

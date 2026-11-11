@@ -18,7 +18,8 @@ const key = (env: Env) => env.CRED_ENC_KEY || env.SESSION_SECRET;
 async function migrateLegacy(env: Env): Promise<void> {
   let rows: { name: string; value_enc: string; meta: string }[] = [];
   try {
-    rows = (await env.DB.prepare(`SELECT name,value_enc,meta FROM integrations WHERE name IN ('threads_access_token','threads_user_id')`).all<any>()).results;
+    const b = await getBrand(env);
+    rows = (await env.DB.prepare(`SELECT name,value_enc,meta FROM integrations WHERE brand_id=? AND name IN ('threads_access_token','threads_user_id')`).bind(b.id).all<any>()).results;
   } catch { return; }
   const tok = rows.find((r) => r.name === 'threads_access_token'), uid = rows.find((r) => r.name === 'threads_user_id');
   if (!tok || !uid) return;
@@ -29,15 +30,17 @@ async function migrateLegacy(env: Env): Promise<void> {
   await env.DB.prepare(
     `INSERT OR IGNORE INTO threads_accounts(brand_id,threads_user_id,username,token_enc,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
   ).bind(brand.id, userId, meta.username ?? null, tok.value_enc, meta.expires_at ?? null, iso(), iso()).run();
-  await env.DB.prepare(`DELETE FROM integrations WHERE name IN ('threads_access_token','threads_user_id')`).run();
+  await env.DB.prepare(`DELETE FROM integrations WHERE brand_id=? AND name IN ('threads_access_token','threads_user_id')`).bind(brand.id).run();
 }
 
 export async function listAccounts(env: Env): Promise<Account[]> {
   await migrateLegacy(env);
-  try { return (await env.DB.prepare('SELECT * FROM threads_accounts ORDER BY id').all<Account>()).results; } catch { return []; }
+  const b = await getBrand(env);
+  try { return (await env.DB.prepare('SELECT * FROM threads_accounts WHERE brand_id=? ORDER BY id').bind(b.id).all<Account>()).results; } catch { return []; }
 }
 export async function getAccount(env: Env, id: number): Promise<Account | null> {
-  return env.DB.prepare('SELECT * FROM threads_accounts WHERE id=?').bind(id).first<Account>();
+  const b = await getBrand(env);
+  return env.DB.prepare('SELECT * FROM threads_accounts WHERE id=? AND brand_id=?').bind(id, b.id).first<Account>();
 }
 
 export async function upsertAccount(env: Env, brandId: string, a: { userId: string; username: string | null; token: string; expiresAt: string | null }): Promise<number> {

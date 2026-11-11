@@ -1,6 +1,7 @@
 import { decryptText, encryptText } from './util/secrets';
 import { iso } from './util/time';
 import type { Env } from './types';
+import { getBrand, isMulti } from './db';
 
 /** DB 憑證名稱 → 對應的 Env 欄位。DB 優先，未設定時退回 wrangler secret。 */
 export const CRED_ENV = {
@@ -16,11 +17,14 @@ const encKey = (env: Env) => env.CRED_ENC_KEY || env.SESSION_SECRET;
 
 /** 回傳疊加了後台所設憑證的 env；資料表尚未建立時原樣返回。 */
 export async function withCreds(env: Env): Promise<Env> {
+  const out: Env = { ...env };
+  // 共用架構：LINE、Threads 憑證一律來自該工作區自己的設定，不可沿用平台層的 secret（避免 A 客戶用到 B 的帳號）
+  if (isMulti(env)) for (const k of ['LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'THREADS_ACCESS_TOKEN', 'THREADS_USER_ID'] as const) (out as any)[k] = '';
   let rows: { name: string; value_enc: string }[] = [];
   try {
-    rows = (await env.DB.prepare('SELECT name,value_enc FROM integrations').all<{ name: string; value_enc: string }>()).results;
-  } catch { return env; }
-  const out: Env = { ...env };
+    const brand = await getBrand(env);
+    rows = (await env.DB.prepare('SELECT name,value_enc FROM integrations WHERE brand_id=?').bind(brand.id).all<{ name: string; value_enc: string }>()).results;
+  } catch { return out; }
   for (const r of rows) {
     const k = CRED_ENV[r.name as CredName];
     if (!k) continue;
@@ -37,17 +41,20 @@ export async function setCred(env: Env, brandId: string, name: CredName, value: 
 }
 
 export async function getMeta(env: Env, name: CredName): Promise<Record<string, any> | null> {
-  const r = await env.DB.prepare('SELECT meta FROM integrations WHERE name=?').bind(name).first<{ meta: string }>();
+  const b = await getBrand(env);
+  const r = await env.DB.prepare('SELECT meta FROM integrations WHERE brand_id=? AND name=?').bind(b.id, name).first<{ meta: string }>();
   return r ? JSON.parse(r.meta || '{}') : null;
 }
 
 export async function deleteCreds(env: Env, names: CredName[]): Promise<void> {
-  for (const n of names) await env.DB.prepare('DELETE FROM integrations WHERE name=?').bind(n).run();
+  const b = await getBrand(env);
+  for (const n of names) await env.DB.prepare('DELETE FROM integrations WHERE brand_id=? AND name=?').bind(b.id, n).run();
 }
 
 /** 前端用：哪些憑證已設定（絕不回傳值）。 */
 export async function credStatus(env: Env): Promise<Record<CredName, { set: boolean; source: 'db' | 'env' | null; meta: Record<string, any> }>> {
-  const rows = (await env.DB.prepare('SELECT name,meta FROM integrations').all<{ name: string; meta: string }>()).results;
+  const b = await getBrand(env);
+  const rows = (await env.DB.prepare('SELECT name,meta FROM integrations WHERE brand_id=?').bind(b.id).all<{ name: string; meta: string }>()).results;
   const db = new Map(rows.map((r) => [r.name, JSON.parse(r.meta || '{}')]));
   const out: any = {};
   for (const n of Object.keys(CRED_ENV) as CredName[]) {

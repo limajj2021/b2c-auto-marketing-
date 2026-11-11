@@ -1,5 +1,5 @@
 // 連線設定（LINE / Gemini / Threads）與帳號管理。由 routes.ts 註冊。
-import { audit, getBrand } from '../db';
+import { audit, getBrand, isMulti } from '../db';
 import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
 import { credFor, getAccount, listAccounts, publicAccount, resolveCred } from '../threads/accounts';
@@ -27,7 +27,7 @@ export function registerExtra(add: Add, json: J, err: E) {
     const st = await credStatus(env);
     const accts = await listAccounts(env);
     return json({
-      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null },
+      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null },
       gemini: { configured: st.gemini_api_key.set },
       threads: {
         configured: accts.length > 0,
@@ -50,7 +50,8 @@ export function registerExtra(add: Add, json: J, err: E) {
     if (!info.ok) return err(400, 'Access token 無效，LINE 拒絕了這組憑證');
     await setCred(env, brandId, 'line_channel_secret', secret);
     await setCred(env, brandId, 'line_channel_access_token', token, { name: info.name, basic_id: info.basicId });
-    const endpoint = `${url.origin}/line/webhook`;
+    const ws = await getBrand(env);
+    const endpoint = isMulti(env) ? `${url.origin}/line/webhook/${ws.slug}` : `${url.origin}/line/webhook`;
     const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
     const set = await fetch('https://api.line.me/v2/bot/channel/webhook/endpoint', { method: 'PUT', headers: auth, body: JSON.stringify({ endpoint }) });
     let verified = false;

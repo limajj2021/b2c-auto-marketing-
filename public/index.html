@@ -310,11 +310,25 @@ document.addEventListener('click', async (e) => {
 
 /* ---------- login ---------- */
 function loginView() {
+  const qs = new URLSearchParams(location.search);
+  let saved = ''; try { saved = localStorage.getItem('ws') || ''; } catch { /* 無痕模式 */ }
+  const ws0 = (qs.get('w') || saved).toLowerCase();
   $('#app').innerHTML = `<div class="login"><div class="mark" id="lg">營</div><h1 class="t-page" id="lt">登入後台</h1><p class="t-sub" style="margin:6px 0 24px">請使用管理員提供的帳號</p>
+  <div id="wsf" class="hide">${field('w', '工作區代號', input('w', ws0, 'autocomplete="organization" autocapitalize="none" autocorrect="off" placeholder="例如：vuca"'), '開通時服務商提供的代號，之後會記住。')}</div>
   ${field('u', '帳號', input('u', '', 'autocomplete="username" autocapitalize="none" autocorrect="off"'))}${field('p', '密碼', input('p', '', 'type="password" autocomplete="current-password"'))}
   <button class="btn block" id="go" style="margin-top:24px">登入</button></div>`;
-  fetch('/api/public').then((r) => r.json()).then((d) => { if (d.name) { BRAND = d.name; $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; } }).catch(() => {});
-  const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); me = null; $('#app').innerHTML = ''; await render(); });
+  const showName = () => fetch('/api/public' + ($('#w').value.trim() ? '?w=' + encodeURIComponent($('#w').value.trim().toLowerCase()) : '')).then((r) => r.json()).then((d) => {
+    if (d.multi) $('#wsf').classList.remove('hide');
+    if (d.name) { BRAND = d.name; $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; } else { $('#lg').textContent = '營'; $('#lt').textContent = '登入後台'; }
+  }).catch(() => {});
+  showName(); $('#w').onchange = showName;
+  const go = (b) => act(b, async () => {
+    const workspace = $('#w').value.trim().toLowerCase() || undefined;
+    await api('POST', '/login', { workspace, username: $('#u').value.trim(), password: $('#p').value });
+    try { if (workspace) localStorage.setItem('ws', workspace); } catch { /* 無痕模式 */ }
+    if (qs.get('w')) history.replaceState(null, '', location.pathname + location.hash);
+    me = null; $('#app').innerHTML = ''; await render();
+  });
   $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
 }
 
@@ -603,11 +617,17 @@ async function settingsPage(r) {
       ${row({ act: 'threads', title: 'Threads 帳號', sub: ig.threads.accounts?.length ? ig.threads.accounts.map((a) => '@' + esc(a.username || '')).join('、') : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
       ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
-    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'audit', title: '操作紀錄' })}</div></section>
+    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'audit', title: '操作紀錄' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
     <section><div class="list">${row({ act: 'password', title: '變更我的密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
       <p class="t-sub foot" style="margin-top:10px"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p></section>`);
   for (const k of ['threads', 'line', 'gemini', 'brand', 'users', 'audit', 'password']) $(`[data-act=${k}]`).onclick = () => go('settings/' + k);
   $('[data-act=out]').onclick = logout;
+  $('[data-act=export]').onclick = (e) => act(e.currentTarget, async () => {
+    const r = await fetch('/api/export', { headers: { 'x-requested-with': 'admin-ui' } });
+    if (!r.ok) throw new Error('匯出失敗，請稍後再試');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob());
+    a.download = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'export.json'; a.click(); URL.revokeObjectURL(a.href);
+  }, '已下載');
 }
 async function logout() { await api('POST', '/logout').catch(() => {}); me = null; $('#app').innerHTML = ''; render(); }
 async function threadsPage() {

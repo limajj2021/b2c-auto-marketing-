@@ -8,6 +8,17 @@
 - Gemini API key（確認免費額度與條款，見 PHASE0）。
 - 企業 LINE 加好友網址（`https://line.me/R/ti/p/@xxxx`）。
 
+## 共用架構（標準版）：部署一次、之後在總後台開通客戶
+
+1. 建立 `brands/platform.json`（可複製 example.json），加上 `"multiTenant": true`、`"slug": "<第一個工作區代號>"`、`"threadsAppId": "<Threads App ID>"`。
+2. `npm run provision -- --brand platform`（之後更新程式也是同一個指令，所有工作區一起生效）。
+3. 建立營運帳號：`node scripts/create-operator.mjs --config .generated/wrangler.platform.toml --username ops`（密碼只顯示一次）。
+4. 打開 `<部署網址>/ops.html` →「開通新工作區」→ 把登入網址（含 `?w=代號`）與一次性密碼交給客戶。
+5. 客戶登入後依首頁「開通進度」貼上 LINE 憑證（系統自動把 Webhook 設為 `/line/webhook/<代號>`）、AI 金鑰、連結 Threads。
+6. Meta 只需登記一次回呼網址：`<部署網址>/threads/callback`。
+
+> 規模提醒：Cloudflare 免費方案每次執行的對外請求數有限，工作區變多時請改用 Workers 付費方案，並視需要調整 `CRON_BATCH`。
+
 ## Threads「一鍵連結」前置（開發者一次性）
 
 所有客戶共用同一個 Meta App（由開發者持有）：

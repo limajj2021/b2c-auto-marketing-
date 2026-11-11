@@ -73,6 +73,7 @@ compatibility_date = "2025-01-01"
 [vars]
 GEMINI_MODEL = "${cfg.geminiModel ?? 'gemini-3.5-flash-lite'}"
 THREADS_APP_ID = "${threadsAppId}"
+MULTI_TENANT = "${cfg.multiTenant ? '1' : ''}"
 
 [assets]
 directory = "../public"
@@ -98,7 +99,7 @@ const cols = {
   cta_text: s.cta_text ?? '', line_add_url: s.line_add_url ?? '', posting_mode: s.posting_mode ?? 'B',
   posts_per_day: s.posts_per_day ?? 1, line_config: JSON.stringify(cfg.lineConfig ?? {}), updated_at: now,
 };
-let seed = `INSERT OR IGNORE INTO brands(id,name,industry,description,timezone,created_at) VALUES(${q(cfg.brandId)},${q(cfg.name)},${q(cfg.industry ?? 'general')},${q(cfg.description ?? '')},${q(cfg.timezone)},${q(now)});\n`;
+let seed = `INSERT OR IGNORE INTO brands(id,slug,name,industry,description,timezone,created_at) VALUES(${q(cfg.brandId)},${q(cfg.slug ?? cfg.brandId)},${q(cfg.name)},${q(cfg.industry ?? 'general')},${q(cfg.description ?? '')},${q(cfg.timezone)},${q(now)});\n`;
 seed += `INSERT OR IGNORE INTO brand_settings(brand_id,${Object.keys(cols).join(',')}) VALUES(${q(cfg.brandId)},${Object.values(cols).map((v) => (typeof v === 'number' ? v : q(v))).join(',')});\n`;
 let adminPassword = null;
 const exists = JSON.parse(wr(['d1', 'execute', 'DB', '--remote', '--config', tomlPath, '--json', '--command',
