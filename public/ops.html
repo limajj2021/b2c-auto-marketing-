@@ -4,172 +4,277 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#0c0c0b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <title>營運總後台</title>
+<link rel="stylesheet" href="/app.css">
 <style>
-/* 營運人員用：資訊密度優先，一屏看完所有工作區。沿用後台的色彩 tokens。 */
-:root{--bg0:#f6f5f1;--bg1:#fff;--bg2:#efede7;--line:#e4e1d8;--text:#1b1a17;--text2:#5c5850;--gold:#c2ab78;--gold-ink:#16150f;
-  --ok:#297347;--warn:#855a00;--bad:#b0372a;--ok-bg:#e4f0e8;--warn-bg:#f6ecd3;--bad-bg:#f8e5e1;--r:6px;
-  --font:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Noto Sans TC","PingFang TC",system-ui,sans-serif;color-scheme:light dark}
-@media (prefers-color-scheme:dark){:root{--bg0:#0c0c0b;--bg1:#141413;--bg2:#1c1c1a;--line:#262624;--text:#ecebe6;--text2:#a3a097;--gold:#cdb98d;
-  --ok:#62b883;--warn:#dcab47;--bad:#ec7b6e;--ok-bg:#15241b;--warn-bg:#2a2210;--bad-bg:#2f1a17}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg0);color:var(--text);font:400 14px/1.55 var(--font);font-variant-numeric:tabular-nums}
-.wrap{max-width:1280px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-left)) 48px max(16px,env(safe-area-inset-right))}
-h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 10px}.mut{color:var(--text2)}.sub{font-size:12.5px;color:var(--text2)}
-.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}.top .grow{flex:1}
-.btn{min-height:40px;padding:0 14px;border-radius:var(--r);border:0;background:var(--gold);color:var(--gold-ink);font:600 13.5px var(--font);cursor:pointer}
-.btn.sec{background:var(--bg2);color:var(--text);font-weight:500}.btn.dng{background:none;color:var(--bad);border:1px solid var(--line)}.btn.sm{min-height:32px;padding:0 10px;font-size:12.5px}
-.btn[aria-busy=true]{opacity:.5}
-input,select{min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg1);color:var(--text);font:inherit;font-size:15px}
-.kpis{display:flex;gap:28px;flex-wrap:wrap;margin-bottom:20px}.kpis b{display:block;font-size:24px;font-weight:500}.kpis span{font-size:12px;color:var(--text2)}
-.tbl{overflow-x:auto;background:var(--bg1);border-radius:10px}
-table{border-collapse:collapse;width:100%;min-width:980px}th,td{padding:10px 12px;text-align:left;border-top:1px solid var(--line);vertical-align:top}
-th{border-top:0;font-size:12px;font-weight:500;color:var(--text2);white-space:nowrap}td.n{text-align:right}th.n{text-align:right}
-.pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:500;background:var(--bg2);color:var(--text2);white-space:nowrap}
-.pill.ok{background:var(--ok-bg);color:var(--ok)}.pill.attention{background:var(--warn-bg);color:var(--warn)}.pill.paused{background:var(--bad-bg);color:var(--bad)}
-.issues{font-size:12.5px;color:var(--warn)}.z{color:var(--text2)}
-.card{background:var(--bg1);border-radius:10px;padding:18px;margin-top:20px}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.row label{display:grid;gap:4px;font-size:12.5px;color:var(--text2)}
-.result{margin-top:14px;padding:12px;border-radius:var(--r);background:var(--bg2);font-size:14px;line-height:1.8}code{font-size:13px;word-break:break-all}
-.lv{display:inline-block;min-width:44px;text-align:center;padding:1px 6px;border-radius:4px;font-size:12px;font-weight:600}
-.lv.error{background:var(--bad-bg);color:var(--bad)}.lv.warn{background:var(--warn-bg);color:var(--warn)}.lv.info{background:var(--bg2);color:var(--text2)}
-#logs td{font-size:13px}#logs td.t{white-space:nowrap;color:var(--text2)}#logs pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-all;font-size:12px;color:var(--text2)}
-.login{max-width:360px;margin:12vh auto;display:grid;gap:12px}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);padding:10px 14px;border-radius:var(--r);background:var(--text);color:var(--bg0);font-size:13.5px}
-#toast.bad{background:var(--bad);color:#fff}.hide{display:none!important}
-:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+/* 營運總後台：沿用客戶後台的設計系統（app.css），只補充這裡特有的元件 */
+.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-radius:var(--r-lg);overflow:hidden}
+.kpi>div{background:var(--bg1);padding:12px 14px;min-width:0}.kpi b{display:block;font-size:22px;font-weight:500;line-height:1.2}.kpi span{font-size:12px;color:var(--text2)}
+.kpi b.bad{color:var(--bad)}.kpi b.z{color:var(--text3)}
+@media (min-width:720px){.kpi{grid-template-columns:repeat(9,1fr)}.kpi>div{padding:12px 10px}}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar>*{flex:1 1 200px}
+.toolbar input[type=month]{min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg1);color:var(--text);font-size:16px;width:100%}
+.lv{flex:none;font-size:11.5px;font-weight:600;padding:1px 6px;border-radius:4px}.lv.error{background:var(--bad-bg);color:var(--bad)}.lv.warn{background:var(--warn-bg);color:var(--warn)}
+pre.det{margin:8px 0 0;padding:10px;border-radius:var(--r);background:var(--bg2);white-space:pre-wrap;word-break:break-all;font-size:12px;color:var(--text2)}
+.secret{padding:14px;border-radius:var(--r-lg);background:var(--gold-soft);line-height:1.8}.secret code{font-size:14px;background:var(--bg1)}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px}.filters .full{grid-column:1/-1}
+.row .nums{display:flex;gap:10px;font-size:12px;color:var(--text2);margin-top:3px;flex-wrap:wrap}
 </style>
 </head>
 <body>
-<div class="wrap" id="app"></div>
-<div id="toast" class="hide" role="status" aria-live="polite"></div>
+<div id="toasts" aria-live="polite" role="status"></div>
+<div id="app"></div>
 <script>
 'use strict';
-const $ = (s, r = document) => r.querySelector(s);
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let tt; const toast = (m, bad) => { const t = $('#toast'); t.textContent = m; t.className = bad ? 'bad' : ''; clearTimeout(tt); tt = setTimeout(() => t.className = 'hide', 4000); };
+const IC = {
+  grid: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+  log: '<path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  out: '<path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>', back: '<path d="m15 6-6 6 6 6"/>',
+  inbox: '<path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"/>',
+};
+const svg = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
+const chev = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+const field = (id, label, ctrl, hint = '') => `<div class="f"><label for="${id}">${label}</label>${ctrl}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+const sec = (label, right = '') => `<div class="sec-h"><span class="lbl">${label}</span>${right}</div>`;
+const empty = (title, desc) => `<div class="empty">${svg('inbox')}<b>${title}</b><div>${desc}</div></div>`;
+const fmt = (t) => t ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t)) : '—';
+const ago = (t) => { if (!t) return '從未'; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.floor(m / 60)} 小時前` : `${Math.floor(m / 1440)} 天前`; };
+
+function toast(msg, kind = '') {
+  const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
+  $('#toasts').append(t); setTimeout(() => t.remove(), kind === 'bad' ? 6000 : 3200);
+}
+// 換頁時舊頁面的讀取結果作廢，避免覆蓋新頁面
+let renderSeq = 0;
+const STALE = 'stale-render';
 async function api(method, path, body) {
+  const seq = renderSeq;
   const r = await fetch('/api/op' + path, { method, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui' }, body: body ? JSON.stringify(body) : undefined });
   const d = await r.json().catch(() => ({}));
-  if (r.status === 401 && path !== '/login') { login(); throw new Error('請重新登入'); }
-  if (!r.ok) throw new Error(d.error || '操作失敗');
+  if (r.status === 401 && path !== '/login' && path !== '/me') { me = null; loginView(); throw new Error('登入已過期，請重新登入'); }
+  if (!r.ok) throw new Error(d.error || '操作失敗，請稍後再試');
+  if (method === 'GET' && seq !== renderSeq) return new Promise(() => {}); // 已換頁：舊頁面不再繼續（不顯示、不覆蓋新頁面）
   return d;
 }
-const act = async (b, fn) => { b?.setAttribute('aria-busy', 'true'); try { return await fn(); } catch (e) { toast(e.message, true); } finally { b?.removeAttribute('aria-busy'); } };
-const ago = (t) => { if (!t) return '從未'; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.floor(m / 60)} 小時前` : `${Math.floor(m / 1440)} 天前`; };
-const HEALTH = { ok: '正常', attention: '需處理', paused: '已暫停' };
-let month = new Date().toISOString().slice(0, 7), ADMIN = false;
+async function act(btn, fn, okMsg) {
+  if (btn) { if (btn.getAttribute('aria-busy') === 'true') return; btn.setAttribute('aria-busy', 'true'); }
+  try { const r = await fn(); if (okMsg) toast(okMsg, 'ok'); return r ?? true; } catch (e) { if (e.message !== STALE) toast(e.message, 'bad'); } finally { btn?.removeAttribute('aria-busy'); }
+}
+function sheet(title, html, mount) {
+  const el = document.createElement('div'); el.className = 'sheet';
+  el.innerHTML = `<div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="ph"><h2>${esc(title)}</h2><button class="icon" data-close aria-label="關閉">${svg('x')}</button></div><div class="pb">${html}</div></div>`;
+  const close = () => { el.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  el.onclick = (e) => { if (e.target === el || e.target.closest('[data-close]')) close(); };
+  document.addEventListener('keydown', onKey); document.body.append(el); mount?.(el, close); return close;
+}
+const confirmSheet = (msg, okText) => new Promise((res) => {
+  let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
+  sheet(msg, `<div class="actions" style="margin-top:8px"><button class="btn sec" data-v="0">取消</button><button class="btn dng" data-v="1" style="background:var(--bad-bg)">${esc(okText)}</button></div>`, (el, c) => {
+    el.addEventListener('click', (e) => { const v = e.target.closest('[data-v]')?.dataset.v; if (v !== undefined) { fin(v === '1'); c(); } });
+    new MutationObserver(() => { if (!document.body.contains(el)) fin(false); }).observe(document.body, { childList: true });
+  });
+});
+const secret = (html) => `<div class="secret">${html}<div class="t-sub" style="margin-top:6px">密碼只顯示這一次，請以安全方式交給對方，並請對方登入後立即變更。</div></div>`;
 
-function login() {
-  $('#app').innerHTML = `<div class="login"><h1>營運總後台</h1><p class="sub">僅限服務商營運與維護人員</p>
-    <input id="u" placeholder="帳號" autocomplete="username" autocapitalize="none"><input id="p" type="password" placeholder="密碼" autocomplete="current-password">
-    <button class="btn" id="go">登入</button></div>`;
-  const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); main(); });
-  $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => { if (e.key === 'Enter') go($('#go')); }; // 不可回傳 false，否則會擋掉輸入
+/* ---------- state & router ---------- */
+let me = null, month = new Date().toISOString().slice(0, 7), T = [];
+const L = { workspace: '', level: '', source: '', q: '' };
+const LVN = { error: '錯誤', warn: '警告', info: '' }, DOT = { error: 'bad', warn: 'warn', info: 'ok' };
+const HEALTH = { ok: ['ok', '正常'], attention: ['warn', '需處理'], paused: ['bad', '已暫停'] };
+const PLAN = { standard: '標準版', growth: '成長版', pilot: '共創試用' };
+const TABS = [['tenants', '工作區', 'grid'], ['logs', '系統紀錄', 'log'], ['new', '開通', 'plus', 'admin'], ['me', '帳號', 'user']];
+const tab = () => (location.hash.slice(2) || 'tenants');
+window.addEventListener('hashchange', () => render());
+
+function bar(title, sub = '') {
+  $('#bar').innerHTML = `<div class="in"><div class="ttl"><div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ''}</div></div><button class="icon" id="logout" aria-label="登出">${svg('out')}</button></div>`;
+  $('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}); me = null; loginView(); };
+  document.title = title + ' · 營運總後台';
+}
+const view = (html) => { $('#view').innerHTML = `<div class="page">${html}</div>`; };
+
+async function render() {
+  if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
+  if (!me) return loginView();
+  const tabs = TABS.filter((t) => t[3] !== 'admin' || me.role === 'admin');
+  let cur = tab(); if (!tabs.some((t) => t[0] === cur)) cur = 'tenants';
+  if (!$('#view')) $('#app').innerHTML = `<header class="bar" id="bar"></header><main id="view"></main><nav class="tabs" aria-label="主選單"><div class="in" id="tabs"></div></nav>`;
+  $('#tabs').innerHTML = `<div class="brand"><span class="mark" style="width:28px;height:28px;margin:0;font-size:14px">營</span><span>營運總後台</span></div>` +
+    tabs.map((t) => `<button class="tab" data-tab="${t[0]}" ${t[0] === cur ? 'aria-current="page"' : ''}>${svg(t[2])}<span>${t[1]}</span></button>`).join('');
+  $$('[data-tab]').forEach((b) => b.onclick = () => { location.hash = '#/' + b.dataset.tab; });
+  $('#view').innerHTML = '<div class="page"><div class="sk" style="height:64px"></div><div class="sk" style="height:240px"></div></div>';
+  const my = ++renderSeq;
+  try { await ({ tenants: tenantsPage, logs: logsPage, new: newPage, me: mePage })[cur](); }
+  catch (e) { if (e.message === STALE || my !== renderSeq) return; view(`${empty('載入失敗', esc(e.message))}<button class="btn sec block" id="retry">重新載入</button>`); $('#retry').onclick = render; }
+  if (my === renderSeq) window.scrollTo(0, 0);
 }
 
-async function main() {
-  let me; try { me = await api('GET', '/me'); } catch { return; }
-  ADMIN = me.role === 'admin';
-  const d = await api('GET', '/tenants?month=' + month);
-  const t = d.tenants, sum = (k) => t.reduce((a, x) => a + (x[k] || 0), 0);
-  $('#app').innerHTML = `<div class="top"><div class="grow"><h1>營運總後台</h1><div class="sub">${esc(me.username)}（${ADMIN ? '營運管理者' : '維護人員'}）· ${t.length} 個工作區</div></div>
-    <label class="sub">月份 <input type="month" id="mo" value="${month}"></label><button class="btn sec" id="csv">下載計費用量 CSV</button><button class="btn sec" id="out">登出</button></div>
-    <div class="kpis"><div><b>${t.filter((x) => x.health === 'attention').length}</b><span>需處理</span></div><div><b>${t.filter((x) => x.status === 'active').length}</b><span>使用中</span></div>
-    <div><b>${sum('views')}</b><span>${month} 曝光</span></div><div><b>${sum('clicks')}</b><span>${month} LINE 點擊</span></div><div><b>${sum('friends')}</b><span>${month} 新好友</span></div><div><b>${sum('handoffs')}</b><span>${month} 轉真人</span></div><div><b>${sum('leads')}</b><span>${month} 留資</span></div><div><b>${sum('published')}</b><span>${month} 發文</span></div><div><b>${sum('generations')}</b><span>${month} AI 生成</span></div></div>
-    <div class="card" style="margin:0 0 20px"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">系統紀錄</h2><span class="sub" id="l24"></span></div>
-      <div class="row" style="margin-top:12px"><label>工作區<select id="lw"><option value="">全部</option><option value="_platform">平台（不屬於工作區）</option>${t.map((x) => `<option value="${esc(x.slug)}">${esc(x.name)}（${esc(x.slug)}）</option>`).join('')}</select></label>
-        <label>等級<select id="ll"><option value="">全部</option><option value="warn">警告與錯誤</option><option value="error">只看錯誤</option></select></label>
-        <label>來源<select id="ls"><option value="">全部</option></select></label><label>關鍵字<input id="lq" placeholder="例如：授權、#12"></label><button class="btn sec" id="lr">重新整理</button></div>
-      <div class="tbl" style="margin-top:12px"><table style="min-width:760px"><thead><tr><th>時間</th><th>工作區</th><th>等級</th><th>來源</th><th>內容</th></tr></thead><tbody id="logs"><tr><td colspan="5" class="sub">載入中…</td></tr></tbody></table></div>
-      <div style="margin-top:10px"><button class="btn sm sec hide" id="lmore">載入更早的紀錄</button></div>
-      <p class="sub" style="margin:10px 0 0">記錄串接、發文、排程的結果與錯誤原因，保留 30 天；不含顧客訊息內容與任何憑證。Threads 授權只有「開始連結」沒有後續，代表卡在 Threads／Meta 頁面（常見：帳號不是測試人員、回呼網址未登記、權限未加入）。</p></div>
-    <div class="tbl"><table><thead><tr><th>工作區</th><th>狀態</th><th>待處理</th><th>留資加購</th><th class="n">曝光</th><th class="n">LINE 點擊</th><th class="n">新好友</th><th class="n">轉真人</th><th class="n">留資</th><th class="n">未處理</th><th class="n">發文</th><th class="n">AI</th><th>Threads</th><th>LINE</th><th>排程</th><th></th></tr></thead><tbody>
-    ${t.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="sub">${esc(x.slug)} · ${esc(x.plan)}</div></td>
-      <td><span class="pill ${x.health}">${HEALTH[x.health]}</span></td><td class="issues">${x.issues.map(esc).join('<br>') || '<span class="z">—</span>'}</td>
-      <td><label style="display:flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" data-leads="${esc(x.slug)}" ${x.leads_enabled ? 'checked' : ''} ${ADMIN ? '' : 'disabled'} style="min-height:0;width:18px;height:18px"> ${x.leads_enabled ? '已開通' : '未開通'}</label></td>
-      <td class="n ${x.views ? '' : 'z'}">${x.views}</td><td class="n ${x.clicks ? '' : 'z'}">${x.clicks}</td><td class="n">${x.friends}</td><td class="n">${x.handoffs}</td>
-      <td class="n ${x.leads_enabled ? '' : 'z'}">${x.leads_enabled ? x.leads : '—'}</td><td class="n ${x.leads_pending && x.leads_enabled ? '' : 'z'}">${x.leads_enabled ? x.leads_pending : '—'}</td><td class="n">${x.published}</td><td class="n">${x.generations}<div class="sub">${x.gemini_own_key ? '自有金鑰' : '平台金鑰'}</div></td>
-      <td>${x.threads_accounts} 個${x.threads_invalid ? `<div class="issues">${x.threads_invalid} 個失效</div>` : ''}${x.threads_expires ? `<div class="sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}</td>
-      <td>${x.line_configured ? '已連接' : '<span class="z">未連接</span>'}</td><td><span class="sub">${ago(x.last_cron_at)}</span><div class="sub">${x.auto_post_enabled ? '自動發文開' : '自動發文關'}</div></td>
-      <td style="white-space:nowrap"><button class="btn sm sec" data-reset="${esc(x.slug)}">重設管理員密碼</button> ${!ADMIN ? '' : x.status === 'active' ? `<button class="btn sm dng" data-sus="${esc(x.slug)}">暫停</button>` : `<button class="btn sm sec" data-res="${esc(x.slug)}">恢復</button>`}</td></tr>`).join('')}
-    </tbody></table></div>
-    ${ADMIN ? '' : '<p class="sub" style="margin-top:14px">你的角色是「維護人員」：可查看狀態、協助客戶重設密碼；開通、暫停與人員管理需由營運管理者處理。</p>'}
-    <div class="card ${ADMIN ? '' : 'hide'}"><h2>開通新工作區</h2><div class="row">
-      <label>工作區代號<input id="ns" placeholder="例如：acme" autocapitalize="none"></label><label>品牌名稱<input id="nn"></label>
-      <label>產業<select id="ni"><option value="general">一般</option><option value="lending">放款（強制審核）</option><option value="finance">金融（強制審核）</option></select></label>
-      <label>方案<select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></label>
-      <label>管理員帳號<input id="na" value="owner" autocapitalize="none"></label><button class="btn" id="create">建立</button></div><div id="made"></div></div>
-    <div class="card ${ADMIN ? '' : 'hide'}" id="people"><h2>營運人員</h2><div id="plist" class="sub">載入中…</div>
-      <div class="row" style="margin-top:12px"><label>帳號<input id="ou" autocapitalize="none"></label><label>角色<select id="or"><option value="support">維護人員（查看、重設客戶密碼）</option><option value="admin">營運管理者（全部權限）</option></select></label><button class="btn" id="oadd">新增人員</button></div><div id="omade"></div></div>
-    <div class="card"><h2>變更我的密碼</h2><div class="row"><label>目前密碼<input type="password" id="pc" autocomplete="current-password"></label><label>新密碼（至少 12 字元）<input type="password" id="pn" autocomplete="new-password"></label><button class="btn sec" id="pchg">變更密碼</button></div></div>
-    <p class="sub" style="margin-top:20px">營運人員只看得到計數與狀態，看不到顧客的留資內容。需要協助客戶時，請客戶授權並由客戶操作，或重設其管理員密碼。</p>`;
-  $('#mo').onchange = (e) => { month = e.target.value; main(); };
-  const LVN = { info: '資訊', warn: '警告', error: '錯誤' };
-  let lastId = null, srcLoaded = false;
-  const loadLogs = async (more) => {
-    const p = new URLSearchParams();
-    for (const [k, el] of [['workspace', '#lw'], ['level', '#ll'], ['source', '#ls'], ['q', '#lq']]) if ($(el).value.trim()) p.set(k, $(el).value.trim());
-    if (more && lastId) p.set('before', lastId);
-    const r = await api('GET', '/logs?' + p);
-    if (!srcLoaded) { $('#ls').innerHTML += Object.entries(r.sources).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join(''); srcLoaded = true; }
-    $('#l24').innerHTML = `近 24 小時：<b style="color:var(--bad)">${r.last24h.error}</b> 個錯誤、<b style="color:var(--warn)">${r.last24h.warn}</b> 個警告`;
-    const html = r.rows.map((l) => {
-      let det = ''; try { det = l.detail ? JSON.stringify(JSON.parse(l.detail), null, 1) : ''; } catch { det = l.detail; }
-      return `<tr><td class="t">${esc(new Date(l.created_at).toLocaleString('zh-TW', { hour12: false }))}</td><td>${l.slug ? esc(l.name) + `<div class="sub">${esc(l.slug)}</div>` : '<span class="z">平台</span>'}</td>
-        <td><span class="lv ${l.level}">${LVN[l.level] || l.level}</span></td><td style="white-space:nowrap">${esc(r.sources[l.source] || l.source)}</td><td>${esc(l.message)}${det ? `<details><summary class="sub" style="cursor:pointer">詳細</summary><pre>${esc(det)}</pre></details>` : ''}</td></tr>`;
-    }).join('');
-    if (more) $('#logs').insertAdjacentHTML('beforeend', html); else $('#logs').innerHTML = html || '<tr><td colspan="5" class="sub">沒有符合條件的紀錄</td></tr>';
-    lastId = r.rows.length ? r.rows[r.rows.length - 1].id : lastId;
-    $('#lmore').classList.toggle('hide', r.rows.length < 100);
-  };
-  for (const s of ['#lw', '#ll', '#ls']) $(s).onchange = () => act(null, () => loadLogs(false));
-  $('#lq').onkeydown = (e) => { if (e.key === 'Enter') act(null, () => loadLogs(false)); };
-  $('#lr').onclick = (e) => act(e.currentTarget, () => loadLogs(false));
-  $('#lmore').onclick = (e) => act(e.currentTarget, () => loadLogs(true));
-  act(null, () => loadLogs(false));
-  $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); login(); };
+/* ---------- login（與客戶後台同一個樣式） ---------- */
+function loginView() {
+  $('#app').innerHTML = `<div class="login"><div class="mark">營</div><h1 class="t-page">營運總後台</h1><p class="t-sub" style="margin:6px 0 24px">僅限服務商營運與維護人員</p>
+    ${field('u', '帳號', '<input id="u" autocomplete="username" autocapitalize="none" autocorrect="off">')}${field('p', '密碼', '<input id="p" type="password" autocomplete="current-password">')}
+    <button class="btn block" id="go" style="margin-top:24px">登入</button>
+    <p class="t-sub" style="margin-top:20px;text-align:center"><a href="/" style="color:inherit">客戶請由此登入管理後台</a></p></div>`;
+  const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); me = null; $('#app').innerHTML = ''; await render(); });
+  $('#go').onclick = (e) => go(e.currentTarget);
+  $('#p').onkeydown = (e) => { if (e.key === 'Enter') go($('#go')); }; // 不可回傳 false，否則會擋掉輸入
+}
+
+/* ---------- 工作區 ---------- */
+async function tenantsPage() {
+  const [d, lg] = await Promise.all([api('GET', '/tenants?month=' + month), api('GET', '/logs?level=warn').catch(() => null)]);
+  T = d.tenants;
+  const sum = (k) => T.reduce((a, x) => a + (x[k] || 0), 0), need = T.filter((x) => x.health === 'attention').length;
+  bar('工作區', `${esc(me.username)}（${me.role === 'admin' ? '營運管理者' : '維護人員'}）· ${T.length} 個工作區`);
+  const k = (v, l, cls = '') => `<div><b class="${cls || (v ? '' : 'z')}">${v}</b><span>${l}</span></div>`;
+  view(`${lg && lg.last24h.error ? `<button class="banner" id="errs" style="width:100%;border:0;text-align:left;cursor:pointer;color:inherit"><span class="dot bad"></span><span class="main"><b>近 24 小時有 ${lg.last24h.error} 個錯誤</b><div class="t-sub">點這裡查看系統紀錄</div></span>${chev}</button>` : ''}
+    <section>${sec('本月成效', '')}
+      <div class="toolbar" style="margin-bottom:10px"><input type="month" id="mo" value="${month}" aria-label="月份"><button class="btn sec" id="csv">下載計費用量 CSV</button></div>
+      <div class="kpi">${k(need, '需處理', need ? 'bad' : '')}${k(sum('views'), '曝光')}${k(sum('clicks'), 'LINE 點擊')}${k(sum('friends'), '新好友')}${k(sum('handoffs'), '轉真人')}${k(sum('published'), '發文')}${k(sum('generations'), 'AI 生成')}${k(sum('leads'), '留資')}${k(T.reduce((a, x) => a + x.threads_accounts, 0), 'Threads 帳號')}</div></section>
+    <section>${sec('全部工作區')}${T.length ? `<div class="list">${T.map((x) => {
+      const [dot, label] = HEALTH[x.health] || ['', x.health];
+      return `<button class="row" data-ws="${esc(x.slug)}"><span class="dot ${dot}"></span><span class="main"><span class="ttl" style="display:block">${esc(x.name)} <span class="mut" style="font-weight:400">· ${esc(x.slug)}</span></span>
+        <span class="sub" style="display:block">${x.issues.length ? `<span style="color:var(--warn)">${x.issues.map(esc).join('、')}</span>` : label}</span>
+        <span class="nums"><span>發文 ${x.published}</span><span>曝光 ${x.views}</span><span>點擊 ${x.clicks}</span><span>新好友 ${x.friends}</span><span>排程 ${ago(x.last_cron_at)}</span></span></span>${chev}</button>`;
+    }).join('')}</div>` : empty('還沒有工作區', '到「開通」建立第一個客戶工作區。')}</section>
+    <p class="t-sub">營運人員只看得到計數與狀態，看不到顧客的留資內容。</p>`);
+  $('#mo').onchange = (e) => { month = e.target.value; render(); };
+  $('#errs')?.addEventListener('click', () => { L.level = 'error'; location.hash = '#/logs'; });
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
     const rows = [['工作區代號', '品牌名稱', '方案', '留資加購', '曝光', 'LINE 點擊', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
-  document.querySelectorAll('[data-sus],[data-res]').forEach((b) => b.onclick = () => act(b, async () => {
-    const slug = b.dataset.sus || b.dataset.res; await api('PATCH', '/tenants/' + slug, { status: b.dataset.sus ? 'suspended' : 'active' });
-    toast(b.dataset.sus ? `${slug} 已暫停：登入、LINE 接待與排程都會停止` : `${slug} 已恢復`); main();
-  }));
-  document.querySelectorAll('[data-leads]').forEach((c) => c.onchange = () => act(null, async () => {
-    const on = c.checked;
-    try { await api('PATCH', '/tenants/' + c.dataset.leads, { leads_enabled: on }); toast(on ? `${c.dataset.leads} 已開通留資` : `${c.dataset.leads} 已關閉留資：LINE 不再顯示諮詢表單`); main(); }
-    catch (e) { c.checked = !on; throw e; }
-  }));
-  document.querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => act(b, async () => {
-    const r = await api('POST', `/tenants/${b.dataset.reset}/reset-admin`);
-    $('#made').innerHTML = `<div class="result">已重設 <b>${esc(b.dataset.reset)}</b> 的管理員 <code>${esc(r.admin_username)}</code> 密碼：<code>${esc(r.password)}</code><br><span class="sub">只顯示這一次，請以安全方式交給客戶，並請對方登入後立即變更。</span></div>`;
-    $('#made').scrollIntoView({ block: 'center' });
-  }));
-  $('#pchg').onclick = (e) => act(e.currentTarget, async () => {
-    if ($('#pn').value.length < 12) throw new Error('新密碼至少 12 字元');
-    await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = ''; toast('密碼已變更');
-  });
-  if (ADMIN) {
-    const ops = await api('GET', '/operators');
-    $('#plist').innerHTML = `<table style="min-width:0"><tbody>${ops.map((o) => `<tr><td><b>${esc(o.username)}</b>${o.username === me.username ? ' <span class="sub">（你）</span>' : ''}</td><td>${o.role === 'admin' ? '營運管理者' : '維護人員'}</td><td>${o.enabled ? '啟用中' : '<span class="z">已停用</span>'}</td>
-      <td style="text-align:right;white-space:nowrap">${o.username === me.username ? '' : `<button class="btn sm sec" data-opw="${o.id}">重設密碼</button> <button class="btn sm ${o.enabled ? 'dng' : 'sec'}" data-oen="${o.id}" data-v="${o.enabled ? 0 : 1}">${o.enabled ? '停用' : '啟用'}</button>`}</td></tr>`).join('')}</tbody></table>`;
-    document.querySelectorAll('[data-oen]').forEach((b) => b.onclick = () => act(b, async () => { await api('PATCH', '/operators/' + b.dataset.oen, { enabled: b.dataset.v === '1' }); toast(b.dataset.v === '1' ? '已啟用' : '已停用，對方立即無法登入'); main(); }));
-    document.querySelectorAll('[data-opw]').forEach((b) => b.onclick = () => act(b, async () => { const r = await api('PATCH', '/operators/' + b.dataset.opw, { reset_password: true });
-      $('#omade').innerHTML = `<div class="result">新的一次性密碼：<code>${esc(r.password)}</code><br><span class="sub">只顯示一次，請以安全方式交給對方。</span></div>`; }));
-    $('#oadd').onclick = (e) => act(e.currentTarget, async () => { const r = await api('POST', '/operators', { username: $('#ou').value.trim(), role: $('#or').value });
-      await main(); $('#omade').innerHTML = `<div class="result">已新增 <code>${esc(r.username)}</code>（${r.role === 'admin' ? '營運管理者' : '維護人員'}）　一次性密碼：<code>${esc(r.password)}</code><br><span class="sub">只顯示一次；請對方登入後在「變更我的密碼」改掉。</span></div>`; });
-  }
-  $('#create').onclick = (e) => act(e.currentTarget, async () => {
-    const r = await api('POST', '/tenants', { slug: $('#ns').value.trim().toLowerCase(), name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim() });
-    await main();
-    $('#made').innerHTML = `<div class="result">已建立 <b>${esc(r.slug)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>管理員：<code>${esc(r.admin_username)}</code>　一次性密碼：<code>${esc(r.password)}</code><br>
-      <span class="sub">密碼只顯示這一次。客戶登入後依首頁的「開通進度」完成 LINE、AI、Threads 設定。</span></div>`;
+  $$('[data-ws]').forEach((b) => b.onclick = () => tenantSheet(T.find((x) => x.slug === b.dataset.ws)));
+}
+
+function tenantSheet(x) {
+  const admin = me.role === 'admin', [dot, label] = HEALTH[x.health] || ['', x.health];
+  const kv = (a, b) => `<dt>${a}</dt><dd>${b}</dd>`;
+  sheet(x.name, `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="dot ${dot}"></span><b>${label}</b><span class="t-sub">${esc(x.slug)} · ${esc(PLAN[x.plan] || x.plan)}</span></div>
+    ${x.issues.length ? `<div class="note warn" style="margin-bottom:14px">${x.issues.map(esc).join('<br>')}</div>` : ''}
+    <dl class="kv">${kv('登入網址', `<code>${esc(location.origin)}/?w=${esc(x.slug)}</code>`)}
+      ${kv('Threads', `${x.threads_accounts} 個帳號${x.threads_invalid ? `，<span style="color:var(--bad)">${x.threads_invalid} 個失效</span>` : ''}${x.threads_expires ? `<div class="t-sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}`)}
+      ${kv('LINE', x.line_configured ? '已連接' : '<span class="mut">未連接</span>')}
+      ${kv('自動發文', x.auto_post_enabled ? '開啟' : '關閉')}${kv('排程', `上次執行 ${ago(x.last_cron_at)}`)}
+      ${kv('AI 金鑰', x.gemini_own_key ? '客戶自有' : '平台提供')}
+      ${kv('本月成效', `發文 ${x.published} · 曝光 ${x.views} · LINE 點擊 ${x.clicks} · 新好友 ${x.friends} · 轉真人 ${x.handoffs} · AI 生成 ${x.generations}${x.leads_enabled ? ` · 留資 ${x.leads}（未處理 ${x.leads_pending}）` : ''}`)}</dl>
+    <div class="list" style="margin-top:16px"><div class="row static"><span class="main"><span class="ttl" style="display:block">留資加購</span><span class="sub" style="display:block">開通後 LINE 選單會出現「立即詢問」表單</span></span>
+      <label class="switch"><input type="checkbox" role="switch" id="tl" ${x.leads_enabled ? 'checked' : ''} ${admin ? '' : 'disabled'} aria-label="留資加購"><i></i></label></div></div>
+    <div class="actions" style="margin-top:16px"><button class="btn sec" id="tlog">查看系統紀錄</button><button class="btn sec" id="trp">重設管理員密碼</button></div>
+    ${admin ? `<button class="btn ${x.status === 'active' ? 'dng' : 'sec'} block" id="tst" style="margin-top:8px">${x.status === 'active' ? '暫停這個工作區' : '恢復這個工作區'}</button>` : '<p class="t-sub" style="margin-top:12px">開通、暫停與留資加購需由營運管理者處理。</p>'}
+    <div id="tout" style="margin-top:14px"></div>`, (el, close) => {
+    $('#tlog', el).onclick = () => { close(); L.workspace = x.slug; L.level = ''; location.hash = '#/logs'; };
+    $('#trp', el).onclick = (e) => act(e.currentTarget, async () => {
+      const r = await api('POST', `/tenants/${x.slug}/reset-admin`);
+      $('#tout', el).innerHTML = secret(`管理員 <code>${esc(r.admin_username)}</code> 的新密碼：<code>${esc(r.password)}</code>`);
+    });
+    $('#tl', el)?.addEventListener('change', (e) => act(null, async () => {
+      const on = e.target.checked;
+      try { await api('PATCH', '/tenants/' + x.slug, { leads_enabled: on }); x.leads_enabled = on ? 1 : 0; toast(on ? '已開通留資' : '已關閉留資：LINE 不再顯示諮詢表單', 'ok'); }
+      catch (er) { e.target.checked = !on; throw er; }
+    }));
+    $('#tst', el)?.addEventListener('click', (e) => act(e.currentTarget, async () => {
+      const suspend = x.status === 'active';
+      if (suspend && !(await confirmSheet(`暫停 ${x.name}？客戶將無法登入，LINE 接待與排程也會停止。`, '暫停'))) return;
+      await api('PATCH', '/tenants/' + x.slug, { status: suspend ? 'suspended' : 'active' });
+      close(); toast(suspend ? `${x.name} 已暫停` : `${x.name} 已恢復`, 'ok'); render();
+    }));
   });
 }
-main().catch(() => login());
+
+/* ---------- 系統紀錄 ---------- */
+async function logsPage() {
+  const p = new URLSearchParams(); for (const [k, v] of Object.entries(L)) if (v) p.set(k, v);
+  const r = await api('GET', '/logs?' + p);
+  if (!T.length) T = (await api('GET', '/tenants?month=' + month).catch(() => ({ tenants: [] }))).tenants;
+  bar('系統紀錄', `近 24 小時：${r.last24h.error} 個錯誤、${r.last24h.warn} 個警告`);
+  const ch = (v, l) => `<button class="chip" data-lv="${v}" aria-pressed="${L.level === v}">${l}</button>`;
+  const opt = (v, l, cur) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(l)}</option>`;
+  const rowHtml = (l) => `<button class="row" data-log="${l.id}" style="align-items:flex-start"><span class="dot ${DOT[l.level]}" style="margin-top:7px"></span><span class="main">
+      <span class="ttl" style="display:block;font-weight:400">${esc(l.message)}</span>
+      <span class="sub" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${LVN[l.level] ? `<span class="lv ${l.level}">${LVN[l.level]}</span>` : ''}<span>${l.slug ? esc(l.name) : '平台'}</span>·<span>${esc(r.sources[l.source] || l.source)}</span>·<span>${fmt(l.created_at)}</span></span>
+      <span class="det-wrap"></span></span></button>`;
+  view(`<div class="chips tight">${ch('', '全部')}${ch('warn', '警告與錯誤')}${ch('error', '只看錯誤')}</div>
+    <div class="filters"><select id="fw" aria-label="工作區">${opt('', '全部工作區', L.workspace)}${opt('_platform', '平台（不屬於工作區）', L.workspace)}${T.map((x) => opt(x.slug, x.name, L.workspace)).join('')}</select>
+      <select id="fs" aria-label="來源">${opt('', '全部來源', L.source)}${Object.entries(r.sources).map(([k, v]) => opt(k, v, L.source)).join('')}</select>
+      <input id="fq" class="full" placeholder="搜尋內容，例如：授權、#12" value="${esc(L.q)}" enterkeyhint="search"></div>
+    ${r.rows.length ? `<div class="list" id="ll">${r.rows.map(rowHtml).join('')}</div>${r.rows.length >= 100 ? '<button class="btn sec block" id="more">載入更早的紀錄</button>' : ''}`
+      : empty(L.level || L.workspace || L.source || L.q ? '沒有符合條件的紀錄' : '尚無紀錄', '串接、發文、排程的結果與錯誤原因會記錄在這裡。')}
+    <div class="note">保留 30 天，不含顧客訊息內容與任何憑證。<br>Threads 授權只有「開始連結」而沒有下一筆，代表卡在 Threads／Meta 頁面：常見原因是帳號不是測試人員、回呼網址未登記，或權限未加入。</div>`);
+  const rows = new Map(r.rows.map((l) => [String(l.id), l]));
+  const bind = () => $$('[data-log]').forEach((b) => b.onclick = () => {
+    const w = $('.det-wrap', b), l = rows.get(b.dataset.log);
+    if (w.innerHTML) { w.innerHTML = ''; return; }
+    let det = ''; try { det = l.detail ? JSON.stringify(JSON.parse(l.detail), null, 1) : ''; } catch { det = l.detail; }
+    w.innerHTML = `<pre class="det">${esc(det || '沒有更多細節')}</pre>`;
+  });
+  bind();
+  $$('[data-lv]').forEach((b) => b.onclick = () => { L.level = b.dataset.lv; render(); });
+  $('#fw').onchange = (e) => { L.workspace = e.target.value; render(); };
+  $('#fs').onchange = (e) => { L.source = e.target.value; render(); };
+  $('#fq').onkeydown = (e) => { if (e.key === 'Enter') { L.q = e.target.value.trim(); render(); } };
+  $('#more')?.addEventListener('click', (e) => act(e.currentTarget, async () => {
+    const q = new URLSearchParams(p); q.set('before', r.rows[r.rows.length - 1].id);
+    const m = await api('GET', '/logs?' + q); m.rows.forEach((l) => rows.set(String(l.id), l)); r.rows.push(...m.rows);
+    $('#ll').insertAdjacentHTML('beforeend', m.rows.map(rowHtml).join('')); bind();
+    if (m.rows.length < 100) e.currentTarget.remove();
+  }));
+}
+
+/* ---------- 開通 ---------- */
+function newPage() {
+  bar('開通新工作區');
+  view(`<div>${field('ns', '工作區代號', '<input id="ns" placeholder="例如：acme" autocapitalize="none" autocorrect="off">', '英文小寫、數字或連字號。客戶登入網址會是 /?w=代號')}
+    ${field('nn', '品牌名稱', '<input id="nn">')}
+    <div class="two" style="margin-top:16px"><div class="f" style="margin:0"><label for="ni">產業</label><select id="ni"><option value="general">一般</option><option value="lending">放款（強制審核）</option><option value="finance">金融（強制審核）</option></select></div>
+      <div class="f" style="margin:0"><label for="np">方案</label><select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></div></div>
+    ${field('na', '管理員帳號', '<input id="na" value="owner" autocapitalize="none" autocorrect="off">', '客戶登入後可以自己改帳號和密碼。')}
+    <button class="btn block" id="create" style="margin-top:24px">建立工作區</button><div id="made" style="margin-top:16px"></div></div>`);
+  $('#create').onclick = (e) => act(e.currentTarget, async () => {
+    const r = await api('POST', '/tenants', { slug: $('#ns').value.trim().toLowerCase(), name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim() });
+    T = [];
+    $('#made').innerHTML = secret(`已建立 <b>${esc(r.slug)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>管理員：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>`) +
+      '<p class="t-sub" style="margin-top:10px">客戶登入後，首頁的「開通進度」會帶他完成 LINE、AI、Threads 設定。Meta App 仍在開發模式時，記得先把客戶的 Threads 帳號加為測試人員。</p>';
+    $('#ns').value = $('#nn').value = '';
+  });
+}
+
+/* ---------- 帳號（營運人員、變更密碼） ---------- */
+async function mePage() {
+  bar('帳號');
+  const admin = me.role === 'admin', ops = admin ? await api('GET', '/operators') : [];
+  view(`<section>${sec('我的帳號')}<div class="list"><div class="row static"><span class="main"><span class="ttl" style="display:block">${esc(me.username)}</span><span class="sub" style="display:block">${admin ? '營運管理者：全部權限' : '維護人員：查看狀態、協助客戶重設密碼'}</span></span></div></div></section>
+    <section>${sec('變更密碼')}${field('pc', '目前密碼', '<input id="pc" type="password" autocomplete="current-password">')}${field('pn', '新密碼', '<input id="pn" type="password" autocomplete="new-password">', '至少 12 個字元。')}
+      <button class="btn sec block" id="pchg" style="margin-top:16px">變更密碼</button></section>
+    ${admin ? `<section>${sec('營運人員')}<div class="list">${ops.map((o) => `<div class="row static"><span class="dot ${o.enabled ? 'ok' : ''}"></span><span class="main"><span class="ttl" style="display:block">${esc(o.username)}${o.username === me.username ? ' <span class="mut">（你）</span>' : ''}</span><span class="sub" style="display:block">${o.role === 'admin' ? '營運管理者' : '維護人員'}${o.enabled ? '' : ' · 已停用'}</span></span>
+        ${o.username === me.username ? '' : `<span class="end"><button class="btn sm sec" data-opw="${o.id}">重設密碼</button><button class="btn sm ${o.enabled ? 'dng' : 'sec'}" data-oen="${o.id}" data-v="${o.enabled ? 0 : 1}">${o.enabled ? '停用' : '啟用'}</button></span>`}</div>`).join('')}</div>
+      <div class="two" style="margin-top:12px"><div class="f" style="margin:0"><label for="ou">新增人員帳號</label><input id="ou" autocapitalize="none" autocorrect="off"></div>
+        <div class="f" style="margin:0"><label for="or">角色</label><select id="or"><option value="support">維護人員</option><option value="admin">營運管理者</option></select></div></div>
+      <button class="btn block" id="oadd" style="margin-top:12px">新增人員</button><div id="omade" style="margin-top:12px"></div></section>` : ''}`);
+  $('#pchg').onclick = (e) => act(e.currentTarget, async () => {
+    if ($('#pn').value.length < 12) throw new Error('新密碼至少 12 個字元');
+    await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = '';
+  }, '密碼已變更');
+  if (!admin) return;
+  $$('[data-oen]').forEach((b) => b.onclick = () => act(b, async () => { await api('PATCH', '/operators/' + b.dataset.oen, { enabled: b.dataset.v === '1' }); toast(b.dataset.v === '1' ? '已啟用' : '已停用，對方立即無法登入', 'ok'); render(); }));
+  $$('[data-opw]').forEach((b) => b.onclick = () => act(b, async () => { const r = await api('PATCH', '/operators/' + b.dataset.opw, { reset_password: true }); $('#omade').innerHTML = secret(`新的一次性密碼：<code>${esc(r.password)}</code>`); }));
+  $('#oadd').onclick = (e) => act(e.currentTarget, async () => {
+    const r = await api('POST', '/operators', { username: $('#ou').value.trim(), role: $('#or').value });
+    await render(); $('#omade').innerHTML = secret(`已新增 <code>${esc(r.username)}</code>（${r.role === 'admin' ? '營運管理者' : '維護人員'}）<br>一次性密碼：<code>${esc(r.password)}</code>`);
+  });
+}
+
+render();
 </script>
 </body>
 </html>
