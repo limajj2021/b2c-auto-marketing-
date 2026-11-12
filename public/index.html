@@ -161,6 +161,17 @@ details.acc .body{padding:0 16px 16px;color:var(--text2);line-height:1.75}.body 
   .page.wide{max-width:none}
 }
 nav.tabs .brand{display:none}
+/* 滾輪時間選擇器（日期／時／分），中間一列為選取值 */
+.sched{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border-radius:var(--r-lg);background:var(--bg2);margin-bottom:14px}
+.sched .when{font-size:15px;font-weight:600}.sched>.btn.sec{background:var(--bg1)}.sched .t-sub{width:100%;margin:-2px 0 0}
+.wheels{position:relative;display:flex;gap:4px;height:200px;margin-top:12px;padding:0 6px;border-radius:var(--r-lg);background:var(--bg2);overflow:hidden;width:100%}
+.wheels:before{content:"";position:absolute;left:6px;right:6px;top:80px;height:40px;border-radius:8px;background:var(--bg1);box-shadow:0 0 0 1px var(--line);pointer-events:none}
+.wheel{position:relative;flex:1;height:200px;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none;overscroll-behavior:contain;outline:none;
+  -webkit-mask-image:linear-gradient(transparent,#000 32%,#000 68%,transparent);mask-image:linear-gradient(transparent,#000 32%,#000 68%,transparent)}
+.wheel.day{flex:2}.wheel::-webkit-scrollbar{display:none}.wheel .pad{height:80px}
+.wheel .it{height:40px;line-height:40px;text-align:center;scroll-snap-align:center;font-size:16px;color:var(--text2);cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}
+.wheel .it.on{color:var(--text);font-weight:600}
+.wheel:focus-visible{box-shadow:inset 0 0 0 2px var(--gold);border-radius:8px}
 /* 觸控裝置：所有可點元件至少 44px（WCAG 2.2 AA 最低 24px，這裡採更嚴格的原生 App 標準） */
 @media (pointer:coarse){.btn.sm,.link,.chip,.tabs-h button{min-height:44px}.link{padding:10px 4px}.tabs-h button{min-width:44px;padding:0 2px}.chip input{min-height:32px!important}.foot a{display:inline-block;padding:12px 6px}}
 @media print{nav.tabs,.bar .icon,#toasts,#rm{display:none!important}.bar{position:static}main{padding:0;margin:0!important}body{background:#fff;color:#000}.list{border:1px solid #ddd}}
@@ -474,6 +485,46 @@ async function postsPage(r) {
   $('[data-act=gen2]')?.addEventListener('click', openGenerate);
   $$('[data-act=post]').forEach((b) => b.onclick = () => openPost(all.find((p) => p.id == b.dataset.id)));
 }
+const WD = '日一二三四五六';
+function tzParts(ms) {
+  return Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short' })
+    .formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+}
+/** 品牌時區的「年月日時分」→ 實際時間（毫秒） */
+function zonedMs(y, mo, d, h, mi) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi), p = tzParts(guess);
+  return guess - (Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - guess);
+}
+const fmtW = (ms) => { const p = tzParts(ms), wd = WD[new Date(Date.UTC(+p.year, +p.month - 1, +p.day)).getUTCDay()]; return `${+p.month}/${+p.day}（${wd}）${p.hour}:${p.minute}`; };
+/** 滾輪選擇器：日期（今天起 90 天）、時、分（每 5 分鐘）。onDone(毫秒) */
+function timePicker(host, initMs, onDone, onCancel) {
+  const now = tzParts(Date.now()), base = Date.UTC(+now.year, +now.month - 1, +now.day);
+  const days = Array.from({ length: 91 }, (_, i) => { const d = new Date(base + i * 86400000); return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), label: `${i === 0 ? '今天 ' : i === 1 ? '明天 ' : ''}${d.getUTCMonth() + 1}/${d.getUTCDate()}（${WD[d.getUTCDay()]}）` }; });
+  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')), mins = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
+  const start = initMs && initMs > Date.now() ? initMs : Math.ceil((Date.now() + 30 * 60000) / 300000) * 300000, ip = tzParts(start);
+  const sel = { d: Math.max(0, days.findIndex((x) => x.y === +ip.year && x.m === +ip.month && x.d === +ip.day)), h: +ip.hour, m: Math.min(11, Math.round(+ip.minute / 5)) };
+  const col = (k, items, cls, label) => `<div class="wheel ${cls}" data-w="${k}" tabindex="0" role="listbox" aria-label="${label}"><div class="pad"></div>${items.map((t, i) => `<div class="it" data-i="${i}" role="option">${t}</div>`).join('')}<div class="pad"></div></div>`;
+  host.innerHTML = `<div class="wheels">${col('d', days.map((x) => x.label), 'day', '日期')}${col('h', hours, '', '時')}${col('m', mins, '', '分')}</div>
+    <p class="t-sub" id="tpv" style="margin:10px 2px 0"></p><div class="actions" style="margin-top:12px"><button class="btn sec" data-tp="0">取消</button><button class="btn" data-tp="1">確定</button></div>`;
+  const ms = () => { const d = days[sel.d]; return zonedMs(d.y, d.m, d.d, sel.h, sel.m * 5); };
+  const show = () => {
+    for (const w of host.querySelectorAll('.wheel')) w.querySelectorAll('.it').forEach((it) => it.classList.toggle('on', +it.dataset.i === sel[w.dataset.w]));
+    const t = ms(), past = t < Date.now() - 60000;
+    $('#tpv', host).textContent = past ? '這個時間已經過去，請選擇之後的時間' : `將於 ${fmtW(t)} 發布`;
+    $('#tpv', host).style.color = past ? 'var(--bad)' : ''; $('[data-tp="1"]', host).disabled = past;
+  };
+  host.querySelectorAll('.wheel').forEach((w) => {
+    const k = w.dataset.w, max = w.querySelectorAll('.it').length - 1; let tm;
+    requestAnimationFrame(() => { w.scrollTop = sel[k] * 40; });
+    w.addEventListener('scroll', () => { clearTimeout(tm); tm = setTimeout(() => { sel[k] = Math.max(0, Math.min(max, Math.round(w.scrollTop / 40))); show(); }, 60); }, { passive: true });
+    w.addEventListener('click', (e) => { const it = e.target.closest('.it'); if (it) w.scrollTo({ top: +it.dataset.i * 40, behavior: 'smooth' }); });
+    w.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); w.scrollBy({ top: e.key === 'ArrowDown' ? 40 : -40, behavior: 'smooth' }); } });
+  });
+  host.querySelector('[data-tp="0"]').onclick = () => { host.innerHTML = ''; onCancel?.(); };
+  host.querySelector('[data-tp="1"]').onclick = (e) => onDone(ms(), e.currentTarget);
+  show();
+}
+
 function openPost(p) {
   const draft = p.status === 'draft', parts = p.parts?.length ? [...p.parts] : [p.content], done = p.part_ids?.length || 0;
   const role = (i, n) => n === 1 ? '' : i === 0 ? '鉤子' : i === n - 1 ? 'CTA' : '';
@@ -482,12 +533,17 @@ function openPost(p) {
   const view = () => parts.map((t, i) => `<div class="f"><div class="lab">第 ${i + 1} 則${i < done ? ' <span class="pill ok">已發出</span>' : ''}</div><div class="note" style="white-space:pre-wrap;color:var(--text)">${esc(t)}</div></div>`).join('');
   const others = ACCTS.filter((a) => a.id !== p.account_id && a.status === 'ok');
   sheet(`${PST[p.status]?.[0] || '貼文'}${parts.length > 1 ? `・串文 ${parts.length} 則` : ''}`, `${p.error_message ? `<div class="note ${draft ? 'warn' : 'bad'}" style="margin-bottom:12px">${esc(p.error_message)}</div>` : ''}
-    <p class="t-sub" style="margin-bottom:12px">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>
+    ${draft || p.status === 'scheduled' ? `<div class="sched"><div><div class="t-sub" style="margin:0">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${draft ? '核准後的發布時間' : '排程發布時間'}</div><div class="when" id="twhen"></div></div><button class="btn sm sec" data-a="time">${draft ? '選擇時間' : '調整時間'}</button><div id="tpick" style="width:100%"></div></div>`
+      : `<p class="t-sub" style="margin-bottom:12px">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>`}
     <div id="parts">${draft ? editor() : view()}</div>
     <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="ok">核准發布</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}
     ${p.status === 'failed' ? `<button class="btn" data-a="retry">${done ? `從第 ${done + 1} 則接續發布` : '重試發布'}</button>` : ''}
     ${others.length ? '<button class="btn sec" data-a="dist">改寫分發</button>' : ''}
-    ${draft || p.status === 'failed' ? '<button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn dng" data-a="del">取消排程</button>' : ''}</div>`, (el, close) => {
+    ${draft || p.status === 'failed' ? '<button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn sec" data-a="unsched">退回待審核</button>' : ''}</div>`, (el, close) => {
+    // 草稿：選好的時間在核准時才送出；已排程：選好就直接更新
+    let pickAt = p.scheduled_at && Date.parse(p.scheduled_at) > Date.now() ? Date.parse(p.scheduled_at) : null;
+    const label = () => { const w = $('#twhen', el); if (w) w.textContent = pickAt ? fmtW(pickAt) : '核准後立即發布'; };
+    label();
     const sync = () => $$('[data-i]', el).forEach((t) => { parts[+t.dataset.i] = t.value; });
     const bind = () => {
       $$('[data-i]', el).forEach((t) => { const cc = $(`[data-cc="${t.dataset.i}"]`, el); const u = () => { const n = [...t.value].length; cc.textContent = `${n} / 500 字`; cc.className = 'hint' + (n > 500 ? ' bad' : ''); }; t.oninput = u; u(); });
@@ -497,6 +553,13 @@ function openPost(p) {
     if (draft) bind();
     $$('[data-a]', el).forEach((b) => b.onclick = () => {
       if (b.dataset.a === 'dist') { close(); return openDistribute(p, others, () => {}); }
+      if (b.dataset.a === 'time') {
+        const host = $('#tpick', el); if (host.innerHTML) { host.innerHTML = ''; return; }
+        return timePicker(host, pickAt, async (ms, btn) => {
+          if (draft) { pickAt = ms; host.innerHTML = ''; label(); return; }
+          await act(btn, async () => { await api('PUT', `/posts/${p.id}/schedule`, { scheduled_at: new Date(ms).toISOString() }); toast(`已改為 ${fmtW(ms)} 發布`, 'ok'); close(); render(); });
+        });
+      }
       act(b, async () => {
         const a = b.dataset.a; if (draft) sync();
         const body = { parts: parts.map((x) => x.trim()) };
@@ -504,10 +567,12 @@ function openPost(p) {
         if (a === 'save') { await api('PUT', '/posts/' + p.id, body); toast('已儲存', 'ok'); return; }
         if (a === 'ok') {
           const over = body.parts.findIndex((x) => [...x].length > 500); if (over >= 0) throw new Error(`第 ${over + 1} 則超過 500 字，Threads 會拒收`);
-          await api('PUT', '/posts/' + p.id, body); const r = await api('POST', `/posts/${p.id}/approve`, {});
-          toast(r.warning || '已核准，將依排程發布', r.warning ? '' : 'ok');
+          await api('PUT', '/posts/' + p.id, body);
+          const r = await api('POST', `/posts/${p.id}/approve`, pickAt ? { scheduled_at: new Date(pickAt).toISOString() } : {});
+          toast(r.warning || (pickAt ? `已核准，將於 ${fmtW(pickAt)} 發布` : '已核准，將在下一輪排程發布（約 5 分鐘內）'), r.warning ? '' : 'ok');
         }
-        if (a === 'del') { if (!(await confirmSheet(p.status === 'scheduled' ? '取消這則排程？' : '刪除這則貼文？'))) return; await api('DELETE', '/posts/' + p.id); toast('已刪除', 'ok'); }
+        if (a === 'del') { if (!(await confirmSheet('刪除這則貼文？'))) return; await api('DELETE', '/posts/' + p.id); toast('已刪除', 'ok'); }
+        if (a === 'unsched') { await api('POST', `/posts/${p.id}/unschedule`, {}); S.postSeg = 'draft'; toast('已退回待審核，可修改後再核准', 'ok'); }
         if (a === 'retry') { await api('POST', `/posts/${p.id}/retry`, {}); toast(done ? `將從第 ${done + 1} 則接續發布` : '已重新排入發布', 'ok'); }
         close(); render();
       });

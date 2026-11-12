@@ -84,3 +84,26 @@ describe('foolproof guards', () => {
     expect((await api(env, 'POST', '/api/pause', { auto_post_enabled: true }, admin)).status).toBe(409);
   });
 });
+
+describe('scheduling controls', () => {
+  it('cancelling a schedule returns the post to review; reschedule validates time', async () => {
+    const env = await makeEnv();
+    const c = (await login(env, 'boss', 'correct-horse-1')).cookie;
+    const future = new Date(Date.now() + 3 * 3600000).toISOString();
+    await env.DB.prepare(`INSERT INTO posts(brand_id,content,status,scheduled_at,approved_by,updated_at,created_at) VALUES('b1','歡迎諮詢','scheduled',?,'boss','x','x')`).bind(future).run();
+    const later = new Date(Date.now() + 26 * 3600000).toISOString();
+    const r = await api(env, 'PUT', '/api/posts/1/schedule', { scheduled_at: later }, c);
+    expect(r.status).toBe(200);
+    expect(((await env.DB.prepare('SELECT scheduled_at FROM posts').first()) as any).scheduled_at).toBe(later);
+    expect((await api(env, 'PUT', '/api/posts/1/schedule', { scheduled_at: '2020-01-01T00:00:00Z' }, c)).status).toBe(400);
+    expect((await api(env, 'PUT', '/api/posts/1/schedule', { scheduled_at: new Date(Date.now() + 100 * 86400000).toISOString() }, c)).status).toBe(400);
+    expect((await api(env, 'POST', '/api/posts/1/unschedule', {}, c)).status).toBe(200);
+    expect(await env.DB.prepare('SELECT status,approved_by,scheduled_at FROM posts').first()).toEqual({ status: 'draft', approved_by: null, scheduled_at: later });
+    // 退回後可以用指定時間重新核准；過去的時間會被拒絕
+    expect((await api(env, 'POST', '/api/posts/1/approve', { scheduled_at: '2020-01-01T00:00:00Z' }, c)).status).toBe(400);
+    expect((await api(env, 'POST', '/api/posts/1/approve', { scheduled_at: later }, c)).status).toBe(200);
+    await env.DB.prepare("UPDATE posts SET status='published'").run();
+    expect((await api(env, 'POST', '/api/posts/1/unschedule', {}, c)).status).toBe(409);
+    expect((await api(env, 'PUT', '/api/posts/1/schedule', { scheduled_at: later }, c)).status).toBe(409);
+  });
+});

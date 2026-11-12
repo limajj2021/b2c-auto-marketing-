@@ -290,6 +290,15 @@ add('PUT', '/posts/(\\d+)', 'admin', async ({ env, req, m, actor, brandId }) => 
   return json({ ok: true });
 });
 
+/** 排程時間檢查：不可早於現在（保留 1 分鐘誤差），最多 90 天後。 */
+function scheduleTime(v: unknown): Date | string {
+  const at = new Date(String(v));
+  if (isNaN(at.getTime())) return '時間格式不合法';
+  if (at.getTime() < Date.now() - 60_000) return '發布時間已經過去，請選擇之後的時間';
+  if (at.getTime() > Date.now() + 90 * 86400000) return '發布時間最多只能排到 90 天後';
+  return at;
+}
+
 add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brandId }) => {
   const brand = await getBrand(env);
   const s = await getSettings(env, brandId);
@@ -298,13 +307,35 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   const issues = checkParts(partsOf(post), { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
   if (issues.length) return err(422, `內容檢查未通過，請先修改：${issues.join('；')}`);
   const b: any = await req.json().catch(() => ({}));
-  const at = b.scheduled_at ? new Date(b.scheduled_at) : post.scheduled_at ? new Date(post.scheduled_at) : new Date();
-  if (isNaN(at.getTime())) return err(400, '時間格式不合法');
+  let at: Date;
+  if (b.scheduled_at) { const t = scheduleTime(b.scheduled_at); if (typeof t === 'string') return err(400, t); at = t; }
+  else at = post.scheduled_at && new Date(post.scheduled_at).getTime() > Date.now() ? new Date(post.scheduled_at) : new Date(); // 原時段已過就立即排入
   await env.DB.prepare(`UPDATE posts SET status='scheduled',approved_by=?,scheduled_at=?,error_message=NULL,updated_at=? WHERE id=? AND status='draft'`)
     .bind(actor.name, at.toISOString(), iso(), m[1]).run();
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
   const hasAcct = (await listAccounts(env)).length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID);
   return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
+});
+
+// 調整已排程（或草稿）的發布時間
+add('PUT', '/posts/(\\d+)/schedule', 'admin', async ({ env, req, m, actor, brandId }) => {
+  const b: any = await req.json().catch(() => ({}));
+  const t = scheduleTime(b.scheduled_at);
+  if (typeof t === 'string') return err(400, t);
+  const r = await env.DB.prepare(`UPDATE posts SET scheduled_at=?,updated_at=? WHERE id=? AND brand_id=? AND status IN ('scheduled','draft')`)
+    .bind(t.toISOString(), iso(), m[1], brandId).run();
+  if (r.meta.changes !== 1) return err(409, '這則貼文已經在發布中或已發布，無法調整時間');
+  await audit(env, brandId, actor.name, 'post_reschedule', `${m[1]}:${t.toISOString()}`);
+  return json({ ok: true, scheduled_at: t.toISOString() });
+});
+
+// 取消排程：退回待審核（保留內容與原本時間，可修改後再核准）
+add('POST', '/posts/(\\d+)/unschedule', 'admin', async ({ env, m, actor, brandId }) => {
+  const r = await env.DB.prepare(`UPDATE posts SET status='draft',approved_by=NULL,updated_at=? WHERE id=? AND brand_id=? AND status='scheduled'`)
+    .bind(iso(), m[1], brandId).run();
+  if (r.meta.changes !== 1) return err(409, '這則貼文已經在發布中或已發布，無法取消');
+  await audit(env, brandId, actor.name, 'post_unschedule', m[1]);
+  return json({ ok: true });
 });
 
 add('POST', '/posts/(\\d+)/retry', 'admin', async ({ env, m, actor, brandId }) => {
