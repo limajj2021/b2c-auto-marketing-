@@ -329,7 +329,8 @@ function loginView() {
   $('#app').innerHTML = `<div class="login"><div class="mark" id="lg">營</div><h1 class="t-page" id="lt">登入後台</h1><p class="t-sub" style="margin:6px 0 24px">請使用管理員提供的帳號</p>
   <div id="wsf" class="hide">${field('w', '工作區代號', input('w', ws0, 'autocomplete="organization" autocapitalize="none" autocorrect="off" placeholder="例如：vuca"'), '開通時服務商提供的代號，之後會記住。')}</div>
   ${field('u', '帳號', input('u', '', 'autocomplete="username" autocapitalize="none" autocorrect="off"'))}${field('p', '密碼', input('p', '', 'type="password" autocomplete="current-password"'))}
-  <button class="btn block" id="go" style="margin-top:24px">登入</button></div>`;
+  <button class="btn block" id="go" style="margin-top:24px">登入</button>
+  <p class="t-sub" style="margin-top:20px;text-align:center"><a href="/ops.html" style="color:inherit">營運人員請由此登入營運總後台</a></p></div>`;
   const showName = () => fetch('/api/public' + ($('#w').value.trim() ? '?w=' + encodeURIComponent($('#w').value.trim().toLowerCase()) : '')).then((r) => r.json()).then((d) => {
     if (d.multi) $('#wsf').classList.remove('hide');
     if (d.name) { BRAND = d.name; $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; } else { $('#lg').textContent = '營'; $('#lt').textContent = '登入後台'; }
