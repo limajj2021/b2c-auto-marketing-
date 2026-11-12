@@ -141,8 +141,15 @@ export function registerExtra(add: Add, json: J, err: E) {
       if (String(b.password).length < 10) return err(400, '密碼至少 10 字元');
       await env.DB.prepare('UPDATE admin_users SET password_hash=? WHERE id=? AND brand_id=?').bind(await hashPassword(b.password), m[1], brandId).run();
     }
-    await audit(env, brandId, actor.name, 'user_update', m[1]);
-    return json({ ok: true });
+    // 管理員替同事重設密碼：由系統產生一次性密碼，只回傳這一次
+    let issued: string | undefined;
+    if (b.reset_password === true) {
+      issued = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(12)))).replace(/[+/=]/g, '').slice(0, 14);
+      const r = await env.DB.prepare('UPDATE admin_users SET password_hash=?,enabled=1 WHERE id=? AND brand_id=?').bind(await hashPassword(issued), m[1], brandId).run();
+      if (!r.meta.changes) return err(404, '找不到這個帳號');
+    }
+    await audit(env, brandId, actor.name, b.reset_password ? 'user_password_reset' : 'user_update', m[1]);
+    return json({ ok: true, password: issued });
   });
 
   // 唯讀：列出已連結 Threads 帳號自己發過的貼文（用於分析範本帳號的貼文架構），最多 150 則

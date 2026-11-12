@@ -107,3 +107,23 @@ describe('scheduling controls', () => {
     expect((await api(env, 'PUT', '/api/posts/1/schedule', { scheduled_at: later }, c)).status).toBe(409);
   });
 });
+
+describe('account & password self-service', () => {
+  it('renames own account and changes password with current password; admins reset colleagues', async () => {
+    const env = await makeEnv();
+    const c = (await login(env, 'boss', 'correct-horse-1')).cookie;
+    expect((await api(env, 'POST', '/api/account', { current: 'wrong', username: 'owner2' }, c)).status).toBe(400);
+    await api(env, 'POST', '/api/users', { username: 'helper', password: 'helper-pass-123', role: 'staff' }, c);
+    expect((await api(env, 'POST', '/api/account', { current: 'correct-horse-1', username: 'helper' }, c)).status).toBe(409); // 和同事重名
+    expect((await api(env, 'POST', '/api/account', { current: 'correct-horse-1', username: 'x' }, c)).status).toBe(400);
+    expect((await api(env, 'POST', '/api/account', { current: 'correct-horse-1', username: 'owner2', next: 'brand-new-pass-1' }, c)).status).toBe(200);
+    expect((await login(env, 'boss', 'correct-horse-1')).r.status).toBe(401);
+    expect((await login(env, 'owner2', 'brand-new-pass-1')).r.status).toBe(200);
+    expect((await api(env, 'GET', '/api/me', undefined, c)).status).toBe(200); // 改名不會把自己登出
+    const r: any = await (await api(env, 'PATCH', '/api/users/2', { reset_password: true }, c)).json();
+    expect(r.password.length).toBeGreaterThanOrEqual(10);
+    expect((await login(env, 'cs', r.password)).r.status).toBe(200);
+    const staff = (await login(env, 'cs', r.password)).cookie;
+    expect((await api(env, 'PATCH', '/api/users/1', { reset_password: true }, staff)).status).toBe(403); // 客服不能重設別人
+  });
+});

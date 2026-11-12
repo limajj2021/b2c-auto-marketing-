@@ -112,6 +112,26 @@ async function login(env: Env, b: any, brandId: string): Promise<Response> {
 // ---------- 通用 ----------
 add('GET', '/me', 'staff', async ({ env, actor, brandId }) => json({ ...actor, leads_enabled: !!(await getSettings(env, brandId)).leads_enabled }));
 
+// 帳號與密碼：改自己的帳號名稱及／或密碼，需輸入目前密碼
+add('POST', '/account', 'staff', async ({ env, req, actor, brandId }) => {
+  const b: any = await req.json().catch(() => ({}));
+  const row = await env.DB.prepare('SELECT password_hash FROM admin_users WHERE id=?').bind(actor.id).first<any>();
+  if (!(await verifyPassword(String(b.current ?? ''), row.password_hash))) return err(400, '目前密碼錯誤');
+  const username = typeof b.username === 'string' ? b.username.trim() : actor.name;
+  const next = typeof b.next === 'string' && b.next ? b.next : null;
+  if (username === actor.name && !next) return err(400, '沒有需要變更的內容');
+  if (username !== actor.name) {
+    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) return err(400, '帳號需為 3–32 字英數（可含 . _ -）');
+    if (await env.DB.prepare('SELECT 1 FROM admin_users WHERE brand_id=? AND authentication_id=? AND id<>?').bind(brandId, username, actor.id).first()) return err(409, '這個帳號名稱已被使用');
+  }
+  if (next && next.length < 10) return err(400, '新密碼至少 10 字元');
+  if (next && next === String(b.current)) return err(400, '新密碼不能和目前密碼相同');
+  await env.DB.prepare('UPDATE admin_users SET authentication_id=?, password_hash=COALESCE(?,password_hash) WHERE id=?')
+    .bind(username, next ? await hashPassword(next) : null, actor.id).run();
+  await audit(env, brandId, actor.name, 'account_update', username !== actor.name ? `rename:${actor.name}->${username}${next ? ',password' : ''}` : 'password');
+  return json({ ok: true, username });
+});
+
 add('POST', '/password', 'staff', async ({ env, req, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
   const row = await env.DB.prepare('SELECT password_hash FROM admin_users WHERE id=?').bind(actor.id).first<any>();

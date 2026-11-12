@@ -290,7 +290,7 @@ async function render() {
   if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
   if (!me) return loginView();
   const r = route(), tabs = tabsFor();
-  const ok = r.tab === 'help' || r.tab === 'setup' || (r.tab === 'report' && me.role === 'admin') || tabs.some((t) => t[0] === r.tab);
+  const ok = r.tab === 'help' || r.tab === 'setup' || (r.tab === 'report' && me.role === 'admin') || (r.tab === 'settings' && r.sub === 'password') || tabs.some((t) => t[0] === r.tab);
   if (!ok) { suppress = true; location.hash = '#/' + tabs[0][0]; return render(); }
   if (!$('#view')) {
     $('#app').innerHTML = `<header class="bar" id="bar"></header><main id="view"></main><nav class="tabs" aria-label="主選單"><div class="in" id="tabs"></div></nav>`;
@@ -716,7 +716,7 @@ async function settingsPage(r) {
       ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
     <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'report', title: '成效報告', sub: '每月導流成效，可列印或另存 PDF 給團隊' })}${row({ act: 'audit', title: '操作紀錄' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
-    <section><div class="list">${row({ act: 'password', title: '變更我的密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
+    <section><div class="list">${row({ act: 'password', title: '帳號與密碼', sub: '變更登入帳號或密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
       <p class="t-sub foot" style="margin-top:10px"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p></section>`);
   for (const k of ['threads', 'line', 'gemini', 'brand', 'users', 'audit', 'password']) $(`[data-act=${k}]`).onclick = () => go('settings/' + k);
   $('[data-act=report]').onclick = () => go('report');
@@ -805,8 +805,15 @@ async function brandPage() {
 }
 async function usersPage() {
   const users = await api('GET', '/users'); bar({ title: '帳號與權限', back: 'settings', right: `<button class="btn sm" data-act="nu" style="margin-right:8px">新增</button>` });
-  setView(`<div class="list">${users.map((u) => row({ go: false, dot: u.enabled ? 'ok' : '', title: esc(u.username) + (u.username === me.name ? ' <span class="mut">（你）</span>' : ''), sub: u.role === 'admin' ? '管理員：可修改全部設定' : '客服：只能查看與處理留資', end: u.username === me.name ? '' : sw('u' + u.id, u.enabled, '啟用 ' + u.username) })).join('')}</div>
+  setView(`<div class="list">${users.map((u) => row({ go: false, dot: u.enabled ? 'ok' : '', title: esc(u.username) + (u.username === me.name ? ' <span class="mut">（你）</span>' : ''), sub: u.role === 'admin' ? '管理員：可修改全部設定' : '客服：只能查看與處理留資', end: u.username === me.name ? '<button class="btn sm sec" data-go="settings/password">編輯</button>' : `<button class="btn sm sec" data-rp="${u.id}">重設密碼</button>${sw('u' + u.id, u.enabled, '啟用 ' + u.username)}` })).join('')}</div>
+    <div id="newpw"></div>
     <p class="t-sub">停用帳號後，對方立即無法登入。離職或不再需要的帳號請停用。</p>`);
+  $$('[data-rp]').forEach((b) => b.onclick = () => act(b, async () => {
+    const u = users.find((x) => x.id == b.dataset.rp);
+    if (!(await confirmSheet(`重設「${u.username}」的密碼？對方原本的密碼會立即失效。`, '重設密碼'))) return;
+    const r = await api('PATCH', '/users/' + u.id, { reset_password: true });
+    $('#newpw').innerHTML = `<div class="note" style="margin-top:16px;color:var(--text)">「<b>${esc(u.username)}</b>」的新密碼：<code style="font-size:15px">${esc(r.password)}</code><br><span class="t-sub">只顯示這一次。請用安全的方式告訴對方，並請對方登入後到「帳號與密碼」改掉。</span></div>`;
+  }));
   users.filter((u) => u.username !== me.name).forEach((u) => { $('#u' + u.id).onchange = async (e) => {
     const on = e.target.checked; if (!on && !(await confirmSheet(`停用「${u.username}」？對方將立即無法登入。`, '停用'))) { e.target.checked = true; return; }
     try { await api('PATCH', '/users/' + u.id, { enabled: on }); toast(on ? '已啟用' : '已停用', 'ok'); } catch (err) { toast(err.message, 'bad'); e.target.checked = !on; } }; });
@@ -816,10 +823,20 @@ async function usersPage() {
       act(e.currentTarget, async () => { await api('POST', '/users', { username: $('#nu', el).value.trim(), role: $('#nr', el).value, password: $('#np', el).value }); close(); render(); }, '帳號已建立'); }; });
 }
 async function passwordPage() {
-  bar({ title: '變更密碼', back: me.role === 'admin' ? 'settings' : 'account' });
-  setView(`<div data-form>${field('pc', '目前密碼', input('pc', '', 'type="password" autocomplete="current-password"'))}${field('pn', '新密碼', input('pn', '', 'type="password" autocomplete="new-password"'), '至少 10 字元。')}<button class="btn block" id="pb" style="margin-top:24px">變更密碼</button></div>`, 'form');
-  $('#pb').onclick = async (e) => { if (!check([[$('#pn'), $('#pn').value.length < 10, '新密碼至少 10 字元'], [$('#pn'), $('#pn').value === $('#pc').value, '新密碼不能和目前密碼相同']])) return;
-    if (await act(e.currentTarget, () => api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }), '密碼已變更')) { dirty = false; $('#pc').value = $('#pn').value = ''; } };
+  bar({ title: '帳號與密碼', back: me.role === 'admin' ? 'settings' : 'account' });
+  setView(`<div data-form>${field('un', '帳號', input('un', me.name, 'autocomplete="username" autocapitalize="none" autocorrect="off"'), '登入時使用。3–32 字英數，可含 . _ -，不可和同事重複。')}
+    ${field('pn', '新密碼', input('pn', '', 'type="password" autocomplete="new-password" placeholder="不改密碼請留空"'), '至少 10 字元。')}${field('pn2', '再輸入一次新密碼', input('pn2', '', 'type="password" autocomplete="new-password"'))}
+    <div class="note" style="margin-top:20px">為了安全，儲存前請輸入目前的密碼。</div>${field('pc', '目前密碼', input('pc', '', 'type="password" autocomplete="current-password"'))}
+    <button class="btn block" id="pb" style="margin-top:24px">儲存</button></div>`, 'form');
+  $('#pb').onclick = async (e) => {
+    const un = $('#un').value.trim(), pn = $('#pn').value;
+    if (!check([[$('#un'), !/^[a-zA-Z0-9_.-]{3,32}$/.test(un), '帳號需為 3–32 字英數（可含 . _ -）'], [$('#pn'), pn && pn.length < 10, '新密碼至少 10 字元'],
+      [$('#pn2'), pn !== $('#pn2').value, '兩次輸入的新密碼不一致'], [$('#un'), un === me.name && !pn, '沒有需要變更的內容'], [$('#pc'), !$('#pc').value, '請輸入目前的密碼']])) return;
+    const r = await act(e.currentTarget, () => api('POST', '/account', { current: $('#pc').value, username: un, next: pn || undefined }));
+    if (!r) return;
+    dirty = false; const renamed = un !== me.name; me.name = un; $('#pc').value = $('#pn').value = $('#pn2').value = '';
+    toast(renamed && pn ? '帳號與密碼已更新，下次請用新帳號登入' : renamed ? '帳號已更新，下次請用新帳號登入' : '密碼已變更', 'ok');
+  };
 }
 async function auditPage() {
   const logs = await api('GET', '/audit'); bar({ title: '操作紀錄', back: 'settings' });
@@ -827,7 +844,7 @@ async function auditPage() {
 }
 async function accountPage() {
   bar({ title: '帳號' });
-  setView(`<div class="list">${row({ go: false, title: esc(me.name), sub: me.role === 'admin' ? '管理員' : '客服' })}${row({ act: 'pw', title: '變更密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>`);
+  setView(`<div class="list">${row({ go: false, title: esc(me.name), sub: me.role === 'admin' ? '管理員' : '客服' })}${row({ act: 'pw', title: '帳號與密碼', sub: '變更登入帳號或密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>`);
   $('[data-act=pw]').onclick = () => go('settings/password'); $('[data-act=out]').onclick = logout;
 }
 
