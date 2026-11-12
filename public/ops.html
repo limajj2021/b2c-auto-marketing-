@@ -61,7 +61,7 @@ function login() {
     <input id="u" placeholder="帳號" autocomplete="username" autocapitalize="none"><input id="p" type="password" placeholder="密碼" autocomplete="current-password">
     <button class="btn" id="go">登入</button></div>`;
   const go = (b) => act(b, async () => { await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value }); main(); });
-  $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
+  $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => { if (e.key === 'Enter') go($('#go')); }; // 不可回傳 false，否則會擋掉輸入
 }
 
 async function main() {

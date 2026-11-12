@@ -342,7 +342,7 @@ function loginView() {
     if (qs.get('w')) history.replaceState(null, '', location.pathname + location.hash);
     me = null; $('#app').innerHTML = ''; await render();
   });
-  $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => e.key === 'Enter' && go($('#go'));
+  $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => { if (e.key === 'Enter') go($('#go')); }; // 不可回傳 false，否則會擋掉輸入
 }
 
 /* ======================================================================
