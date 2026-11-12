@@ -82,6 +82,9 @@ directory = "../public"
 binding = "ASSETS"
 run_worker_first = ["/api/*", "/line/*", "/threads/*"]
 
+[observability]
+enabled = true
+
 [triggers]
 crons = ["*/5 * * * *"]
 

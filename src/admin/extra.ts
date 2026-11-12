@@ -86,8 +86,9 @@ export function registerExtra(add: Add, json: J, err: E) {
     return json({ ok: true });
   });
 
-  add('GET', '/integrations/threads/connect', 'admin', async ({ env, actor, url }) => {
+  add('GET', '/integrations/threads/connect', 'admin', async ({ env, actor, url, brandId }) => {
     if (!oauthConfigured(env)) return err(409, '系統尚未設定 Threads App（THREADS_APP_ID / THREADS_APP_SECRET）');
+    await audit(env, brandId, actor.name, 'threads_oauth_start', `${url.origin}/threads/callback`); // 用來判斷授權是否有回到系統
     return json({ url: await buildAuthorizeUrl(env, url.origin, actor.id) });
   });
 

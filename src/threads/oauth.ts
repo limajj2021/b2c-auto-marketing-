@@ -21,7 +21,7 @@ export async function buildAuthorizeUrl(env: Env, origin: string, adminId: numbe
   const state = await signToken(stateSecret(env), { uid: adminId, p: 'threads_oauth', exp: Math.floor(now / 1000) + STATE_TTL });
   const q = new URLSearchParams({
     client_id: env.THREADS_APP_ID!, redirect_uri: `${origin}/threads/callback`,
-    scope: SCOPES, response_type: 'code', state,
+    scope: env.THREADS_SCOPES?.trim() || SCOPES, response_type: 'code', state,
   });
   return `https://threads.net/oauth/authorize?${q}`;
 }
@@ -37,16 +37,22 @@ async function jget(url: string, init?: RequestInit, f: typeof fetch = fetch) {
 export async function handleCallback(env: Env, req: Request, now = Date.now()): Promise<Response> {
   const url = new URL(req.url);
   const fail = (reason: string) => redirect(`/?threads=error&reason=${encodeURIComponent(reason)}`);
-  if (url.searchParams.get('error')) return fail('已取消授權');
   const code = (url.searchParams.get('code') ?? '').replace(/#_$/, '');
   const state = url.searchParams.get('state') ?? '';
-  const st = code ? await verifyToken(stateSecret(env), state, Math.floor(now / 1000)) : null;
-  if (!st || st.p !== 'threads_oauth') return fail('授權已逾時，請重新操作');
+  const st = await verifyToken(stateSecret(env), state, Math.floor(now / 1000));
+  const owner = st && st.p === 'threads_oauth'
+    ? await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>() : null;
+  // 每一步的結果寫入操作紀錄（不含任何憑證），授權卡住時可判斷停在哪一步
+  const trace = (detail: string) => owner ? audit(env, owner.brand_id, null, 'threads_oauth_result', detail.slice(0, 300)).catch(() => {}) : Promise.resolve();
+  if (url.searchParams.get('error')) {
+    await trace(`denied: ${url.searchParams.get('error_reason') ?? url.searchParams.get('error')} ${url.searchParams.get('error_description') ?? ''}`);
+    return fail('已取消授權');
+  }
+  if (!code || !owner) { console.warn('threads:callback', code ? 'bad_state' : 'no_code'); return fail('授權已逾時，請重新操作'); }
   // 授權結果歸屬於發起連結的管理員所在的工作區（固定一個回呼網址即可服務所有工作區）
-  const owner = await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>();
-  if (!owner) return fail('授權已逾時，請重新操作');
   env = forBrand(env, owner.brand_id);
   if (!oauthConfigured(env)) return fail('系統尚未設定 Threads App');
+  let stage = 'exchange_code';
   try {
     const short = await jget(`${OAUTH}/oauth/access_token`, {
       method: 'POST',
@@ -56,7 +62,9 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
         redirect_uri: `${url.origin}/threads/callback`, code,
       }).toString(),
     });
+    stage = 'long_lived_token';
     const long = await jget(`${OAUTH}/access_token?grant_type=th_exchange_token&client_secret=${encodeURIComponent(env.THREADS_APP_SECRET!)}&access_token=${encodeURIComponent(short.access_token)}`);
+    stage = 'read_profile';
     const me = await jget(`${OAUTH}/v1.0/me?fields=id,username&access_token=${encodeURIComponent(long.access_token)}`);
     const brand = await getBrand(env);
     const expiresAt = new Date(now + (long.expires_in ?? 5184000) * 1000).toISOString();
@@ -65,8 +73,9 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
     await audit(env, brand.id, null, 'threads_connected', me.username ?? '');
     return redirect('/?threads=connected');
   } catch (e) {
-    console.error('threads:callback', (e as Error).message);
-    return fail('授權失敗，請重試');
+    console.error('threads:callback', stage, (e as Error).message);
+    await trace(`failed at ${stage}: ${(e as Error).message}`);
+    return fail(`授權失敗（${stage}）：${(e as Error).message}`.slice(0, 200));
   }
 }
 

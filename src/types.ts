@@ -18,6 +18,8 @@ export interface Env {
   CRED_ENC_KEY?: string;
   THREADS_APP_ID?: string;
   THREADS_APP_SECRET?: string;
+  /** 覆寫向 Meta 要求的權限（逗號分隔）；Meta App 尚未加入某權限時可暫時移除 */
+  THREADS_SCOPES?: string;
   /** "1" = 共用架構（多工作區）；未設定 = 單一企業獨立部署 */
   MULTI_TENANT?: string;
   /** 每次排程最多處理幾個工作區（輪替），預設 25 */
