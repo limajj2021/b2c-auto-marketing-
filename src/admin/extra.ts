@@ -2,7 +2,7 @@
 import { audit, getBrand, isMulti } from '../db';
 import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
-import { credFor, getAccount, listAccounts, publicAccount, resolveCred } from '../threads/accounts';
+import { credFor, getAccount, listAccounts, publicAccount, removeAccounts, resolveCred } from '../threads/accounts';
 import { iso } from '../util/time';
 import type { Env } from '../types';
 import { hashPassword } from '../util/crypto';
@@ -80,7 +80,7 @@ export function registerExtra(add: Add, json: J, err: E) {
   });
 
   add('DELETE', '/integrations/threads', 'admin', async ({ env, actor, brandId }) => {
-    await env.DB.prepare('DELETE FROM threads_accounts WHERE brand_id=?').bind(brandId).run();
+    await removeAccounts(env, { brandId });
     await audit(env, brandId, actor.name, 'threads_disconnect');
     return json({ ok: true });
   });
@@ -210,9 +210,7 @@ export function registerExtra(add: Add, json: J, err: E) {
   add('DELETE', '/accounts/(\\d+)', 'admin', async ({ env, m, actor, brandId }) => {
     const a = await getAccount(env, Number(m[1]));
     if (!a || a.brand_id !== brandId) return err(404, '找不到這個帳號');
-    await env.DB.prepare('DELETE FROM threads_accounts WHERE id=?').bind(a.id).run();
-    // 該帳號尚未發出的貼文改回草稿，避免誤發到其他帳號
-    await env.DB.prepare(`UPDATE posts SET status='draft',approved_by=NULL,error_message='發文帳號已中斷連結，請重新指定或刪除' WHERE account_id=? AND status IN ('scheduled','generating','gen_failed')`).bind(a.id).run();
+    await removeAccounts(env, { brandId, id: a.id }); // 尚未發出的貼文退回草稿，避免誤發
     await audit(env, brandId, actor.name, 'account_disconnect', a.username ?? '');
     return json({ ok: true });
   });

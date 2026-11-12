@@ -19,9 +19,9 @@ export async function runAllTenants(raw: Env, now = new Date()): Promise<{ proce
     if (!canAfford(benv, 12)) break; // 剩下的工作區留到下一輪（最久沒處理的優先）
     try {
       await benv.DB.prepare('UPDATE brands SET last_cron_at=? WHERE id=?').bind(iso(now), id).run();
-      const env = await withCreds(forBrand(benv, id));
+      const env = await withCreds({ ...forBrand(benv, id), MEMO: new Map() });
       await refreshIfNeeded(env, now).catch((e) => { if (e instanceof BudgetError) throw e; console.error('refresh', id, (e as Error).message); });
-      await runCron(await withCreds(forBrand(benv, id)), now);
+      await runCron(env, now);
       processed.push(id);
     } catch (e) {
       if (e instanceof BudgetError) { console.warn('cron:budget', id, `used ${benv.BUDGET!.used()}`); break; }

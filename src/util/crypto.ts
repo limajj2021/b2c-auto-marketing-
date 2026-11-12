@@ -51,18 +51,18 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 // ---- 簽章 Session token（無狀態，每次請求仍會回查 admin_users.enabled）----
-export async function signToken(secret: string, payload: { uid: number; exp: number }): Promise<string> {
+export async function signToken(secret: string, payload: { uid: number; exp: number; p?: string }): Promise<string> {
   const body = btoa(JSON.stringify(payload));
   return `${body}.${await hmacBase64(secret, body)}`;
 }
-export async function verifyToken(secret: string, token: string, nowSec: number): Promise<{ uid: number } | null> {
+export async function verifyToken(secret: string, token: string, nowSec: number): Promise<{ uid: number; p?: string } | null> {
   const [body, sig] = token.split('.');
   if (!body || !sig || !secret) return null;
   if (!timingSafeEqual(await hmacBase64(secret, body), sig)) return null;
   try {
     const p = JSON.parse(atob(body));
     if (typeof p.uid !== 'number' || typeof p.exp !== 'number' || p.exp < nowSec) return null;
-    return { uid: p.uid };
+    return { uid: p.uid, p: typeof p.p === 'string' ? p.p : undefined };
   } catch {
     return null;
   }

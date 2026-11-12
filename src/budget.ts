@@ -25,9 +25,11 @@ export function budgeted(env: Env, limit: number): Env {
   });
   const SUBFETCH = ((input: RequestInfo | URL, init?: RequestInit) => { take(); return fetch(input, init); }) as typeof fetch;
   const BUDGET: Budget = { remaining: () => limit - used, used: () => used };
-  return { ...env, DB, SUBFETCH, BUDGET };
+  return { ...env, DB, SUBFETCH, BUDGET, DB_RESERVE: env.DB };
 }
 
+/** 額度用完後仍須完成的收尾寫入（還原狀態）。上限本身已比平台硬上限少 5 次，這裡只用來寫 1～2 次。 */
+export const reserveDb = (env: Env): D1Database => env.DB_RESERVE ?? env.DB;
 /** 對外呼叫一律經過這裡，排程時會被計數。 */
 export const xfetch = (env: Pick<Env, 'SUBFETCH'>): typeof fetch => env.SUBFETCH ?? fetch;
 /** 剩餘額度是否足夠做一件預估要用 n 次請求的工作（非排程時永遠足夠）。 */

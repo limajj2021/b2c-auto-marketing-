@@ -5,7 +5,7 @@ import { REGULATED_INDUSTRIES } from '../types';
 import { addDays, iso, localDate, zonedToUtc } from '../util/time';
 import { effective, listAccounts, markAccount, resolveCred, type Account } from './accounts';
 import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, postInsights, publishContainer } from './api';
-import { BudgetError, canAfford } from '../budget';
+import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
@@ -33,7 +33,9 @@ export async function runCron(env: Env, now = new Date()): Promise<void> {
   const step = async (name: string, fn: () => Promise<void>) => {
     try { await fn(); } catch (e) { if (e instanceof BudgetError) throw e; console.error(`cron:${name}`, (e as Error).message); }
   };
-  if (now.getUTCMinutes() < 5) await step('housekeeping', () => housekeeping(env, now)); // 每小時一次即可，節省額度
+  // 每個工作區每小時清理一次（各自計時；工作區很多、輪替處理時也不會漏掉）
+  const lastHk = brand.last_housekeeping_at ? new Date(brand.last_housekeeping_at).getTime() : 0;
+  if (now.getTime() - lastHk >= 3600_000) await step('housekeeping', () => housekeeping(env, now));
   if (s.auto_post_enabled) {
     // 額度有限時的優先順序：先核對與發布，再生成新草稿
     await step('reconcile', () => reconcile(env, now));
@@ -49,6 +51,7 @@ async function housekeeping(env: Env, now: Date) {
   await env.DB.prepare('DELETE FROM inquiries WHERE brand_id=? AND created_at<?').bind(brand.id, new Date(now.getTime() - s.retention_days * 86400000).toISOString()).run();
   await env.DB.prepare('DELETE FROM processed_events WHERE brand_id=? AND processed_at<?').bind(brand.id, new Date(now.getTime() - 7 * 86400000).toISOString()).run();
   await env.DB.prepare(`UPDATE posts SET status='gen_failed', updated_at=? WHERE brand_id=? AND status='generating' AND updated_at<?`).bind(iso(now), brand.id, new Date(now.getTime() - STALE_MS).toISOString()).run();
+  await env.DB.prepare('UPDATE brands SET last_housekeeping_at=? WHERE id=?').bind(iso(now), brand.id).run();
 }
 
 /** 為每個啟用中的帳號，在今天與明天的每個時段確保有一串貼文（slot_key 唯一約束防重複）。 */
@@ -69,9 +72,10 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
         const at = new Date(zonedToUtc(day, times[i], brand.timezone).getTime() + offset);
         if (at.getTime() < now.getTime() - 3600_000) continue;
         const slot = `${day}#${i}${a ? `@a${a.id}` : ''}`;
+        // 先確認額度再佔位：佔位後才發現額度不足，會留下沒人處理的「生成中」貼文
+        if (!canAfford(env, 10)) return; // 生成一串約需 8～10 次請求，不夠就留到下一輪
         const ins = await env.DB.prepare(`INSERT OR IGNORE INTO posts(brand_id,account_id,status,slot_key,scheduled_at,updated_at,created_at) VALUES(?,?,?,?,?,?,?)`)
           .bind(brand.id, a?.id ?? null, 'generating', slot, at.toISOString(), iso(now), iso(now)).run();
-        if (!canAfford(env, 8)) return; // 生成一串約需 8 次請求，不夠就留到下一輪
         let postId: number | null = ins.meta.changes === 1 ? (ins.meta.last_row_id as number) : null;
         if (postId === null) {
           const row = await env.DB.prepare(`SELECT id FROM posts WHERE brand_id=? AND slot_key=? AND status='gen_failed' AND gen_attempts<?`).bind(brand.id, slot, MAX_GEN_ATTEMPTS).first<{ id: number }>();
@@ -87,7 +91,11 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
             .bind(g.parts[0], JSON.stringify(g.parts), status, g.generationId, status === 'scheduled' ? 'auto' : null,
               g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(now), postId).run();
         } catch (err) {
-          if (err instanceof BudgetError) throw err;
+          if (err instanceof BudgetError) {
+            // 額度在生成途中用完：把佔位還原成可重試狀態（用保留額度寫入），下一輪再生成
+            await reserveDb(env).prepare(`UPDATE posts SET status='gen_failed',updated_at=? WHERE id=? AND status='generating'`).bind(iso(now), postId).run().catch(() => {});
+            throw err;
+          }
           if (err instanceof QuotaError) {
             await env.DB.prepare(`DELETE FROM posts WHERE id=? AND status='generating'`).bind(postId).run();
             console.warn('cron:quota', err.message);
@@ -112,8 +120,8 @@ export async function publishDue(env: Env, now: Date): Promise<void> {
      ORDER BY p.scheduled_at LIMIT 3`,
   ).bind(brand.id, iso(now)).all<{ id: number; parts: string | null; part_ids: string | null; content: string }>();
   for (const r of due.results) {
-    // 每則約 2 次對外呼叫 + 資料庫寫入；額度不夠就留到下一輪，不會發到一半
-    if (!canAfford(env, (partsOf(r).length - idsOf(r).length) * 3 + 8)) return;
+    // 每則 = 建立 + 發布 2 次對外呼叫 + 2 次寫入；另有搶佔、讀取、追蹤連結、憑證、收尾約 12 次。額度不夠就留到下一輪，不會發到一半
+    if (!canAfford(env, (partsOf(r).length - idsOf(r).length) * 4 + 12)) return;
     await publishOne(env, r.id, now);
   }
 }
@@ -139,11 +147,16 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
         await env.DB.prepare('UPDATE posts SET threads_creation_id=? WHERE id=?').bind(creation, id).run();
       }
       ids.push(await publishContainer(cred, creation));
-      await env.DB.prepare('UPDATE posts SET part_ids=?,threads_post_id=?,threads_creation_id=NULL WHERE id=?').bind(JSON.stringify(ids), ids[0], id).run();
+      // 已發出的 ID 一定要記下（即使額度剛好用完），否則下次會重複發同一則
+      await reserveDb(env).prepare('UPDATE posts SET part_ids=?,threads_post_id=?,threads_creation_id=NULL WHERE id=?').bind(JSON.stringify(ids), ids[0], id).run();
     }
     await env.DB.prepare(`UPDATE posts SET status='published',published_at=?,error_message=NULL,updated_at=? WHERE id=?`).bind(iso(now), iso(now), id).run();
   } catch (e) {
-    if (e instanceof BudgetError) throw e; // 額度檢查已事先預留，理論上不會發生
+    if (e instanceof BudgetError) {
+      // 額度檢查已事先預留，理論上不會發生；若發生，已發出的部分都已記錄，退回排程讓下一輪接續
+      await reserveDb(env).prepare(`UPDATE posts SET status='scheduled',updated_at=? WHERE id=? AND status='publishing'`).bind(iso(now), id).run().catch(() => {});
+      throw e;
+    }
     const n = ids.length + 1, chain = parts.length > 1;
     if (e instanceof ThreadsUnknownError) {
       // 第一則結果未知 → 交給 reconcile 核對；串文中途未知 → 請人工確認，避免重複

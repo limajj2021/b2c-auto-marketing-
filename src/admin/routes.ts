@@ -28,7 +28,7 @@ export async function authenticate(env: Env, req: Request, now = Date.now()): Pr
   const tok = cookie(req, 'sid');
   if (!tok) return null;
   const v = await verifyToken(env.SESSION_SECRET, tok, Math.floor(now / 1000));
-  if (!v) return null;
+  if (!v || v.p) return null; // 只接受登入 Session（不帶用途標記）
   const u = await env.DB.prepare('SELECT id,authentication_id,role,brand_id FROM admin_users WHERE id=? AND enabled=1').bind(v.uid).first<any>();
   return u ? { id: u.id, name: u.authentication_id, role: u.role, brandId: u.brand_id } : null;
 }
@@ -330,8 +330,10 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   let at: Date;
   if (b.scheduled_at) { const t = scheduleTime(b.scheduled_at); if (typeof t === 'string') return err(400, t); at = t; }
   else at = post.scheduled_at && new Date(post.scheduled_at).getTime() > Date.now() ? new Date(post.scheduled_at) : new Date(); // 原時段已過就立即排入
-  await env.DB.prepare(`UPDATE posts SET status='scheduled',approved_by=?,scheduled_at=?,error_message=NULL,updated_at=? WHERE id=? AND status='draft'`)
-    .bind(actor.name, at.toISOString(), iso(), m[1]).run();
+  // 指定的帳號已被移除時改用預設帳號（否則排程後會一直發不出去）
+  const acct = post.account_id && !(await getAccount(env, post.account_id)) ? null : post.account_id;
+  await env.DB.prepare(`UPDATE posts SET status='scheduled',approved_by=?,scheduled_at=?,account_id=?,error_message=NULL,updated_at=? WHERE id=? AND status='draft'`)
+    .bind(actor.name, at.toISOString(), acct, iso(), m[1]).run();
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
   const hasAcct = (await listAccounts(env)).length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID);
   return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
@@ -351,9 +353,14 @@ add('PUT', '/posts/(\\d+)/schedule', 'admin', async ({ env, req, m, actor, brand
 
 // 取消排程：退回待審核（保留內容與原本時間，可修改後再核准）
 add('POST', '/posts/(\\d+)/unschedule', 'admin', async ({ env, m, actor, brandId }) => {
-  const r = await env.DB.prepare(`UPDATE posts SET status='draft',approved_by=NULL,updated_at=? WHERE id=? AND brand_id=? AND status='scheduled'`)
-    .bind(iso(), m[1], brandId).run();
-  if (r.meta.changes !== 1) return err(409, '這則貼文已經在發布中或已發布，無法取消');
+  // 串文已發出一部分時不可退回草稿（修改後會與已發出的部分對不上）；清掉預先建立的容器，避免修改後發出舊內容
+  const r = await env.DB.prepare(`UPDATE posts SET status='draft',approved_by=NULL,threads_creation_id=NULL,updated_at=?
+    WHERE id=? AND brand_id=? AND status='scheduled' AND COALESCE(part_ids,'[]')='[]'`).bind(iso(), m[1], brandId).run();
+  if (r.meta.changes !== 1) {
+    const p = await env.DB.prepare('SELECT status,part_ids FROM posts WHERE id=? AND brand_id=?').bind(m[1], brandId).first<{ status: string; part_ids: string | null }>();
+    if (p?.status === 'scheduled') return err(409, '這串已經發出前幾則，無法退回草稿；可以調整時間，或到 Threads 刪除已發出的部分後再刪除這串');
+    return err(409, '這則貼文已經在發布中或已發布，無法取消');
+  }
   await audit(env, brandId, actor.name, 'post_unschedule', m[1]);
   return json({ ok: true });
 });

@@ -2,7 +2,7 @@
 // 原則：營運人員只看「計數與狀態」，不讀顧客留資內容等個資。
 import type { Env } from '../types';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
-import { iso } from '../util/time';
+import { isValidTimezone, iso } from '../util/time';
 
 const SESSION_SEC = 8 * 3600;
 const PLATFORM = '_platform'; // audit_logs 的 brand_id，用來記錄營運人員的操作
@@ -21,7 +21,7 @@ const nextMonth = (start: string) => { const d = new Date(start); d.setUTCMonth(
 
 async function operator(env: Env, req: Request) {
   const tok = cookieOf(req); if (!tok) return null;
-  const v = await verifyToken(opSecret(env), tok, Math.floor(Date.now() / 1000)); if (!v) return null;
+  const v = await verifyToken(opSecret(env), tok, Math.floor(Date.now() / 1000)); if (!v || v.p) return null;
   return env.DB.prepare('SELECT id,username,role FROM operators WHERE id=? AND enabled=1').bind(v.uid).first<{ id: number; username: string; role: 'admin' | 'support' }>();
 }
 
@@ -160,10 +160,12 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
     if (!name || name.length > 100) return err(400, '請輸入品牌名稱');
     if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(admin)) return err(400, '管理員帳號需為 3–32 字英數');
     if (!['general', 'lending', 'finance', 'loan'].includes(industry)) return err(400, '產業類別不合法');
+    const timezone = String(b.timezone ?? 'Asia/Taipei').trim();
+    if (!isValidTimezone(timezone)) return err(400, '時區不正確，請使用例如 Asia/Taipei 的格式');
     if (await env.DB.prepare('SELECT 1 FROM brands WHERE slug=? OR id=?').bind(slug, slug).first()) return err(409, '這個工作區代號已被使用');
     const id = slug, now = iso(), pw = randomPassword();
     await env.DB.prepare(`INSERT INTO brands(id,slug,name,industry,description,timezone,created_at,status,plan) VALUES(?,?,?,?,'',?,?,'active',?)`)
-      .bind(id, slug, name, industry, String(b.timezone ?? 'Asia/Taipei'), now, String(b.plan ?? 'standard')).run();
+      .bind(id, slug, name, industry, timezone, now, String(b.plan ?? 'standard')).run();
     await env.DB.prepare(`INSERT INTO brand_settings(brand_id,updated_at,auto_post_enabled,line_auto_reply_enabled) VALUES(?,?,0,1)`).bind(id, now).run();
     await env.DB.prepare(`INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,'admin',?,?)`).bind(id, admin, await hashPassword(pw)).run();
     await log(env, op.username, 'tenant_create', slug);

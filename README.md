@@ -89,7 +89,7 @@ npm run provision -- --brand acme
 
 ## 排程用量保護
 
-Cloudflare 對每次執行的對外請求有上限（免費方案 50 次，資料庫查詢也算在內）。排程期間所有資料庫查詢與對外呼叫都會被計數（`src/budget.ts`，上限 `CRON_SUBREQUEST_LIMIT`，預設 45）；額度不足時不會開始發一串貼文，剩下的工作留到下一輪，順序為：核對 → 發布 → 生成 → 成效數據。改用 Workers 付費方案後，可把上限調到 5000。
+Cloudflare 對每次執行的對外請求有上限（免費方案 50 次，資料庫查詢也算在內）。排程期間所有資料庫查詢與對外呼叫都會被計數（`src/budget.ts`，上限 `CRON_SUBREQUEST_LIMIT`，預設 45）；額度不足時不會開始發一串貼文，剩下的工作留到下一輪，順序為：核對 → 發布 → 生成 → 成效數據。同一工作區同一輪的品牌與設定只查一次；每個工作區各自每小時清理一次。改用 Workers 付費方案後，可把上限調到 5000。
 
 ## 營運人員
 
@@ -106,7 +106,7 @@ Cloudflare 對每次執行的對外請求有上限（免費方案 50 次，資�
 ## 重要設計決定
 
 - **防重複發文**：`posts.slot_key` 唯一約束 + 原子狀態搶佔（`scheduled→publishing`）+ 保存 `creation_id` 重用；請求結果不明時標記 `unknown`，先向 Threads 列表核對文字再決定是否重試。
-- **LINE 去重**：`processed_events(brand_id, webhookEventId)` 唯一；處理失敗會釋放佔位以便重送；留資另以 `flow_id` 唯一防重複提交。
+- **LINE 去重**：`processed_events(brand_id, webhookEventId)` 唯一；尚未寫入狀態前失敗才釋放佔位讓 LINE 重送，已寫入（例如只是回覆失敗）則不重送，避免重複處理；留資另以 `flow_id` 唯一防重複提交。
 - **受監管產業（`industry = lending/finance/loan`）**：不論模式一律走人工審核；利率／案例等數字內容被合規檢查擋下，須人工撰寫。通過檢查不代表合法，仍需法遵確認。
 - **合規檢查未通過的草稿不能核准**（API 422），需先修改。
 - **額度**：每日生成次數、每月 Token 上限；超額即停止生成、保留草稿，不會自動升級付費。

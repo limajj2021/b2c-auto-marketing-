@@ -5,10 +5,21 @@ export const isMulti = (env: Env) => env.MULTI_TENANT === '1';
 /** 回傳綁定到指定工作區的 env；之後所有 getBrand 都只會拿到這個工作區。 */
 export const forBrand = (env: Env, brandId: string): Env => ({ ...env, BRAND_ID: brandId });
 
-const COLS = 'id,slug,status,name,industry,description,timezone';
+const COLS = 'id,slug,status,name,industry,description,timezone,last_housekeeping_at';
 
 /** 目前請求所屬的工作區。共用架構下若未解析出工作區，直接拒絕，避免跨工作區讀寫。 */
+/** 排程期間的讀取快取：同一工作區同一輪只查一次。寫入相關資料後呼叫 forget。 */
+async function memo<T>(env: Env, k: string, load: () => Promise<T>): Promise<T> {
+  if (!env.MEMO) return load();
+  if (env.MEMO.has(k)) return env.MEMO.get(k) as T;
+  const v = await load(); env.MEMO.set(k, v); return v;
+}
+export const forget = (env: Env, k: string) => { env.MEMO?.delete(k); };
+
 export async function getBrand(env: Env): Promise<Brand> {
+  return memo(env, `brand:${env.BRAND_ID ?? ''}`, () => loadBrand(env));
+}
+async function loadBrand(env: Env): Promise<Brand> {
   let b: Brand | null;
   if (env.BRAND_ID) b = await env.DB.prepare(`SELECT ${COLS} FROM brands WHERE id=?`).bind(env.BRAND_ID).first<Brand>();
   else if (isMulti(env)) throw new Error('tenant not resolved');
@@ -23,6 +34,9 @@ export async function brandBySlug(env: Env, slug: string): Promise<Brand | null>
 }
 
 export async function getSettings(env: Env, brandId: string): Promise<Settings> {
+  return memo(env, `settings:${brandId}`, () => loadSettings(env, brandId));
+}
+async function loadSettings(env: Env, brandId: string): Promise<Settings> {
   const s = await env.DB.prepare('SELECT * FROM brand_settings WHERE brand_id=?').bind(brandId).first<Settings>();
   if (!s) throw new Error('settings missing');
   return s;

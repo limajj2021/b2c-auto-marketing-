@@ -27,6 +27,10 @@ export interface Env {
   /** 排程期間由 budget.ts 注入 */
   SUBFETCH?: typeof fetch;
   BUDGET?: import('./budget').Budget;
+  /** 排程額度用完時仍可用於收尾寫入的資料庫（不計數）；只在 budget.ts 設定 */
+  DB_RESERVE?: D1Database;
+  /** 排程期間每個工作區一份的讀取快取（品牌、設定），減少重複查詢 */
+  MEMO?: Map<string, unknown>;
 }
 
 export interface Brand {
@@ -37,6 +41,7 @@ export interface Brand {
   industry: string;
   description: string;
   timezone: string;
+  last_housekeeping_at?: string | null;
 }
 
 export interface Settings {

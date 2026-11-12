@@ -1,14 +1,16 @@
 import { audit, forBrand, getBrand } from '../db';
-import { credFor, listAccounts, markAccount, setAccountToken, upsertAccount } from './accounts';
+import { credFor, listAccounts, markAccount, removeAccounts, setAccountToken, upsertAccount } from './accounts';
 import type { Env } from '../types';
 import { hmacBase64, signToken, timingSafeEqual, verifyToken } from '../util/crypto';
 
 const OAUTH = 'https://graph.threads.net';
-// threads_manage_replies：串文（回覆自己上一則）需要
-export const SCOPES = 'threads_basic,threads_content_publish,threads_manage_replies';
+// threads_manage_replies：串文（回覆自己上一則）需要；threads_manage_insights：曝光／互動數據
+export const SCOPES = 'threads_basic,threads_content_publish,threads_manage_replies,threads_manage_insights';
 const STATE_TTL = 600;
 const REFRESH_BEFORE_DAYS = 10;
 
+// state 會出現在網址列與 Referer，必須用與登入 Session 不同的金鑰簽章，否則可被當成登入憑證重放
+const stateSecret = (env: Env) => `${env.SESSION_SECRET}:threads-oauth-state`;
 const redirect = (to: string) => new Response(null, { status: 302, headers: { location: to } });
 
 export function oauthConfigured(env: Env): boolean {
@@ -16,7 +18,7 @@ export function oauthConfigured(env: Env): boolean {
 }
 
 export async function buildAuthorizeUrl(env: Env, origin: string, adminId: number, now = Date.now()): Promise<string> {
-  const state = await signToken(env.SESSION_SECRET, { uid: adminId, exp: Math.floor(now / 1000) + STATE_TTL });
+  const state = await signToken(stateSecret(env), { uid: adminId, p: 'threads_oauth', exp: Math.floor(now / 1000) + STATE_TTL });
   const q = new URLSearchParams({
     client_id: env.THREADS_APP_ID!, redirect_uri: `${origin}/threads/callback`,
     scope: SCOPES, response_type: 'code', state,
@@ -38,8 +40,8 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
   if (url.searchParams.get('error')) return fail('已取消授權');
   const code = (url.searchParams.get('code') ?? '').replace(/#_$/, '');
   const state = url.searchParams.get('state') ?? '';
-  const st = code ? await verifyToken(env.SESSION_SECRET, state, Math.floor(now / 1000)) : null;
-  if (!st) return fail('授權已逾時，請重新操作');
+  const st = code ? await verifyToken(stateSecret(env), state, Math.floor(now / 1000)) : null;
+  if (!st || st.p !== 'threads_oauth') return fail('授權已逾時，請重新操作');
   // 授權結果歸屬於發起連結的管理員所在的工作區（固定一個回呼網址即可服務所有工作區）
   const owner = await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>();
   if (!owner) return fail('授權已逾時，請重新操作');
@@ -106,7 +108,7 @@ export async function handleMetaCallback(env: Env, req: Request, kind: 'deauthor
     // 使用者在 Threads 撤銷授權：從所有工作區移除這個帳號
     const rows = (await env.DB.prepare('SELECT id,brand_id FROM threads_accounts WHERE threads_user_id=?').bind(String(data.user_id)).all<{ id: number; brand_id: string }>()).results;
     for (const r of rows) {
-      await env.DB.prepare('DELETE FROM threads_accounts WHERE id=?').bind(r.id).run();
+      await removeAccounts(forBrand(env, r.brand_id), { brandId: r.brand_id, id: r.id });
       await audit(env, r.brand_id, null, `threads_${kind}`);
     }
   }
