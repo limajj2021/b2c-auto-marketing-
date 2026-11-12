@@ -1,6 +1,7 @@
 import { audit, forBrand, getBrand } from '../db';
 import { credFor, listAccounts, markAccount, removeAccounts, setAccountToken, upsertAccount } from './accounts';
 import type { Env } from '../types';
+import { logEvent } from '../log';
 import { hmacBase64, signToken, timingSafeEqual, verifyToken } from '../util/crypto';
 
 const OAUTH = 'https://graph.threads.net';
@@ -43,12 +44,17 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
   const owner = st && st.p === 'threads_oauth'
     ? await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>() : null;
   // 每一步的結果寫入操作紀錄（不含任何憑證），授權卡住時可判斷停在哪一步
-  const trace = (detail: string) => owner ? audit(env, owner.brand_id, null, 'threads_oauth_result', detail.slice(0, 300)).catch(() => {}) : Promise.resolve();
+  const bid = owner?.brand_id ?? null;
   if (url.searchParams.get('error')) {
-    await trace(`denied: ${url.searchParams.get('error_reason') ?? url.searchParams.get('error')} ${url.searchParams.get('error_description') ?? ''}`);
+    await logEvent(env, bid, 'warn', 'threads_oauth', '使用者在 Threads 取消或拒絕授權', {
+      error: url.searchParams.get('error'), reason: url.searchParams.get('error_reason'), description: url.searchParams.get('error_description'),
+    });
     return fail('已取消授權');
   }
-  if (!code || !owner) { console.warn('threads:callback', code ? 'bad_state' : 'no_code'); return fail('授權已逾時，請重新操作'); }
+  if (!code || !owner) {
+    await logEvent(env, bid, 'warn', 'threads_oauth', code ? '授權回到系統，但驗證碼無效或已逾時（超過 10 分鐘，或從別的瀏覽器開啟）' : '授權回到系統，但沒有帶授權碼');
+    return fail('授權已逾時，請重新操作');
+  }
   // 授權結果歸屬於發起連結的管理員所在的工作區（固定一個回呼網址即可服務所有工作區）
   env = forBrand(env, owner.brand_id);
   if (!oauthConfigured(env)) return fail('系統尚未設定 Threads App');
@@ -71,10 +77,11 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
     await upsertAccount(env, brand.id, { userId: String(me.id), username: me.username ?? null, token: long.access_token, expiresAt });
     await env.DB.prepare(`UPDATE brand_settings SET threads_status='ok' WHERE brand_id=?`).bind(brand.id).run();
     await audit(env, brand.id, null, 'threads_connected', me.username ?? '');
+    await logEvent(env, brand.id, 'info', 'threads_oauth', `已連結 @${me.username ?? me.id}`);
     return redirect('/?threads=connected');
   } catch (e) {
-    console.error('threads:callback', stage, (e as Error).message);
-    await trace(`failed at ${stage}: ${(e as Error).message}`);
+    const STAGE: Record<string, string> = { exchange_code: '以授權碼換取憑證', long_lived_token: '換成長效憑證', read_profile: '讀取帳號資料' };
+    await logEvent(env, bid, 'error', 'threads_oauth', `授權失敗：${STAGE[stage] ?? stage}時 Meta 回傳錯誤`, { stage, meta_error: (e as Error).message });
     return fail(`授權失敗（${stage}）：${(e as Error).message}`.slice(0, 200));
   }
 }
@@ -91,8 +98,10 @@ export async function refreshIfNeeded(env: Env, now = new Date()): Promise<void>
       const r = await jget(`${OAUTH}/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(c.token)}`, undefined, c.f);
       await setAccountToken(env, a.id, r.access_token, new Date(now.getTime() + (r.expires_in ?? 5184000) * 1000).toISOString());
       await audit(env, brand.id, null, 'threads_token_refreshed', a.username ?? '');
+      await logEvent(env, brand.id, 'info', 'threads_token', `@${a.username} 憑證已自動續期`);
     } catch (e) {
-      console.error('threads:refresh', (e as Error).message);
+      await logEvent(env, brand.id, left <= 0 ? 'error' : 'warn', 'threads_token',
+        left <= 0 ? `@${a.username} 憑證已過期且續期失敗，請重新連結` : `@${a.username} 憑證續期失敗，稍後會再試`, { error: (e as Error).message });
       if (left <= 0) await markAccount(env, a.id, 'token_invalid');
     }
   }
@@ -118,6 +127,7 @@ export async function handleMetaCallback(env: Env, req: Request, kind: 'deauthor
     const rows = (await env.DB.prepare('SELECT id,brand_id FROM threads_accounts WHERE threads_user_id=?').bind(String(data.user_id)).all<{ id: number; brand_id: string }>()).results;
     for (const r of rows) {
       await removeAccounts(forBrand(env, r.brand_id), { brandId: r.brand_id, id: r.id });
+      await logEvent(env, r.brand_id, 'warn', 'threads_oauth', kind === 'delete' ? '使用者在 Threads 要求刪除資料，帳號已移除' : '使用者在 Threads 撤銷授權，帳號已移除');
       await audit(env, r.brand_id, null, `threads_${kind}`);
     }
   }

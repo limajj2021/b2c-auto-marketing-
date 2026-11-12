@@ -6,10 +6,12 @@ import { getDisplayName, reply } from './api';
 import { parseLineConfig } from './config';
 import { handleText, menuFor, welcomeReply } from './flow';
 import { bump } from '../metrics';
+import { logEvent } from '../log';
 
 export async function handleLineWebhook(env: Env, req: Request): Promise<Response> {
   const raw = await req.text();
   if (!(await verifyLineSignature(env.LINE_CHANNEL_SECRET, raw, req.headers.get('x-line-signature')))) {
+    await logEvent(env, env.BRAND_ID ?? null, 'warn', 'line_webhook', 'LINE 送來的簽章不符：Channel secret 可能已變更，請到「設定 → LINE 官方帳號」重新儲存', undefined, { throttleMinutes: 30 });
     return new Response('invalid signature', { status: 401 });
   }
   let body: any;
@@ -40,7 +42,8 @@ export async function handleLineWebhook(env: Env, req: Request): Promise<Respons
       if (replies && ev.replyToken) await reply(env, ev.replyToken, replies);
     } catch (e) {
       // 日誌不含訊息內容
-      console.error('line:event_failed', ev.type, applied ? 'after_state' : 'before_state', (e as Error).message);
+      // 不記錄訊息內容與 LINE User ID
+      await logEvent(env, brand.id, 'error', 'line_webhook', applied ? `已處理訊息但回覆失敗（${ev.type}）：${(e as Error).message}` : `處理訊息失敗，已請 LINE 重送（${ev.type}）：${(e as Error).message}`, undefined, { throttleMinutes: 10 });
       if (applied) continue; // 狀態已寫入（通常是回覆失敗）：保留佔位，不要求重送，避免重複處理
       failed = true;
       // 尚未寫入任何狀態：釋放佔位讓 LINE 重送可重新處理

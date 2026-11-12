@@ -1,5 +1,6 @@
 // 連線設定（LINE / Gemini / Threads）與帳號管理。由 routes.ts 註冊。
 import { LineCredError, issueLineToken } from '../line/token';
+import { SOURCES, logEvent } from '../log';
 import { audit, getBrand, isMulti } from '../db';
 import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
@@ -54,10 +55,16 @@ export function registerExtra(add: Add, json: J, err: E) {
       try {
         const t = await issueLineToken(channelId, secret);
         token = t.token; meta = { auto: true, expires_at: t.expiresAt };
-      } catch (e) { return err(e instanceof LineCredError ? 400 : 502, (e as Error).message); }
+      } catch (e) {
+        await logEvent(env, brandId, 'error', 'line_connect', `以 Channel ID 取得 LINE 憑證失敗：${(e as Error).message}`, { channel_id: channelId });
+        return err(e instanceof LineCredError ? 400 : 502, (e as Error).message);
+      }
     } else if (token.length < 50) return err(400, 'Channel access token 看起來不完整');
     const info = await lineInfo(token);
-    if (!info.ok) return err(400, 'Access token 無效，LINE 拒絕了這組憑證');
+    if (!info.ok) {
+      await logEvent(env, brandId, 'error', 'line_connect', 'LINE 拒絕了這組 access token（讀取官方帳號資料失敗）');
+      return err(400, 'Access token 無效，LINE 拒絕了這組憑證');
+    }
     await setCred(env, brandId, 'line_channel_secret', secret);
     await setCred(env, brandId, 'line_channel_access_token', token, { ...meta, name: info.name, basic_id: info.basicId });
     if (meta.auto) await setCred(env, brandId, 'line_channel_id', channelId);
@@ -72,6 +79,9 @@ export function registerExtra(add: Add, json: J, err: E) {
       verified = t.ok && ((await t.json().catch(() => ({}))) as any).success === true;
     }
     await audit(env, brandId, actor.name, 'integration_line');
+    await logEvent(env, brandId, verified ? 'info' : 'warn', 'line_connect',
+      verified ? `已連接 LINE「${info.name}」，Webhook 驗證通過` : set.ok ? `已連接 LINE「${info.name}」，但 Webhook 測試未通過：請到 LINE Developers 開啟 Use webhook` : `已連接 LINE「${info.name}」，但設定 Webhook 網址失敗（HTTP ${set.status}）`,
+      { endpoint, auto_token: !!meta.auto });
     return json({ ok: true, bot: info.name, webhook_set: set.ok, webhook_verified: verified });
   });
 
@@ -88,7 +98,8 @@ export function registerExtra(add: Add, json: J, err: E) {
 
   add('GET', '/integrations/threads/connect', 'admin', async ({ env, actor, url, brandId }) => {
     if (!oauthConfigured(env)) return err(409, '系統尚未設定 Threads App（THREADS_APP_ID / THREADS_APP_SECRET）');
-    await audit(env, brandId, actor.name, 'threads_oauth_start', `${url.origin}/threads/callback`); // 用來判斷授權是否有回到系統
+    // 用來判斷授權是否有回到系統：只有「開始」沒有後續結果，代表卡在 Threads／Meta 頁面
+    await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 開始連結 Threads（等待 Threads 頁面回傳）`, { callback: `${url.origin}/threads/callback` });
     return json({ url: await buildAuthorizeUrl(env, url.origin, actor.id) });
   });
 
@@ -226,6 +237,14 @@ export function registerExtra(add: Add, json: J, err: E) {
     await removeAccounts(env, { brandId, id: a.id }); // 尚未發出的貼文退回草稿，避免誤發
     await audit(env, brandId, actor.name, 'account_disconnect', a.username ?? '');
     return json({ ok: true });
+  });
+
+  // 系統紀錄（只看自己工作區）：串接、發文、排程的結果與錯誤原因
+  add('GET', '/logs', 'admin', async ({ env, brandId, url }) => {
+    const lv = url.searchParams.get('level');
+    const cond = lv === 'error' ? ` AND level='error'` : lv === 'warn' ? ` AND level IN ('warn','error')` : '';
+    const rows = (await env.DB.prepare(`SELECT id,level,source,message,detail,created_at FROM event_logs WHERE brand_id=?${cond} ORDER BY id DESC LIMIT 100`).bind(brandId).all()).results;
+    return json({ rows, sources: SOURCES });
   });
 
   add('GET', '/audit', 'admin', async ({ env, brandId }) =>

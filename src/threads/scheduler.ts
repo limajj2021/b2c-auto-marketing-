@@ -8,6 +8,7 @@ import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, post
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
 import { renewLineTokenIfNeeded } from '../line/token';
+import { logEvent } from '../log';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
 const MAX_GEN_ATTEMPTS = 3;
@@ -32,7 +33,7 @@ export async function runCron(env: Env, now = new Date()): Promise<void> {
   const brand = await getBrand(env);
   const s = await getSettings(env, brand.id);
   const step = async (name: string, fn: () => Promise<void>) => {
-    try { await fn(); } catch (e) { if (e instanceof BudgetError) throw e; console.error(`cron:${name}`, (e as Error).message); }
+    try { await fn(); } catch (e) { if (e instanceof BudgetError) throw e; await logEvent(env, brand.id, 'error', 'cron', `排程步驟「${name}」發生錯誤：${(e as Error).message}`); }
   };
   // 每個工作區每小時清理一次（各自計時；工作區很多、輪替處理時也不會漏掉）
   const lastHk = brand.last_housekeeping_at ? new Date(brand.last_housekeeping_at).getTime() : 0;
@@ -54,7 +55,10 @@ async function housekeeping(env: Env, now: Date) {
   await env.DB.prepare(`UPDATE posts SET status='gen_failed', updated_at=? WHERE brand_id=? AND status='generating' AND updated_at<?`).bind(iso(now), brand.id, new Date(now.getTime() - STALE_MS).toISOString()).run();
   await env.DB.prepare('UPDATE brands SET last_housekeeping_at=? WHERE id=?').bind(iso(now), brand.id).run();
   // LINE token（系統自動申請者）到期前更新；失敗不影響其他清理，下一小時再試
-  await renewLineTokenIfNeeded(env, now).catch((e) => { if (e instanceof BudgetError) throw e; console.error('line:renew', (e as Error).message); });
+  await renewLineTokenIfNeeded(env, now).catch(async (e) => {
+    if (e instanceof BudgetError) throw e;
+    await logEvent(env, brand.id, 'error', 'line_token', `LINE 發訊憑證自動更新失敗，下一小時再試：${(e as Error).message}`);
+  });
 }
 
 /** 為每個啟用中的帳號，在今天與明天的每個時段確保有一串貼文（slot_key 唯一約束防重複）。 */
@@ -101,11 +105,12 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
           }
           if (err instanceof QuotaError) {
             await env.DB.prepare(`DELETE FROM posts WHERE id=? AND status='generating'`).bind(postId).run();
-            console.warn('cron:quota', err.message);
+            await logEvent(env, brand.id, 'warn', 'threads_generate', `AI 生成額度已達上限，暫停生成：${err.message}`, undefined, { throttleMinutes: 360 });
             return; // 額度不足：停止本輪，保留既有草稿
           }
           await env.DB.prepare(`UPDATE posts SET status='gen_failed',gen_attempts=gen_attempts+1,error_message=?,updated_at=? WHERE id=?`)
             .bind(String((err as Error).message).slice(0, 300), iso(now), postId).run();
+          await logEvent(env, brand.id, 'error', 'threads_generate', `AI 生成失敗（貼文 #${postId}）：${(err as Error).message}`, { account: a?.username ?? null });
         }
       }
     }
@@ -140,7 +145,11 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
   const parts = await trackedParts(env, post, partsOf(post)); // LINE 連結換成追蹤短連結
   const setErr = (status: string, msg: string) => env.DB.prepare('UPDATE posts SET status=?,error_message=?,updated_at=? WHERE id=?').bind(status, msg.slice(0, 300), iso(now), id).run();
   const cred = await resolveCred(env, post.account_id);
-  if (!cred) { await setErr('failed', '發文帳號未連結或授權已失效，請到「設定 → Threads」重新連結後重試'); return; }
+  if (!cred) {
+    await setErr('failed', '發文帳號未連結或授權已失效，請到「設定 → Threads」重新連結後重試');
+    await logEvent(env, post.brand_id, 'error', 'threads_publish', `貼文 #${id} 無法發布：發文帳號未連結或授權已失效`);
+    return;
+  }
 
   try {
     for (let i = ids.length; i < parts.length; i++) {
@@ -154,6 +163,7 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
       await reserveDb(env).prepare('UPDATE posts SET part_ids=?,threads_post_id=?,threads_creation_id=NULL WHERE id=?').bind(JSON.stringify(ids), ids[0], id).run();
     }
     await env.DB.prepare(`UPDATE posts SET status='published',published_at=?,error_message=NULL,updated_at=? WHERE id=?`).bind(iso(now), iso(now), id).run();
+    await logEvent(env, post.brand_id, 'info', 'threads_publish', `貼文 #${id} 已發布（${parts.length} 則）${cred.username ? ` @${cred.username}` : ''}`, { threads_post_id: ids[0] });
   } catch (e) {
     if (e instanceof BudgetError) {
       // 額度檢查已事先預留，理論上不會發生；若發生，已發出的部分都已記錄，退回排程讓下一輪接續
@@ -161,6 +171,9 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
       throw e;
     }
     const n = ids.length + 1, chain = parts.length > 1;
+    await logEvent(env, post.brand_id, e instanceof ThreadsUnknownError ? 'warn' : 'error', 'threads_publish',
+      `貼文 #${id} 第 ${n} 則發布失敗${cred.username ? `（@${cred.username}）` : ''}：${(e as Error).message}`,
+      { kind: e instanceof ThreadsUnknownError ? 'unknown' : e instanceof ThreadsApiError ? (e.tokenInvalid ? 'token_invalid' : e.permission ? 'permission' : 'api') : 'other', published_parts: ids.length, total_parts: parts.length });
     if (e instanceof ThreadsUnknownError) {
       // 第一則結果未知 → 交給 reconcile 核對；串文中途未知 → 請人工確認，避免重複
       if (!ids.length) await setErr('unknown', `結果未知，待核對：${e.message}`);
@@ -191,6 +204,7 @@ export async function reconcile(env: Env, now: Date): Promise<void> {
       if (parts.length > 1) await upd('scheduled', null); // 首則已發出，繼續發後面的串文
       else await env.DB.prepare(`UPDATE posts SET status='published',published_at=?,error_message=NULL WHERE id=?`).bind(hit.timestamp ?? iso(now), p.id).run();
     } else await upd(p.attempts >= MAX_PUBLISH_ATTEMPTS ? 'failed' : 'scheduled', '核對後平台無此貼文，重新排入');
+    await logEvent(env, brand.id, 'info', 'threads_reconcile', hit ? `貼文 #${p.id} 核對結果：已在 Threads 上，標記為已發出` : `貼文 #${p.id} 核對結果：Threads 上找不到，${p.attempts >= MAX_PUBLISH_ATTEMPTS ? '標記失敗' : '重新排入'}`);
   }
 }
 
@@ -212,6 +226,7 @@ export async function refreshInsights(env: Env, now: Date): Promise<void> {
     const m = await postInsights(cred, r.threads_post_id);
     if (m === null) {
       if (cred.accountId) await env.DB.prepare(`UPDATE threads_accounts SET insights_status='no_permission' WHERE id=?`).bind(cred.accountId).run();
+      await logEvent(env, brand.id, 'warn', 'threads_insights', `@${cred.username ?? ''} 沒有成效數據權限：請在 Meta App 加入 threads_manage_insights 後重新連結`);
       continue;
     }
     if (cred.accountId) await env.DB.prepare(`UPDATE threads_accounts SET insights_status='ok' WHERE id=? AND insights_status<>'ok'`).bind(cred.accountId).run();

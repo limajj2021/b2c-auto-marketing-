@@ -99,7 +99,7 @@ describe('#8 cron reuses brand/settings within a workspace pass', () => {
     const m = mockFetch(() => jres({})); restore = m.restore;
     const orig = env.DB.prepare.bind(env.DB);
     (env.DB as any).prepare = (sql: string) => { peak++; return orig(sql); };
-    await runAllTenants(env, NOW);
+    await runAllTenants(env, new Date('2026-11-08T01:07:00Z')); // 非整點：不含每小時一次的紀錄清理
     expect(peak).toBeLessThanOrEqual(12);
   });
 });

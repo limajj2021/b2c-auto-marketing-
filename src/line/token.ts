@@ -3,6 +3,7 @@ import { audit, getBrand } from '../db';
 import { xfetch } from '../budget';
 import { getMeta, setCred } from '../integrations';
 import type { Env } from '../types';
+import { logEvent } from '../log';
 
 const RENEW_BEFORE_MS = 7 * 86400000;
 
@@ -35,4 +36,5 @@ export async function renewLineTokenIfNeeded(env: Env, now = new Date()): Promis
   await setCred(env, brand.id, 'line_channel_access_token', t.token, { ...meta, expires_at: t.expiresAt });
   env.LINE_CHANNEL_ACCESS_TOKEN = t.token; env.LINE_TOKEN_AUTO_EXPIRES = t.expiresAt;
   await audit(env, brand.id, null, 'line_token_renewed');
+  await logEvent(env, brand.id, 'info', 'line_token', 'LINE 發訊憑證已自動更新');
 }

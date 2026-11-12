@@ -1,6 +1,7 @@
 // 營運總後台 API：跨工作區的健康狀態、用量計量、開通與暫停。
 // 原則：營運人員只看「計數與狀態」，不讀顧客留資內容等個資。
 import type { Env } from '../types';
+import { SOURCES } from '../log';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso } from '../util/time';
 
@@ -149,6 +150,28 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.slug`,
     ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me).all()).results;
     return json({ month: ms.slice(0, 7), rows });
+  }
+
+  // 系統紀錄：全部工作區，可依工作區、等級、來源、關鍵字篩選（紀錄本身不含顧客訊息與憑證）
+  if (path === '/logs' && req.method === 'GET') {
+    const q = new URL(req.url).searchParams;
+    const where: string[] = [], args: unknown[] = [];
+    const ws = q.get('workspace');
+    if (ws === '_platform') where.push('l.brand_id IS NULL');
+    else if (ws) { where.push('b.slug=?'); args.push(ws); }
+    const lv = q.get('level');
+    if (lv === 'error') where.push(`l.level='error'`);
+    else if (lv === 'warn') where.push(`l.level IN ('warn','error')`);
+    if (q.get('source')) { where.push('l.source=?'); args.push(q.get('source')); }
+    if (q.get('q')) { where.push('l.message LIKE ?'); args.push(`%${q.get('q')!.slice(0, 50)}%`); }
+    if (q.get('before')) { where.push('l.id<?'); args.push(Number(q.get('before'))); }
+    const rows = (await env.DB.prepare(
+      `SELECT l.id,l.level,l.source,l.message,l.detail,l.created_at,b.slug,b.name FROM event_logs l LEFT JOIN brands b ON b.id=l.brand_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY l.id DESC LIMIT 100`,
+    ).bind(...args).all()).results;
+    const since = new Date(Date.now() - 86400000).toISOString();
+    const c = await env.DB.prepare(`SELECT SUM(level='error') e, SUM(level='warn') w FROM event_logs WHERE created_at>?`).bind(since).first<{ e: number; w: number }>();
+    return json({ rows, sources: SOURCES, last24h: { error: c?.e ?? 0, warn: c?.w ?? 0 } });
   }
 
   // 開通新工作區：建立品牌、設定與第一位管理員，回傳一次性密碼

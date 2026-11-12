@@ -707,7 +707,7 @@ async function leadsPage() {
    ====================================================================== */
 async function settingsPage(r) {
   if (r.sub === 'threads' && r.arg) return threadsAccountPage(+r.arg);
-  const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage }[r.sub];
+  const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage, logs: logsPage }[r.sub];
   if (sub) return sub();
   const [ig, st, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/dashboard')]);
   TZ = st.brand.timezone; bar({ title: '設定' });
@@ -716,10 +716,10 @@ async function settingsPage(r) {
       ${row({ act: 'threads', title: 'Threads 帳號', sub: ig.threads.accounts?.length ? ig.threads.accounts.map((a) => '@' + esc(a.username || '')).join('、') : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
       ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
-    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'report', title: '成效報告', sub: '每月導流成效，可列印或另存 PDF 給團隊' })}${row({ act: 'audit', title: '操作紀錄' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
+    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'report', title: '成效報告', sub: '每月導流成效，可列印或另存 PDF 給團隊' })}${row({ act: 'audit', title: '操作紀錄', sub: '誰在什麼時候改了什麼' })}${row({ act: 'logs', title: '系統紀錄', sub: '串接、發文與錯誤原因，出問題時先看這裡' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
     <section><div class="list">${row({ act: 'password', title: '帳號與密碼', sub: '變更登入帳號或密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
       <p class="t-sub foot" style="margin-top:10px"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p></section>`);
-  for (const k of ['threads', 'line', 'gemini', 'brand', 'users', 'audit', 'password']) $(`[data-act=${k}]`).onclick = () => go('settings/' + k);
+  for (const k of ['threads', 'line', 'gemini', 'brand', 'users', 'audit', 'logs', 'password']) $(`[data-act=${k}]`).onclick = () => go('settings/' + k);
   $('[data-act=report]').onclick = () => go('report');
   $('[data-act=out]').onclick = logout;
   $('[data-act=export]').onclick = (e) => act(e.currentTarget, async () => {
@@ -846,6 +846,17 @@ async function passwordPage() {
 async function auditPage() {
   const logs = await api('GET', '/audit'); bar({ title: '操作紀錄', back: 'settings' });
   setView(logs.length ? `<div class="list">${logs.map((l) => row({ go: false, title: esc(ACTION[l.action] || l.action), sub: `${esc(l.actor || '系統')} · ${fmt(l.created_at)}` })).join('')}</div><p class="t-sub">顯示最近 50 筆。</p>` : empty('inbox', '尚無紀錄', '設定與操作變更會記錄在這裡。'));
+}
+async function logsPage() {
+  const lv = S.logLevel || '';
+  const r = await api('GET', '/logs' + (lv ? '?level=' + lv : '')); bar({ title: '系統紀錄', back: 'settings' });
+  const ch = (v, l) => `<button class="chip" data-lv="${v}" aria-pressed="${lv === v}">${l}</button>`;
+  const DOT = { error: 'bad', warn: 'warn', info: 'ok' }, LVN = { error: '錯誤', warn: '警告', info: '' };
+  setView(`<div class="chips tight">${ch('', '全部')}${ch('warn', '警告與錯誤')}${ch('error', '只看錯誤')}</div>
+    ${r.rows.length ? `<div class="list">${r.rows.map((l) => row({ go: false, dot: DOT[l.level], title: esc(l.message), sub: `${LVN[l.level] ? LVN[l.level] + ' · ' : ''}${esc(r.sources[l.source] || l.source)} · ${fmt(l.created_at)}` })).join('')}</div>
+    <p class="t-sub">顯示最近 100 筆，保留 30 天。紀錄不含顧客訊息內容與任何憑證。</p>`
+    : empty('inbox', lv ? '沒有警告或錯誤' : '尚無紀錄', lv ? '目前一切正常。' : '連結 Threads、發文、LINE 接收訊息的結果會記錄在這裡。')}`);
+  $$('[data-lv]').forEach((b) => b.onclick = () => { S.logLevel = b.dataset.lv; render(); });
 }
 async function accountPage() {
   bar({ title: '帳號' });

@@ -1,3 +1,4 @@
+import { logEvent } from './log';
 import { handleApi } from './admin/routes';
 import { brandBySlug, forBrand, getBrand, isMulti } from './db';
 import { withCreds } from './integrations';
@@ -25,7 +26,7 @@ export default {
       if (pathname === '/threads/delete' && req.method === 'POST') return await handleMetaCallback(raw, req, 'delete');
       if (pathname.startsWith('/api/')) return await handleApi(raw, req);
     } catch (e) {
-      console.error('unhandled', (e as Error).message); // 不記錄請求內容
+      await logEvent(raw, null, 'error', 'system', `未預期的錯誤（${req.method} ${pathname.replace(/\/line\/webhook\/.*/, '/line/webhook/…')}）：${(e as Error).message}`); // 不記錄請求內容
       return new Response(JSON.stringify({ error: 'internal error' }), { status: 500, headers: { 'content-type': 'application/json' } });
     }
     return raw.ASSETS.fetch(req);

@@ -30,6 +30,9 @@ th{border-top:0;font-size:12px;font-weight:500;color:var(--text2);white-space:no
 .card{background:var(--bg1);border-radius:10px;padding:18px;margin-top:20px}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
 .row label{display:grid;gap:4px;font-size:12.5px;color:var(--text2)}
 .result{margin-top:14px;padding:12px;border-radius:var(--r);background:var(--bg2);font-size:14px;line-height:1.8}code{font-size:13px;word-break:break-all}
+.lv{display:inline-block;min-width:44px;text-align:center;padding:1px 6px;border-radius:4px;font-size:12px;font-weight:600}
+.lv.error{background:var(--bad-bg);color:var(--bad)}.lv.warn{background:var(--warn-bg);color:var(--warn)}.lv.info{background:var(--bg2);color:var(--text2)}
+#logs td{font-size:13px}#logs td.t{white-space:nowrap;color:var(--text2)}#logs pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-all;font-size:12px;color:var(--text2)}
 .login{max-width:360px;margin:12vh auto;display:grid;gap:12px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);padding:10px 14px;border-radius:var(--r);background:var(--text);color:var(--bg0);font-size:13.5px}
 #toast.bad{background:var(--bad);color:#fff}.hide{display:none!important}
@@ -73,6 +76,13 @@ async function main() {
     <label class="sub">月份 <input type="month" id="mo" value="${month}"></label><button class="btn sec" id="csv">下載計費用量 CSV</button><button class="btn sec" id="out">登出</button></div>
     <div class="kpis"><div><b>${t.filter((x) => x.health === 'attention').length}</b><span>需處理</span></div><div><b>${t.filter((x) => x.status === 'active').length}</b><span>使用中</span></div>
     <div><b>${sum('views')}</b><span>${month} 曝光</span></div><div><b>${sum('clicks')}</b><span>${month} LINE 點擊</span></div><div><b>${sum('friends')}</b><span>${month} 新好友</span></div><div><b>${sum('handoffs')}</b><span>${month} 轉真人</span></div><div><b>${sum('leads')}</b><span>${month} 留資</span></div><div><b>${sum('published')}</b><span>${month} 發文</span></div><div><b>${sum('generations')}</b><span>${month} AI 生成</span></div></div>
+    <div class="card" style="margin:0 0 20px"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">系統紀錄</h2><span class="sub" id="l24"></span></div>
+      <div class="row" style="margin-top:12px"><label>工作區<select id="lw"><option value="">全部</option><option value="_platform">平台（不屬於工作區）</option>${t.map((x) => `<option value="${esc(x.slug)}">${esc(x.name)}（${esc(x.slug)}）</option>`).join('')}</select></label>
+        <label>等級<select id="ll"><option value="">全部</option><option value="warn">警告與錯誤</option><option value="error">只看錯誤</option></select></label>
+        <label>來源<select id="ls"><option value="">全部</option></select></label><label>關鍵字<input id="lq" placeholder="例如：授權、#12"></label><button class="btn sec" id="lr">重新整理</button></div>
+      <div class="tbl" style="margin-top:12px"><table style="min-width:760px"><thead><tr><th>時間</th><th>工作區</th><th>等級</th><th>來源</th><th>內容</th></tr></thead><tbody id="logs"><tr><td colspan="5" class="sub">載入中…</td></tr></tbody></table></div>
+      <div style="margin-top:10px"><button class="btn sm sec hide" id="lmore">載入更早的紀錄</button></div>
+      <p class="sub" style="margin:10px 0 0">記錄串接、發文、排程的結果與錯誤原因，保留 30 天；不含顧客訊息內容與任何憑證。Threads 授權只有「開始連結」沒有後續，代表卡在 Threads／Meta 頁面（常見：帳號不是測試人員、回呼網址未登記、權限未加入）。</p></div>
     <div class="tbl"><table><thead><tr><th>工作區</th><th>狀態</th><th>待處理</th><th>留資加購</th><th class="n">曝光</th><th class="n">LINE 點擊</th><th class="n">新好友</th><th class="n">轉真人</th><th class="n">留資</th><th class="n">未處理</th><th class="n">發文</th><th class="n">AI</th><th>Threads</th><th>LINE</th><th>排程</th><th></th></tr></thead><tbody>
     ${t.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="sub">${esc(x.slug)} · ${esc(x.plan)}</div></td>
       <td><span class="pill ${x.health}">${HEALTH[x.health]}</span></td><td class="issues">${x.issues.map(esc).join('<br>') || '<span class="z">—</span>'}</td>
@@ -94,6 +104,29 @@ async function main() {
     <div class="card"><h2>變更我的密碼</h2><div class="row"><label>目前密碼<input type="password" id="pc" autocomplete="current-password"></label><label>新密碼（至少 12 字元）<input type="password" id="pn" autocomplete="new-password"></label><button class="btn sec" id="pchg">變更密碼</button></div></div>
     <p class="sub" style="margin-top:20px">營運人員只看得到計數與狀態，看不到顧客的留資內容。需要協助客戶時，請客戶授權並由客戶操作，或重設其管理員密碼。</p>`;
   $('#mo').onchange = (e) => { month = e.target.value; main(); };
+  const LVN = { info: '資訊', warn: '警告', error: '錯誤' };
+  let lastId = null, srcLoaded = false;
+  const loadLogs = async (more) => {
+    const p = new URLSearchParams();
+    for (const [k, el] of [['workspace', '#lw'], ['level', '#ll'], ['source', '#ls'], ['q', '#lq']]) if ($(el).value.trim()) p.set(k, $(el).value.trim());
+    if (more && lastId) p.set('before', lastId);
+    const r = await api('GET', '/logs?' + p);
+    if (!srcLoaded) { $('#ls').innerHTML += Object.entries(r.sources).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join(''); srcLoaded = true; }
+    $('#l24').innerHTML = `近 24 小時：<b style="color:var(--bad)">${r.last24h.error}</b> 個錯誤、<b style="color:var(--warn)">${r.last24h.warn}</b> 個警告`;
+    const html = r.rows.map((l) => {
+      let det = ''; try { det = l.detail ? JSON.stringify(JSON.parse(l.detail), null, 1) : ''; } catch { det = l.detail; }
+      return `<tr><td class="t">${esc(new Date(l.created_at).toLocaleString('zh-TW', { hour12: false }))}</td><td>${l.slug ? esc(l.name) + `<div class="sub">${esc(l.slug)}</div>` : '<span class="z">平台</span>'}</td>
+        <td><span class="lv ${l.level}">${LVN[l.level] || l.level}</span></td><td style="white-space:nowrap">${esc(r.sources[l.source] || l.source)}</td><td>${esc(l.message)}${det ? `<details><summary class="sub" style="cursor:pointer">詳細</summary><pre>${esc(det)}</pre></details>` : ''}</td></tr>`;
+    }).join('');
+    if (more) $('#logs').insertAdjacentHTML('beforeend', html); else $('#logs').innerHTML = html || '<tr><td colspan="5" class="sub">沒有符合條件的紀錄</td></tr>';
+    lastId = r.rows.length ? r.rows[r.rows.length - 1].id : lastId;
+    $('#lmore').classList.toggle('hide', r.rows.length < 100);
+  };
+  for (const s of ['#lw', '#ll', '#ls']) $(s).onchange = () => act(null, () => loadLogs(false));
+  $('#lq').onkeydown = (e) => { if (e.key === 'Enter') act(null, () => loadLogs(false)); };
+  $('#lr').onclick = (e) => act(e.currentTarget, () => loadLogs(false));
+  $('#lmore').onclick = (e) => act(e.currentTarget, () => loadLogs(true));
+  act(null, () => loadLogs(false));
   $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); login(); };
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
