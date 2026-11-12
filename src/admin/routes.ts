@@ -1,6 +1,7 @@
 import { generateThread, QuotaError } from '../ai/gemini';
 import { checkParts } from '../ai/compliance';
 import { getAccount, listAccounts } from '../threads/accounts';
+import { lineAddUrl, lineIdFromUrl } from '../line/links';
 import { audit, brandBySlug, forBrand, getBrand, getSettings, isMulti, jsonArr } from '../db';
 import { withCreds } from '../integrations';
 import { handleOps } from './ops';
@@ -165,6 +166,10 @@ add('GET', '/dashboard', 'admin', async ({ env, brandId }) => {
     inquiries_pending: await n(`SELECT COUNT(*) c FROM inquiries WHERE brand_id=? AND handling_status='pending'`, brandId),
     leads_enabled: !!s.leads_enabled,
     friends_today: await metricSum(env, brandId, 'friend_add', localDate(new Date(), brand.timezone)),
+    // 未開通自動接待：好友數來自 LINE 每日統計（隔天才有），首頁改顯示昨天的新好友與今天的點擊
+    friends_yesterday: await metricSum(env, brandId, 'friend_add', addDays(localDate(new Date(), brand.timezone), -1), localDate(new Date(), brand.timezone)),
+    clicks_today: await metricSum(env, brandId, 'link_click', localDate(new Date(), brand.timezone)),
+    line_data: !!env.LINE_CHANNEL_ACCESS_TOKEN,
     handoffs_today: await metricSum(env, brandId, 'handoff', localDate(new Date(), brand.timezone)),
     auto_post_enabled: !!s.auto_post_enabled,
     line_auto_reply_enabled: !!s.line_auto_reply_enabled,
@@ -213,6 +218,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
       publishing_times: jsonArr(s.publishing_times), daily_gen_limit: s.daily_gen_limit,
       regulated: needsReview(brand.industry, { posting_mode: 'A', require_review: 0 }),
       style_preset: s.style_preset, thread_min: s.thread_min, thread_max: s.thread_max, fact_bank: s.fact_bank,
+      line_id: lineIdFromUrl(s.line_add_url),
       line_ready: !!parseLineConfig(s.line_config).serviceInfo && !parseLineConfig(s.line_config).serviceInfo.startsWith('（'),
     },
   });
@@ -225,6 +231,11 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
   const put = (col: string, v: unknown) => { sets.push(`${col}=?`); vals.push(v); };
   for (const k of SETTING_FIELDS) if (typeof b[k] === 'string') { if (b[k].length > 2000) return err(400, `${k} 過長`); put(k, b[k]); }
   if (b.line_add_url && !/^https:\/\//.test(b.line_add_url)) return err(400, 'LINE 連結需為 https');
+  if (b.line_id !== undefined) { // 只填官方帳號 ID（@xxx），自動產生加好友連結
+    const u = b.line_id === '' ? '' : lineAddUrl(String(b.line_id));
+    if (u === null) return err(400, '官方帳號 ID 格式不正確，例如：@033azwud');
+    put('line_add_url', u);
+  }
   if (b.style_preset !== undefined) { if (typeof b.style_preset !== 'string' || b.style_preset.length > 500) return err(400, '寫作原則過長'); put('style_preset', b.style_preset); }
   if (b.fact_bank !== undefined) { if (typeof b.fact_bank !== 'string' || b.fact_bank.length > 5000) return err(400, '數據庫不可超過 5000 字'); put('fact_bank', b.fact_bank); }
   if (b.thread_min !== undefined || b.thread_max !== undefined) {
@@ -520,6 +531,8 @@ add('GET', '/funnel', 'admin', async ({ env, url, brandId }) => {
       views: sum('views'), likes: sum('likes'), replies: sum('replies'), reposts: sum('reposts'), quotes: sum('quotes'), shares: sum('shares'),
       clicks: await metricSum(env, brandId, 'link_click', from, to),
       friends: await metricSum(env, brandId, 'friend_add', from, to),
+      // 新好友的來源：加購客戶即時（Webhook）；其他客戶連接 LINE 數據後每日更新（隔天才有）；都沒有則無法統計
+      friends_source: s.leads_enabled ? 'live' : env.LINE_CHANNEL_ACCESS_TOKEN ? 'daily' : 'none',
       handoffs: await metricSum(env, brandId, 'handoff', from, to),
       leads: s.leads_enabled ? ((await env.DB.prepare('SELECT COUNT(*) c FROM inquiries WHERE brand_id=? AND created_at>=? AND created_at<?').bind(brandId, fromIso, toIso).first<{ c: number }>())?.c ?? 0) : null,
     },

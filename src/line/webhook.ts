@@ -19,6 +19,7 @@ export async function handleLineWebhook(env: Env, req: Request): Promise<Respons
 
   const brand = await getBrand(env);
   const s = await getSettings(env, brand.id);
+  if (!s.leads_enabled) return new Response('auto-reply add-on off', { status: 200 }); // 未開通加購：官方帳號自己的自動回應負責回覆
   if (!s.line_auto_reply_enabled) return new Response('paused', { status: 200 });
 
   let failed = false;

@@ -150,7 +150,7 @@ async function tenantsPage() {
   $('#errs')?.addEventListener('click', () => { L.level = 'error'; location.hash = '#/logs'; });
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
-    const rows = [['工作區代號', '品牌名稱', '方案', '留資加購', '曝光', 'LINE 點擊', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
+    const rows = [['工作區代號', '品牌名稱', '方案', 'LINE 自動接待加購', '曝光', 'LINE 點擊', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
@@ -164,12 +164,12 @@ function tenantSheet(x) {
     ${x.issues.length ? `<div class="note warn" style="margin-bottom:14px">${x.issues.map(esc).join('<br>')}</div>` : ''}
     <dl class="kv">${kv('登入網址', `<code>${esc(location.origin)}/?w=${esc(x.slug)}</code>`)}
       ${kv('Threads', `${x.threads_accounts} 個帳號${x.threads_invalid ? `，<span style="color:var(--bad)">${x.threads_invalid} 個失效</span>` : ''}${x.threads_expires ? `<div class="t-sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}`)}
-      ${kv('LINE', x.line_configured ? '已連接' : '<span class="mut">未連接</span>')}
+      ${kv('LINE', x.line_add_url ? `${esc((x.line_add_url.match(/@[\w.-]+/) || [x.line_add_url])[0])}${x.line_configured ? ' · 已連接數據' : ''}` : '<span class="mut">未設定加好友連結</span>')}
       ${kv('自動發文', x.auto_post_enabled ? '開啟' : '關閉')}${kv('排程', `上次執行 ${ago(x.last_cron_at)}`)}
       ${kv('AI 金鑰', x.gemini_own_key ? '客戶自有' : '平台提供')}
       ${kv('本月成效', `發文 ${x.published} · 曝光 ${x.views} · LINE 點擊 ${x.clicks} · 新好友 ${x.friends} · 轉真人 ${x.handoffs} · AI 生成 ${x.generations}${x.leads_enabled ? ` · 留資 ${x.leads}（未處理 ${x.leads_pending}）` : ''}`)}</dl>
-    <div class="list" style="margin-top:16px"><div class="row static"><span class="main"><span class="ttl" style="display:block">留資加購</span><span class="sub" style="display:block">開通後 LINE 選單會出現「立即詢問」表單</span></span>
-      <label class="switch"><input type="checkbox" role="switch" id="tl" ${x.leads_enabled ? 'checked' : ''} ${admin ? '' : 'disabled'} aria-label="留資加購"><i></i></label></div></div>
+    <div class="list" style="margin-top:16px"><div class="row static"><span class="main"><span class="ttl" style="display:block">LINE 自動接待＋留資（加購）</span><span class="sub" style="display:block">開通後由系統回覆 LINE 選單、FAQ 與諮詢表單；未開通時只導流，回覆交給官方帳號自己的設定</span></span>
+      <label class="switch"><input type="checkbox" role="switch" id="tl" ${x.leads_enabled ? 'checked' : ''} ${admin ? '' : 'disabled'} aria-label="LINE 自動接待加購"><i></i></label></div></div>
     <div class="actions" style="margin-top:16px"><button class="btn sec" id="tlog">查看系統紀錄</button><button class="btn sec" id="trp">重設管理員密碼</button></div>
     ${admin ? `<button class="btn ${x.status === 'active' ? 'dng' : 'sec'} block" id="tst" style="margin-top:8px">${x.status === 'active' ? '暫停這個工作區' : '恢復這個工作區'}</button>` : '<p class="t-sub" style="margin-top:12px">開通、暫停與留資加購需由營運管理者處理。</p>'}
     <div id="tout" style="margin-top:14px"></div>`, (el, close) => {
@@ -180,7 +180,7 @@ function tenantSheet(x) {
     });
     $('#tl', el)?.addEventListener('change', (e) => act(null, async () => {
       const on = e.target.checked;
-      try { await api('PATCH', '/tenants/' + x.slug, { leads_enabled: on }); x.leads_enabled = on ? 1 : 0; toast(on ? '已開通留資' : '已關閉留資：LINE 不再顯示諮詢表單', 'ok'); }
+      try { await api('PATCH', '/tenants/' + x.slug, { leads_enabled: on }); x.leads_enabled = on ? 1 : 0; toast(on ? '已開通 LINE 自動接待：請客戶在設定頁按「設定並測試 Webhook」' : '已關閉 LINE 自動接待：系統不再回覆 LINE 訊息', 'ok'); }
       catch (er) { e.target.checked = !on; throw er; }
     }));
     $('#tst', el)?.addEventListener('click', (e) => act(e.currentTarget, async () => {

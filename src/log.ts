@@ -10,7 +10,7 @@ export const LOG_RETENTION_DAYS = 30;
 export const SOURCES: Record<string, string> = {
   threads_oauth: 'Threads 授權', threads_publish: 'Threads 發文', threads_generate: 'AI 生成', threads_token: 'Threads 憑證',
   threads_insights: 'Threads 成效數據', threads_reconcile: '發文核對', line_webhook: 'LINE 接收訊息', line_connect: 'LINE 串接',
-  line_token: 'LINE 憑證', cron: '排程', system: '系統',
+  line_token: 'LINE 憑證', line_insights: 'LINE 好友數', cron: '排程', system: '系統',
 };
 
 /** 去除可能夾帶的憑證（網址參數、Bearer） */

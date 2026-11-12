@@ -19,20 +19,19 @@ const api = (env: any, method: string, path: string, body?: unknown, cookie?: st
   method, body: body ? JSON.stringify(body) : undefined, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui', ...(cookie ? { cookie } : {}) } }));
 
 describe('lead capture as a paid add-on (disabled by default)', () => {
-  it('LINE menu has no inquiry entry, inquiry wording points to a human, nothing is stored', async () => {
+  it('without the add-on the system never replies, reads profiles or stores anything (the OA handles replies itself)', async () => {
     const env = await makeEnv({ leads: false });
     const m = mockFetch(() => jres({ displayName: '不應被抓取' })); restore = m.restore;
     await send(env, ev(null));
-    expect(m.calls.some((c) => c.url.includes('/profile/'))).toBe(false); // 不另外抓顯示名稱
-    expect(lastReply(m.calls).quickReply.items.map((i: any) => i.action.text)).toEqual(['了解服務', '聯絡專人']);
-    for (const t of ['立即詢問', '同意', '一般諮詢', '我想申請']) await send(env, ev(t));
-    expect(lastReply(m.calls).text).toContain('聯絡專人');
-    expect(((await env.DB.prepare('SELECT COUNT(*) c FROM inquiries').first()) as any).c).toBe(0);
-    expect(((await env.DB.prepare("SELECT flow_state FROM conversation_states").first()) as any)?.flow_state ?? 'idle').not.toBe('form');
+    for (const t of ['立即詢問', '同意', '一般諮詢', '我想申請', '聯絡專人']) expect((await send(env, ev(t))).status).toBe(200);
+    expect(m.calls.length).toBe(0); // 不回覆、不抓顯示名稱
+    for (const t of ['inquiries', 'contacts', 'conversation_states', 'metrics_daily']) {
+      expect(((await env.DB.prepare(`SELECT COUNT(*) c FROM ${t}`).first()) as any).c).toBe(0);
+    }
   });
 
-  it('counts new friends and human handoffs without storing customer content', async () => {
-    const env = await makeEnv({ leads: false });
+  it('with the add-on, counts new friends and human handoffs in real time without storing customer content', async () => {
+    const env = await makeEnv({ leads: true });
     const m = mockFetch(() => jres({})); restore = m.restore;
     await send(env, ev(null, 'A')); await send(env, ev(null, 'B')); await send(env, ev('聯絡專人', 'A'));
     const rows = (await env.DB.prepare('SELECT name,count FROM metrics_daily ORDER BY name').all()).results as any[];
@@ -54,13 +53,14 @@ describe('lead capture as a paid add-on (disabled by default)', () => {
     expect(list.tenants[0]).toMatchObject({ leads_enabled: true, friends: 0, handoffs: 0 });
   });
 
-  it('turning the add-on off mid-form ends the form without saving', async () => {
+  it('turning the add-on off mid-form stops replying and never saves the half-filled form', async () => {
     const env = await makeEnv();
     const m = mockFetch(() => jres({})); restore = m.restore;
     for (const t of ['立即詢問', '同意', '一般諮詢', '小明']) await send(env, ev(t, 'Z'));
     await env.DB.prepare('UPDATE brand_settings SET leads_enabled=0').run();
-    await send(env, ev('想了解方案', 'Z'));
-    expect(((await env.DB.prepare('SELECT flow_state FROM conversation_states').first()) as any).flow_state).toBe('idle');
+    const before = m.calls.length;
+    for (const t of ['想了解方案', 'LINE 訊息', '略過', '確認送出']) await send(env, ev(t, 'Z'));
+    expect(m.calls.length).toBe(before);
     expect(((await env.DB.prepare('SELECT COUNT(*) c FROM inquiries').first()) as any).c).toBe(0);
   });
 });

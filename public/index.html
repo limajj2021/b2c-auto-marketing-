@@ -112,7 +112,8 @@ window.addEventListener('hashchange', async () => {
 });
 const TABS = [['home', '首頁', 'home', 'admin'], ['posts', '貼文', 'post', 'admin'], ['line', 'LINE', 'line', 'admin'], ['leads', '留資', 'lead', 'staff'], ['settings', '設定', 'gear', 'admin'], ['account', '帳號', 'user', 'staff-only']];
 // 留資為加購項目：未開通時不顯示「留資」分頁
-const tabsFor = () => TABS.filter((t) => (t[0] !== 'leads' || me.leads_enabled) && (me.role === 'admin' ? t[3] !== 'staff-only' : (t[3] === 'staff' || t[3] === 'staff-only')));
+// LINE 自動接待也屬於加購：未開通時不顯示「LINE」分頁（回覆交給官方帳號後台自己的自動回應）
+const tabsFor = () => TABS.filter((t) => ((t[0] !== 'leads' && t[0] !== 'line') || me.leads_enabled) && (me.role === 'admin' ? t[3] !== 'staff-only' : (t[3] === 'staff' || t[3] === 'staff-only')));
 
 function bar({ title, back, right = '', sub = '', dot = '' }) {
   $('#bar').innerHTML = `<div class="in">${back ? `<button class="icon" data-act="back" data-to="${esc(back)}" aria-label="返回">${svg('back')}</button>` : ''}<div class="ttl" style="${back ? '' : 'padding:6px 0'}">${dot ? `<span class="dot ${dot}"></span>` : ''}<div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div></div>${right}<button class="icon" data-act="help" aria-label="說明">${svg('help')}</button></div>`;
@@ -194,10 +195,10 @@ async function getSetup() {
   TZ = st.brand.timezone; BRAND = st.brand.name;
   const s = st.settings, steps = [
     { id: 'brand', t: '填寫品牌資料', d: '品牌介紹與服務內容，AI 會依此撰寫貼文', ok: !!(st.brand.description && s.services && !s.services.startsWith('（')), to: 'settings/brand', help: 'start' },
-    { id: 'line', t: '連接 LINE 官方帳號', d: '貼上 Channel ID 與 Channel secret', ok: ig.line.configured, to: 'settings/line', help: 'line' },
+    { id: 'line', t: '填入 LINE 官方帳號 ID', d: '貼文結尾的加好友連結會用它', ok: !!s.line_add_url, to: 'settings/line', help: 'line' },
     { id: 'gemini', t: '連接 AI（Gemini）', d: '貼上 API key', ok: ig.gemini.configured, to: 'settings/gemini', help: 'gemini' },
     { id: 'threads', t: '連結 Threads 帳號', d: '授權後即可自動發文', ok: ig.threads.configured, to: 'settings/threads', help: 'threads' },
-    { id: 'linecontent', t: '編輯 LINE 服務說明', d: '顧客點「了解服務」時看到的內容', ok: !!s.line_ready, to: 'line/content', help: 'start' },
+    ...(me.leads_enabled ? [{ id: 'linecontent', t: '編輯 LINE 服務說明', d: '顧客點「了解服務」時看到的內容', ok: !!s.line_ready, to: 'line/content', help: 'start' }] : []),
   ];
   return { ig, st, steps, done: steps.filter((x) => x.ok).length };
 }
@@ -218,18 +219,18 @@ async function homePage() {
   if (pct >= 1) todo.push({ dot: 'warn', t: '今日 AI 生成額度已用完', s: '明天自動恢復；既有草稿不受影響', to: 'posts' });
   else if (pct >= 0.8) todo.push({ dot: 'warn', t: `今日 AI 額度即將用完（${d.gen_today}/${d.gen_limit}）`, s: '', to: 'posts' });
   bar({ title: BRAND, dot: d.healthy ? 'ok' : 'bad', sub: d.healthy ? '' : '需要處理' });
-  const m = (n, l, bad) => `<div><b class="${n === 0 ? 'z' : bad ? 'bad' : ''}">${n}</b><span>${l}</span></div>`;
+  const m = (n, l, bad) => `<div><b class="${n === 0 || n === null ? 'z' : bad ? 'bad' : ''}">${n ?? '—'}</b><span>${l}</span></div>`;
   setView(`
     ${setup.done < setup.steps.length ? (() => { const nx = setup.steps.find((x) => !x.ok); return `<div class="banner"><div class="main"><div class="t-label">開通進度 ${setup.done}/${setup.steps.length}</div><div class="t-sub">下一步：${esc(nx.t)}</div></div><button class="btn sm" data-go="setup">繼續設定</button></div>`; })() : ''}
     <section>${sec('今日')}
-      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.friends_today, '新好友') + m(d.handoffs_today, '轉真人')}</div>
+      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.clicks_today, 'LINE 點擊') + m(d.line_data ? d.friends_yesterday : null, '昨日新好友')}</div>
       <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停'}</p></section>
     ${fn ? funnelBlock(fn, '導流成效・近 30 天', true) : ''}
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
-    <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="line">LINE 接待</button>'}</section>
+    <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="report">成效報告</button>'}</section>
     <section>${sec('自動化')}<div class="list">
       ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程生成並發布' : '已暫停', end: sw('t1', d.auto_post_enabled, '自動發文') })}
-      ${row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') })}</div></section>
+      ${d.leads_enabled ? row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') }) : ''}</div></section>
     <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 5).map((a) => row({ go: false, title: esc(ACTION[a.action] || a.action), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
       <p class="t-sub" style="margin-top:12px">今日 AI 生成 ${d.gen_today}/${d.gen_limit}${audit.length > 5 ? ' · <a href="#/settings/audit">全部紀錄</a>' : ''}</p></section>`);
   S.todo = todo;
@@ -241,7 +242,7 @@ async function homePage() {
     try { await api('POST', '/pause', { [key]: on }); toast(on ? `已開啟${label}` : `已暫停${label}`, 'ok'); } catch (err) { toast(err.message, 'bad'); }
     render();
   };
-  $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2').onchange = flip('line_auto_reply_enabled', 'LINE 自動接待');
+  $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2')?.addEventListener('change', flip('line_auto_reply_enabled', 'LINE 自動接待'));
 }
 
 let ACCTS = [];
@@ -267,12 +268,13 @@ function funnelBlock(f, title, compact) {
   const steps = [
     ['曝光', noIns ? null : t.views, ''], ['互動', noIns ? null : eng, noIns ? '' : '互動率 ' + pct(eng, t.views)],
     ['點擊 LINE', f.tracking ? t.clicks : null, noIns || !f.tracking ? '' : '點擊率 ' + pct(t.clicks, t.views)],
-    ['新好友', t.friends, f.tracking ? '點擊→加好友 ' + pct(t.friends, t.clicks) : ''], ['轉真人', t.handoffs, '好友→轉真人 ' + pct(t.handoffs, t.friends)],
+    ['新好友', t.friends_source === 'none' ? null : t.friends, t.friends_source !== 'none' && f.tracking ? '點擊→加好友 ' + pct(t.friends, t.clicks) : ''],
+    ...(f.leads_enabled ? [['轉真人', t.handoffs, '好友→轉真人 ' + pct(t.handoffs, t.friends)]] : []),
   ];
   const note = noIns ? (f.insights === 'no_permission' ? '曝光與互動數據需要 Threads「成效數據」權限，請聯絡服務商開通後重新連結帳號。' : '曝光與互動數據會在貼文發布後數小時內開始出現。') : '';
   return `<section>${sec(title, compact ? '<button class="link" data-go="report">完整報告</button>' : '')}
-    <div class="metrics" style="flex-wrap:wrap;row-gap:12px">${steps.map(([l, v, sub]) => `<div style="min-width:96px"><b class="${v === 0 || v === null ? 'z' : ''}">${nf(v)}</b><span>${l}</span>${sub ? `<div class="t-sub" style="font-size:11.5px">${sub}</div>` : ''}</div>`).join('')}</div>
-    ${note ? `<p class="t-sub" style="margin-top:10px">${note}</p>` : ''}${!f.tracking ? '<p class="t-sub" style="margin-top:6px">LINE 連結點擊追蹤尚未啟用。</p>' : ''}</section>`;
+    <div class="metrics" style="flex-wrap:wrap;row-gap:12px">${steps.map(([l, v, sub]) => `<div style="min-width:72px"><b style="white-space:nowrap" class="${v === 0 || v === null ? 'z' : ''}">${nf(v)}</b><span>${l}</span>${sub ? `<div class="t-sub" style="font-size:11.5px">${sub}</div>` : ''}</div>`).join('')}</div>
+    ${note ? `<p class="t-sub" style="margin-top:10px">${note}</p>` : ''}${t.friends_source === 'none' ? '<p class="t-sub" style="margin-top:6px">新好友數需要「連接 LINE 數據」（設定 → LINE 官方帳號，選用）。</p>' : t.friends_source === 'daily' ? '<p class="t-sub" style="margin-top:6px">新好友數來自 LINE 每日統計，隔天更新。</p>' : ''}${!f.tracking ? '<p class="t-sub" style="margin-top:6px">LINE 連結點擊追蹤尚未啟用。</p>' : ''}</section>`;
 }
 let RMONTH = new Date().toISOString().slice(0, 7);
 async function reportPage() {
@@ -551,7 +553,7 @@ async function settingsPage(r) {
   const stat = (ok, warn) => `<span class="pill ${ok ? 'ok' : warn ? 'warn' : ''}">${ok ? '已連線' : warn || '未設定'}</span>`;
   setView(`<section>${sec('連線')}<div class="list">
       ${row({ act: 'threads', title: 'Threads 帳號', sub: ig.threads.accounts?.length ? ig.threads.accounts.map((a) => '@' + esc(a.username || '')).join('、') : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
-      ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
+      ${row({ act: 'line', title: 'LINE 官方帳號', sub: st.settings.line_id ? esc(st.settings.line_id) + (ig.line.configured ? ' · 已連接數據' : '') : '填入官方帳號 ID，貼文才有加好友連結', end: `<span class="pill ${st.settings.line_add_url ? 'ok' : 'warn'}">${st.settings.line_add_url ? '已設定' : '未設定'}</span>` })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
     <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'report', title: '成效報告', sub: '每月導流成效，可列印或另存 PDF 給團隊' })}${row({ act: 'audit', title: '操作紀錄', sub: '誰在什麼時候改了什麼' })}${row({ act: 'logs', title: '系統紀錄', sub: '串接、發文與錯誤原因，出問題時先看這裡' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
     <section><div class="list">${row({ act: 'password', title: '帳號與密碼', sub: '變更登入帳號或密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
@@ -618,21 +620,16 @@ function parseLineCreds(text) {
   return { id, secret };
 }
 async function lineConnPage() {
-  const ig = await api('GET', '/integrations'); const l = ig.line; bar({ title: 'LINE 官方帳號', back: 'settings' });
-  let bid = ''; try { bid = l.basic_id || localStorage.getItem('line_bid') || ''; } catch { bid = l.basic_id || ''; }
+  const [ig, st] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings')]); const l = ig.line, addon = !!me.leads_enabled;
+  bar({ title: 'LINE 官方帳號', back: 'settings' });
+  const lineId = st.settings.line_id || '';
+  let bid = ''; try { bid = l.basic_id || lineId || localStorage.getItem('line_bid') || ''; } catch { bid = l.basic_id || lineId; }
   const linkBtn = (href, label) => `<a class="btn sec sm" href="${esc(href)}" target="_blank" rel="noopener" style="text-decoration:none">${label} ↗</a>`;
-  setView(`<div data-form>
-    ${l.configured ? `<div class="list">${row({ go: false, dot: 'ok', title: esc(l.name || '已連線'), sub: `${l.basic_id ? esc(l.basic_id) + ' · ' : ''}${l.auto_token ? '發訊憑證由系統自動更新' : '使用自行發行的 access token'}` })}</div>
-      ${l.chat_mode === 'chat' ? `<div class="note warn" style="margin-top:12px"><b>「聊天」功能開啟中</b><br>顧客傳訊息時，可能同時收到自動回覆與你們的真人訊息。如果只要系統自動接待，請到「回應設定」把「聊天」關閉；需要真人接手時，系統會自動停止回覆 24 小時。
-        ${l.basic_id ? `<div style="margin-top:8px">${linkBtn(oaUrl(l.basic_id, '/setting/response'), '開啟回應設定')}</div>` : ''}</div>` : ''}
-      <div class="actions" style="margin-top:12px"><button class="btn sec" id="lt">測試連線</button>${l.basic_id ? linkBtn(oaUrl(l.basic_id, '/setting/response'), '回應設定') : ''}</div>
-      <p class="t-sub" style="margin-top:20px">要更換官方帳號或憑證，重新完成下面步驟即可。</p>` : ''}
-
-    <section style="margin-top:${l.configured ? 12 : 0}px">${sec('方法一：自己設定（約 3 分鐘，建議用電腦）')}
+  const setupSteps = `
       <div class="list" style="padding:4px 16px 16px">
-        <div class="f"><label for="lbid"><b>1.</b> 輸入官方帳號 ID</label><input id="lbid" value="${esc(bid)}" placeholder="例如：@033azwud" autocapitalize="none" autocorrect="off"><div class="hint">在 LINE 官方帳號 App 或後台首頁，帳號名稱下方「@」開頭的那串。</div></div>
+        <div class="f"><label for="lbid"><b>1.</b> 官方帳號 ID</label><input id="lbid" value="${esc(bid)}" placeholder="例如：@033azwud" autocapitalize="none" autocorrect="off"></div>
         <div class="f"><div class="lab"><b>2.</b> 啟用 Messaging API</div>
-          <div class="actions" id="lk1">${bid ? linkBtn(oaUrl(bid, '/setting/messaging-api'), '開啟 Messaging API 設定') : '<span class="t-sub">輸入帳號 ID 後會出現直達按鈕</span>'}</div>
+          <div class="actions" id="lk1">${bid ? linkBtn(oaUrl(normBasicId(bid).slice(1), '/setting/messaging-api'), '開啟 Messaging API 設定') : '<span class="t-sub">填入帳號 ID 後會出現直達按鈕</span>'}</div>
           <div class="hint">按「啟用 Messaging API」→ 選擇或建立服務提供者（填公司名稱即可）→ 同意。若跳到首頁：右上角「設定」→ 左側「Messaging API」。</div></div>
         <div class="f"><div class="lab"><b>3.</b> 複製憑證</div>
           <div class="actions">${linkBtn('https://developers.line.biz/console/', '開啟 LINE Developers')}</div>
@@ -644,22 +641,48 @@ async function lineConnPage() {
         <details style="margin-top:12px"><summary class="t-sub" style="cursor:pointer">進階：改用自行發行的 long-lived access token</summary>
           ${field('ltok', 'Channel access token（long-lived，選填）', input('ltok', '', 'autocomplete="off" autocapitalize="none"'), '一般不需要。填了這欄就不使用 Channel ID，也不會自動更新。')}</details>
         <button class="btn block" id="ls" style="margin-top:20px">驗證並儲存</button>
-        <div class="hint" style="margin-top:10px"><b>4.</b> 儲存後系統會自動設定 Webhook（<code>${esc(l.webhook_url)}</code>）並測試。最後請到「回應設定」關閉「自動回應訊息」與「加入好友的歡迎訊息」，避免重複回覆。</div>
-      </div></section>
+        <p class="t-sub" style="margin-top:12px">不想自己操作？到 LINE 官方帳號後台「設定 → 權限管理」新增成員（權限選「管理員」），把邀請連結傳給服務商，由我們代設定；完成後可隨時移除。<span id="lk2">${bid ? linkBtn(oaUrl(normBasicId(bid).slice(1), '/setting/user'), '開啟權限管理') : ''}</span></p>
+      </div>`;
 
-    <section>${sec('方法二：交給服務商代設定（你只要 1 分鐘）')}
-      <div class="list" style="padding:12px 16px 16px;line-height:1.8">
-        <ol style="margin:0;padding-left:20px"><li>打開 LINE 官方帳號後台 → 右上角「設定」→「權限管理」</li><li>按「新增成員」，權限選<b>「管理員」</b>，產生邀請連結</li><li>把邀請連結傳給你的服務商窗口</li></ol>
-        <p class="t-sub" style="margin-top:8px">服務商會幫你完成啟用、串接與回應設定。完成後你可以隨時在同一頁把對方移除，不影響已完成的串接。不需要提供任何密碼。</p>
-        <div class="actions" style="margin-top:10px" id="lk2">${bid ? linkBtn(oaUrl(bid, '/setting/user'), '開啟權限管理') : ''}</div>
-      </div></section>
+  setView(`<div data-form>
+    <section>${sec('LINE 加好友連結')}
+      <div class="list" style="padding:4px 16px 16px">
+        ${field('lineid', '官方帳號 ID', input('lineid', lineId, 'placeholder="例如：@033azwud" autocapitalize="none" autocorrect="off"'), '在 LINE 官方帳號 App 或後台首頁，帳號名稱下方「@」開頭的那串。')}
+        <div class="t-sub" id="lineurl" style="word-break:break-all;margin-top:8px">${st.settings.line_add_url ? `貼文會使用：<code>${esc(st.settings.line_add_url)}</code>（發布時自動換成追蹤短連結，統計點擊次數）` : ''}</div>
+        <div class="actions" style="margin-top:14px"><button class="btn" id="lidsave">儲存</button>${st.settings.line_add_url ? `<a class="btn sec" href="${esc(st.settings.line_add_url)}" target="_blank" rel="noopener" style="text-decoration:none">測試加好友 ↗</a>` : ''}</div>
+      </div>
+      <p class="t-sub" style="margin-top:8px">只要這一步就能導流與統計點擊。自動回應、歡迎訊息、圖文選單請直接在 LINE 官方帳號後台設定，系統不會干擾。</p></section>
+
+    <section style="margin-top:28px">${sec('連接 LINE 數據（選用）')}
+      ${l.configured ? `<div class="list">${row({ go: false, dot: 'ok', title: esc(l.name || '已連接'), sub: `${l.basic_id ? esc(l.basic_id) + ' · ' : ''}${addon ? '自動接待運作中' : '每天讀取新好友數，不回覆訊息'}` })}</div>
+        <div class="actions" style="margin-top:12px"><button class="btn sec" id="lt">測試連線</button></div>` : ''}
+      <p class="t-sub" style="margin:${l.configured ? 12 : 0}px 0 10px">連接後，報表會多出每日「新好友數」，就能看到「點擊 → 加好友」的轉換率。只讀取統計，不會接管訊息。約 3 分鐘，建議用電腦。</p>
+      ${l.configured ? `<details><summary class="t-sub" style="cursor:pointer">更換官方帳號或憑證</summary><div style="margin-top:10px">${setupSteps}</div></details>` : setupSteps}
+    </section>
+
+    ${addon ? `<section style="margin-top:28px">${sec('LINE 自動接待（加購）')}
+      <div class="list" style="padding:12px 16px 16px">
+        <p class="t-sub">由系統回覆選單、FAQ 與諮詢表單。Webhook：<code>${esc(l.webhook_url)}</code></p>
+        ${l.chat_mode === 'chat' ? `<div class="note warn" style="margin-top:10px"><b>「聊天」功能開啟中</b><br>顧客可能同時收到自動回覆與真人訊息。只要系統接待時，請到「回應設定」關閉「聊天」；真人接手時系統會自動停止回覆 24 小時。</div>` : ''}
+        <div class="actions" style="margin-top:12px"><button class="btn sec" id="lwh" ${l.configured ? '' : 'disabled'}>設定並測試 Webhook</button>${l.basic_id ? linkBtn(oaUrl(normBasicId(l.basic_id).slice(1), '/setting/response'), '回應設定') : ''}</div>
+        <p class="t-sub" style="margin-top:10px">${l.configured ? '開通後請到 LINE 回應設定，關閉「自動回應訊息」與「加入好友的歡迎訊息」，避免重複回覆。' : '請先完成上方「連接 LINE 數據」。'}</p>
+      </div></section>` : ''}
     <button class="link" id="lhelp">完整圖文說明</button></div>`, 'form');
   $('#lhelp').onclick = () => { S.helpOpen = 'line'; go('help'); };
 
+  // LINE ID → 加好友連結
+  const showUrl = () => { const id = normBasicId($('#lineid').value); $('#lineurl').innerHTML = id ? `貼文會使用：<code>https://line.me/R/ti/p/${esc(id)}</code>（發布時自動換成追蹤短連結，統計點擊次數）` : ''; };
+  $('#lineid').addEventListener('input', showUrl);
+  $('#lidsave').onclick = async (e) => {
+    const id = normBasicId($('#lineid').value); $('#lineid').value = id;
+    if (!check([[$('#lineid'), !/^@[a-z0-9._-]{3,40}$/.test(id), '請輸入官方帳號 ID，例如：@033azwud']])) return;
+    if (await act(e.currentTarget, () => api('PUT', '/settings', { line_id: id }), 'LINE 加好友連結已儲存')) { dirty = false; try { localStorage.setItem('line_bid', id); } catch { /* 無痕模式 */ } render(); }
+  };
+
+  // 連接 LINE 數據
   const refreshLinks = () => {
-    const id = normBasicId($('#lbid').value);
-    try { if (id) localStorage.setItem('line_bid', id); } catch { /* 無痕模式 */ }
-    $('#lk1').innerHTML = id ? linkBtn(oaUrl(id, '/setting/messaging-api'), '開啟 Messaging API 設定') : '<span class="t-sub">輸入帳號 ID 後會出現直達按鈕</span>';
+    const id = normBasicId($('#lbid').value).slice(1);
+    $('#lk1').innerHTML = id ? linkBtn(oaUrl(id, '/setting/messaging-api'), '開啟 Messaging API 設定') : '<span class="t-sub">填入帳號 ID 後會出現直達按鈕</span>';
     $('#lk2').innerHTML = id ? linkBtn(oaUrl(id, '/setting/user'), '開啟權限管理') : '';
   };
   $('#lbid').addEventListener('input', refreshLinks);
@@ -679,12 +702,16 @@ async function lineConnPage() {
     const r = await act(btn, () => api('POST', '/integrations/line', tok ? { channel_secret: $('#lsec').value, channel_access_token: tok } : { channel_id: $('#lid').value, channel_secret: $('#lsec').value }));
     if (r && r !== true) {
       dirty = false;
-      toast(r.webhook_verified ? `已連線（${r.bot}），Webhook 驗證通過` : `已儲存（${r.bot}）；Webhook 驗證未通過，請到 LINE Developers 的 Messaging API 分頁開啟 Use webhook`, r.webhook_verified ? 'ok' : '');
-      if (r.chat_mode === 'chat') toast('提醒：官方帳號的「聊天」功能開啟中，詳見本頁說明');
+      if (r.mode === 'data') toast(`已連接 LINE 數據（${r.bot}），新好友數會在明天開始出現`, 'ok');
+      else toast(r.webhook_verified ? `已連線（${r.bot}），自動接待 Webhook 驗證通過` : `已儲存（${r.bot}）；Webhook 驗證未通過，請到 LINE Developers 的 Messaging API 分頁開啟 Use webhook`, r.webhook_verified ? 'ok' : '');
       render();
     }
   };
-  $('#lt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'line' }); toast(r.message, r.ok ? (r.chat_mode === 'chat' ? '' : 'ok') : 'bad'); if (r.ok) render(); }));
+  $('#lt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'line' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+  $('#lwh')?.addEventListener('click', (e) => act(e.currentTarget, async () => {
+    const r = await api('POST', '/integrations/line/webhook');
+    toast(r.webhook_verified ? '自動接待 Webhook 已設定並驗證通過' : 'Webhook 已設定但測試未通過：請到 LINE Developers 的 Messaging API 分頁開啟 Use webhook', r.webhook_verified ? 'ok' : 'bad');
+  }));
 }
 async function geminiPage() {
   const ig = await api('GET', '/integrations'), d = await api('GET', '/dashboard'); bar({ title: 'AI（Gemini）', back: 'settings' });
@@ -764,9 +791,9 @@ async function accountPage() {
    說明中心
    ====================================================================== */
 const HELP = [
-  ['start', '第一次使用，照這 5 步', `<ol><li><b>設定 → LINE 官方帳號：</b>貼上 Channel ID 與 Channel secret。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」。</li></ol><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
+  ['start', '第一次使用，照這 4 步', `<ol><li><b>設定 → LINE 官方帳號：</b>填入官方帳號 ID（@ 開頭），貼文的加好友連結會用它。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>首頁：</b>打開「自動發文」。</li></ol><p>想在報表看到「新好友數」，可再到「設定 → LINE 官方帳號」連接 LINE 數據（選用，只讀取統計，不會接管你的自動回應）。</p><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
   ['line-delegate', '請服務商代設定 LINE（最省事）', `<ol><li>打開 <b>LINE 官方帳號後台</b>（manager.line.biz）→ 右上角「設定」→「權限管理」。</li><li>按「新增成員」，權限選 <b>管理員</b>，產生邀請連結。</li><li>把邀請連結傳給服務商窗口。</li></ol><p>服務商會完成啟用 Messaging API、串接與回應設定，你不需要提供任何密碼。完成後可在同一頁移除對方，已完成的串接不受影響。</p>`],
-  ['line', '如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 整頁全選複製，貼到「設定 → LINE 官方帳號」的貼上框，系統會自動找出 <b>Channel ID</b> 與 <b>Channel secret</b>（也可以分別手動填）。</li><li>貼到「設定 → LINE 官方帳號」，按「驗證並儲存」。系統會自動取得發訊憑證（到期前自動更新）並設定 Webhook。</li><li>回到 LINE Developers，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，<b>關閉「自動回應訊息」與「加入好友的歡迎訊息」</b>，否則會重複回覆。</li></ol><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
+  ['line', '連接 LINE 數據（選用）', `<p>只填官方帳號 ID 就能導流與統計點擊。連接 LINE 數據後，報表會多出每日「新好友數」。系統只讀取統計，<b>不會回覆訊息</b>，你在 LINE 後台設定的自動回應、歡迎訊息、圖文選單都照常運作。</p><ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 整頁全選複製，貼到「設定 → LINE 官方帳號」的貼上框，系統會自動找出 <b>Channel ID</b> 與 <b>Channel secret</b>（也可以分別手動填）。</li><li>按「驗證並儲存」。系統會自動取得憑證並在到期前更新。</li></ol><p>有開通「LINE 自動接待」加購的話，系統才會接手回覆；這時請到 Official Account Manager → 回應設定，關閉「自動回應訊息」與「加入好友的歡迎訊息」，避免重複回覆。</p><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
   ['gemini', '如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b> 並複製。</li><li>貼到「設定 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p>AI 只用來寫 Threads 貼文，不讀取顧客資料。每日生成次數有上限，用完自動停止，不會多收費。</p>`],
   ['threads', '如何連結 Threads（可多個帳號）', `<ol><li>先在 Threads App 登入要發文的帳號。</li><li>到「設定 → Threads 帳號」按<b>連結</b>（已有帳號時按右上角「新增帳號」），並按同意。</li><li>完成後自動回到後台，帳號會出現在清單裡。要再加一個帳號，就在 Threads App 切換帳號後重複一次。</li><li>點進每個帳號可以設定<b>人設</b>、語氣、主題與發文時段；沒填的沿用預設。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，在 Threads App 登入該帳號後按「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡服務商。</div>`],
   ['thread', '串文、改寫分發與【待補數據】', `<ul><li><b>串文：</b>AI 依「爭議化、數據化、具體化」一次寫一整串，第一則是鉤子、最後一則是 CTA（自動附上 LINE 連結）。審核時可以逐則修改、新增或移除。</li><li><b>則數：</b>在「貼文 → 發文設定 → 內容策略」調整，設 1 則就是單篇貼文。</li><li><b>【待補數據】：</b>AI 只能引用你在「可引用數據」填的數字；需要數據但沒有時會留下【待補數據】，補上真實數字前無法核准，避免散布不實數據。</li><li><b>改寫分發：</b>打開一串貼文按「改寫分發」，AI 會用其他帳號的人設重寫，並錯開 45 分鐘發布。</li><li><b>發到一半中斷：</b>系統會記住發到第幾則，按「接續發布」只會補發剩下的，不會重複。</li></ul>`],

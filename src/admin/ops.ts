@@ -98,7 +98,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
   if (path === '/tenants' && req.method === 'GET') {
     const ms = monthStart(url.searchParams.get('month')), me = nextMonth(ms);
     const rows = (await env.DB.prepare(
-      `SELECT b.id,b.slug,b.name,b.industry,b.status,b.plan,b.created_at,b.last_cron_at,s.auto_post_enabled,s.line_auto_reply_enabled,s.daily_gen_limit,s.leads_enabled,
+      `SELECT b.id,b.slug,b.name,b.industry,b.status,b.plan,b.created_at,b.last_cron_at,s.auto_post_enabled,s.line_auto_reply_enabled,s.daily_gen_limit,s.leads_enabled,s.line_add_url,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
@@ -125,7 +125,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         if (r.status === 'active') {
           if (r.threads_invalid) issues.push('Threads 授權失效');
           if (!r.threads_accounts) issues.push('未連結 Threads');
-          if (r.line_creds < 2) issues.push('未連接 LINE');
+          if (!r.line_add_url) issues.push('未設定 LINE 加好友連結');
           if (r.post_errors) issues.push(`${r.post_errors} 則貼文異常`);
           if (r.auto_post_enabled && cronAge(r.last_cron_at) > 30 * 60000) issues.push('排程超過 30 分鐘未執行');
         }

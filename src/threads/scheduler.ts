@@ -8,6 +8,7 @@ import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, post
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
 import { renewLineTokenIfNeeded } from '../line/token';
+import { syncLineFollowers } from '../line/insights';
 import { logEvent } from '../log';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
@@ -54,6 +55,7 @@ async function housekeeping(env: Env, now: Date) {
   await env.DB.prepare('DELETE FROM processed_events WHERE brand_id=? AND processed_at<?').bind(brand.id, new Date(now.getTime() - 7 * 86400000).toISOString()).run();
   await env.DB.prepare(`UPDATE posts SET status='gen_failed', updated_at=? WHERE brand_id=? AND status='generating' AND updated_at<?`).bind(iso(now), brand.id, new Date(now.getTime() - STALE_MS).toISOString()).run();
   await env.DB.prepare('UPDATE brands SET last_housekeeping_at=? WHERE id=?').bind(iso(now), brand.id).run();
+  await syncLineFollowers(env, now).catch(async (e) => { if (e instanceof BudgetError) throw e; await logEvent(env, brand.id, 'error', 'line_insights', `取得 LINE 好友數失敗：${(e as Error).message}`); });
   // LINE token（系統自動申請者）到期前更新；失敗不影響其他清理，下一小時再試
   await renewLineTokenIfNeeded(env, now).catch(async (e) => {
     if (e instanceof BudgetError) throw e;

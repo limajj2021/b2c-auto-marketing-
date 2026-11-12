@@ -107,7 +107,7 @@ describe('operator console', () => {
     const list = await (await call(env, 'GET', '/api/op/tenants', undefined, op)).json() as any;
     expect(list.tenants.map((t: any) => t.slug)).toEqual(['acme', 'beta', 'gamma']);
     expect(list.tenants[0].leads).toBe(1);
-    expect(list.tenants[2].issues).toContain('未連接 LINE');
+    expect(list.tenants[2].issues).toContain('未設定 LINE 加好友連結');
     expect(JSON.stringify(list)).not.toContain('王小明');
   });
 

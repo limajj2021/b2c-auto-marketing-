@@ -3,7 +3,8 @@ import { getBrand } from './db';
 import type { Env } from './types';
 import { localDate } from './util/time';
 
-export type MetricName = 'friend_add' | 'handoff' | 'link_click';
+// line_followers：LINE 統計的累計加好友次數（每日快照，用來算 friend_add）
+export type MetricName = 'friend_add' | 'handoff' | 'link_click' | 'line_followers';
 
 export async function bump(env: Env, name: MetricName, now = new Date()): Promise<void> {
   const b = await getBrand(env);

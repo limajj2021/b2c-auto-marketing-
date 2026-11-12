@@ -1,7 +1,8 @@
 // 連線設定（LINE / Gemini / Threads）與帳號管理。由 routes.ts 註冊。
 import { LineCredError, issueLineToken } from '../line/token';
 import { SOURCES, logEvent } from '../log';
-import { audit, getBrand, isMulti } from '../db';
+import { lineAddUrl } from '../line/links';
+import { audit, getBrand, getSettings, isMulti } from '../db';
 import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
 import { credFor, getAccount, listAccounts, publicAccount, removeAccounts, resolveCred } from '../threads/accounts';
@@ -25,12 +26,30 @@ async function lineInfo(token: string): Promise<{ ok: boolean; name?: string; ba
   return { ok: true, name: b.displayName, basicId: b.basicId, chatMode: b.chatMode };
 }
 
+/** 把 LINE Webhook 指向本系統並用 LINE 官方測試驗證 */
+async function setWebhook(env: Env, token: string, origin: string): Promise<{ set: boolean; verified: boolean; endpoint: string }> {
+  const ws = await getBrand(env);
+  const endpoint = isMulti(env) ? `${origin}/line/webhook/${ws.slug}` : `${origin}/line/webhook`;
+  const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const set = await fetch('https://api.line.me/v2/bot/channel/webhook/endpoint', { method: 'PUT', headers: auth, body: JSON.stringify({ endpoint }) });
+  let verified = false;
+  if (set.ok) {
+    const t = await fetch('https://api.line.me/v2/bot/channel/webhook/test', { method: 'POST', headers: auth, body: JSON.stringify({ endpoint }) });
+    verified = t.ok && ((await t.json().catch(() => ({}))) as any).success === true;
+  }
+  return { set: set.ok, verified, endpoint };
+}
+/** 還沒設定加好友連結時，用官方帳號 ID 自動帶入 */
+async function fillLineUrl(env: Env, brandId: string, basicId: string): Promise<void> {
+  await env.DB.prepare(`UPDATE brand_settings SET line_add_url=? WHERE brand_id=? AND COALESCE(line_add_url,'')=''`).bind(lineAddUrl(basicId), brandId).run();
+}
+
 export function registerExtra(add: Add, json: J, err: E) {
-  add('GET', '/integrations', 'admin', async ({ env, url }) => {
+  add('GET', '/integrations', 'admin', async ({ env, url, brandId }) => {
     const st = await credStatus(env);
     const accts = await listAccounts(env);
     return json({
-      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null, auto_token: !!st.line_channel_access_token.meta.auto, basic_id: st.line_channel_access_token.meta.basic_id ?? null, chat_mode: st.line_channel_access_token.meta.chat_mode ?? null },
+      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null, auto_token: !!st.line_channel_access_token.meta.auto, basic_id: st.line_channel_access_token.meta.basic_id ?? null, chat_mode: st.line_channel_access_token.meta.chat_mode ?? null, auto_reply: !!(await getSettings(env, brandId)).leads_enabled },
       gemini: { configured: st.gemini_api_key.set },
       threads: {
         configured: accts.length > 0,
@@ -70,20 +89,27 @@ export function registerExtra(add: Add, json: J, err: E) {
     await setCred(env, brandId, 'line_channel_access_token', token, { ...meta, name: info.name, basic_id: info.basicId, chat_mode: info.chatMode ?? null });
     if (meta.auto) await setCred(env, brandId, 'line_channel_id', channelId);
     else await deleteCreds(env, ['line_channel_id']); // 改用自行發行的 token：不再自動更新
-    const ws = await getBrand(env);
-    const endpoint = isMulti(env) ? `${url.origin}/line/webhook/${ws.slug}` : `${url.origin}/line/webhook`;
-    const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-    const set = await fetch('https://api.line.me/v2/bot/channel/webhook/endpoint', { method: 'PUT', headers: auth, body: JSON.stringify({ endpoint }) });
-    let verified = false;
-    if (set.ok) {
-      const t = await fetch('https://api.line.me/v2/bot/channel/webhook/test', { method: 'POST', headers: auth, body: JSON.stringify({ endpoint }) });
-      verified = t.ok && ((await t.json().catch(() => ({}))) as any).success === true;
-    }
+    // 只開通「導流」的客戶：只讀取好友數，不接管訊息（官方帳號自己的自動回應照常運作）
+    const addon = !!(await getSettings(env, brandId)).leads_enabled;
+    if (!addon && !info.basicId) { /* 沒有 basic ID 也能用，只是無法自動帶入加好友連結 */ }
+    if (info.basicId) await fillLineUrl(env, brandId, info.basicId);
+    const wh = addon ? await setWebhook(env, token, url.origin) : null;
     await audit(env, brandId, actor.name, 'integration_line');
-    await logEvent(env, brandId, verified ? 'info' : 'warn', 'line_connect',
-      verified ? `已連接 LINE「${info.name}」，Webhook 驗證通過` : set.ok ? `已連接 LINE「${info.name}」，但 Webhook 測試未通過：請到 LINE Developers 開啟 Use webhook` : `已連接 LINE「${info.name}」，但設定 Webhook 網址失敗（HTTP ${set.status}）`,
-      { endpoint, auto_token: !!meta.auto });
-    return json({ ok: true, bot: info.name, basic_id: info.basicId ?? null, chat_mode: info.chatMode ?? null, webhook_set: set.ok, webhook_verified: verified });
+    await logEvent(env, brandId, !wh || wh.verified ? 'info' : 'warn', 'line_connect',
+      !wh ? `已連接 LINE「${info.name}」數據（只讀取好友數，不回覆訊息）`
+        : wh.verified ? `已連接 LINE「${info.name}」，自動接待 Webhook 驗證通過` : wh.set ? `已連接 LINE「${info.name}」，但 Webhook 測試未通過：請到 LINE Developers 開啟 Use webhook` : `已連接 LINE「${info.name}」，但設定 Webhook 網址失敗`,
+      { auto_token: !!meta.auto, auto_reply: addon });
+    return json({ ok: true, bot: info.name, basic_id: info.basicId ?? null, chat_mode: info.chatMode ?? null, mode: addon ? 'auto_reply' : 'data', webhook_set: wh?.set ?? false, webhook_verified: wh?.verified ?? false });
+  });
+
+  // 開通「LINE 自動接待」加購後：把 Webhook 指向本系統（需已連接 LINE）
+  add('POST', '/integrations/line/webhook', 'admin', async ({ env, actor, url, brandId }) => {
+    if (!(await getSettings(env, brandId)).leads_enabled) return err(403, 'LINE 自動接待為加購項目，請聯絡服務商開通');
+    if (!env.LINE_CHANNEL_ACCESS_TOKEN) return err(409, '請先在「設定 → LINE 官方帳號」連接 LINE');
+    const wh = await setWebhook(env, env.LINE_CHANNEL_ACCESS_TOKEN, url.origin);
+    await audit(env, brandId, actor.name, 'integration_line_webhook');
+    await logEvent(env, brandId, wh.verified ? 'info' : 'warn', 'line_connect', wh.verified ? '自動接待 Webhook 已設定並驗證通過' : '自動接待 Webhook 設定未完成：請到 LINE Developers 開啟 Use webhook');
+    return json({ ok: true, webhook_set: wh.set, webhook_verified: wh.verified });
   });
 
   add('POST', '/integrations/gemini', 'admin', async ({ env, req, actor, brandId }) => {
