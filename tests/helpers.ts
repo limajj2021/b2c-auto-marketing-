@@ -18,12 +18,12 @@ export function fakeD1(db: DatabaseSync): D1Database {
   return { prepare: (sql: string) => stmt(sql) } as unknown as D1Database;
 }
 
-export async function makeEnv(opts: { industry?: string } = {}): Promise<Env> {
+export async function makeEnv(opts: { industry?: string; leads?: boolean } = {}): Promise<Env> {
   const db = new DatabaseSync(':memory:');
   for (const f of readdirSync(join(process.cwd(), 'migrations')).sort()) db.exec(readFileSync(join(process.cwd(), 'migrations', f), 'utf8'));
   db.prepare("INSERT INTO brands(id,name,industry,description,timezone,created_at) VALUES('b1','測試品牌',?,'介紹','Asia/Taipei','2026-01-01')")
     .run(opts.industry ?? 'general');
-  db.prepare("INSERT INTO brand_settings(brand_id,updated_at,line_add_url,cta_text) VALUES('b1','2026-01-01','https://line.me/R/ti/p/@test','加 LINE 諮詢')").run();
+  db.prepare("INSERT INTO brand_settings(brand_id,updated_at,line_add_url,cta_text,leads_enabled) VALUES('b1','2026-01-01','https://line.me/R/ti/p/@test','加 LINE 諮詢',?)").run(opts.leads === false ? 0 : 1);
   db.prepare("INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES('b1','admin','boss',?)").run(await hashPassword('correct-horse-1'));
   db.prepare("INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES('b1','staff','cs',?)").run(await hashPassword('staff-password-1'));
   return {

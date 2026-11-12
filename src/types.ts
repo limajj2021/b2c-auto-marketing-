@@ -58,6 +58,7 @@ export interface Settings {
   thread_min: number;
   thread_max: number;
   fact_bank: string;
+  leads_enabled: number;
 }
 
 export interface Post {

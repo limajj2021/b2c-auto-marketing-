@@ -71,11 +71,13 @@ async function main() {
   $('#app').innerHTML = `<div class="top"><div class="grow"><h1>營運總後台</h1><div class="sub">${esc(me.username)} · ${t.length} 個工作區</div></div>
     <label class="sub">月份 <input type="month" id="mo" value="${month}"></label><button class="btn sec" id="csv">下載計費用量 CSV</button><button class="btn sec" id="out">登出</button></div>
     <div class="kpis"><div><b>${t.filter((x) => x.health === 'attention').length}</b><span>需處理</span></div><div><b>${t.filter((x) => x.status === 'active').length}</b><span>使用中</span></div>
-    <div><b>${sum('leads')}</b><span>${month} 留資</span></div><div><b>${sum('published')}</b><span>${month} 發文</span></div><div><b>${sum('generations')}</b><span>${month} AI 生成</span></div></div>
-    <div class="tbl"><table><thead><tr><th>工作區</th><th>狀態</th><th>待處理</th><th class="n">留資</th><th class="n">未處理</th><th class="n">發文</th><th class="n">AI</th><th>Threads</th><th>LINE</th><th>排程</th><th></th></tr></thead><tbody>
+    <div><b>${sum('friends')}</b><span>${month} 新好友</span></div><div><b>${sum('handoffs')}</b><span>${month} 轉真人</span></div><div><b>${sum('leads')}</b><span>${month} 留資</span></div><div><b>${sum('published')}</b><span>${month} 發文</span></div><div><b>${sum('generations')}</b><span>${month} AI 生成</span></div></div>
+    <div class="tbl"><table><thead><tr><th>工作區</th><th>狀態</th><th>待處理</th><th>留資加購</th><th class="n">新好友</th><th class="n">轉真人</th><th class="n">留資</th><th class="n">未處理</th><th class="n">發文</th><th class="n">AI</th><th>Threads</th><th>LINE</th><th>排程</th><th></th></tr></thead><tbody>
     ${t.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="sub">${esc(x.slug)} · ${esc(x.plan)}</div></td>
       <td><span class="pill ${x.health}">${HEALTH[x.health]}</span></td><td class="issues">${x.issues.map(esc).join('<br>') || '<span class="z">—</span>'}</td>
-      <td class="n">${x.leads}</td><td class="n ${x.leads_pending ? '' : 'z'}">${x.leads_pending}</td><td class="n">${x.published}</td><td class="n">${x.generations}<div class="sub">${x.gemini_own_key ? '自有金鑰' : '平台金鑰'}</div></td>
+      <td><label style="display:flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" data-leads="${esc(x.slug)}" ${x.leads_enabled ? 'checked' : ''} style="min-height:0;width:18px;height:18px"> ${x.leads_enabled ? '已開通' : '未開通'}</label></td>
+      <td class="n">${x.friends}</td><td class="n">${x.handoffs}</td>
+      <td class="n ${x.leads_enabled ? '' : 'z'}">${x.leads_enabled ? x.leads : '—'}</td><td class="n ${x.leads_pending && x.leads_enabled ? '' : 'z'}">${x.leads_enabled ? x.leads_pending : '—'}</td><td class="n">${x.published}</td><td class="n">${x.generations}<div class="sub">${x.gemini_own_key ? '自有金鑰' : '平台金鑰'}</div></td>
       <td>${x.threads_accounts} 個${x.threads_invalid ? `<div class="issues">${x.threads_invalid} 個失效</div>` : ''}${x.threads_expires ? `<div class="sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}</td>
       <td>${x.line_configured ? '已連接' : '<span class="z">未連接</span>'}</td><td><span class="sub">${ago(x.last_cron_at)}</span><div class="sub">${x.auto_post_enabled ? '自動發文開' : '自動發文關'}</div></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-reset="${esc(x.slug)}">重設管理員密碼</button> ${x.status === 'active' ? `<button class="btn sm dng" data-sus="${esc(x.slug)}">暫停</button>` : `<button class="btn sm sec" data-res="${esc(x.slug)}">恢復</button>`}</td></tr>`).join('')}
@@ -90,13 +92,18 @@ async function main() {
   $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); login(); };
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
-    const rows = [['工作區代號', '品牌名稱', '方案', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads, r.published, r.threads_accounts, r.generations])];
+    const rows = [['工作區代號', '品牌名稱', '方案', '留資加購', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
   document.querySelectorAll('[data-sus],[data-res]').forEach((b) => b.onclick = () => act(b, async () => {
     const slug = b.dataset.sus || b.dataset.res; await api('PATCH', '/tenants/' + slug, { status: b.dataset.sus ? 'suspended' : 'active' });
     toast(b.dataset.sus ? `${slug} 已暫停：登入、LINE 接待與排程都會停止` : `${slug} 已恢復`); main();
+  }));
+  document.querySelectorAll('[data-leads]').forEach((c) => c.onchange = () => act(null, async () => {
+    const on = c.checked;
+    try { await api('PATCH', '/tenants/' + c.dataset.leads, { leads_enabled: on }); toast(on ? `${c.dataset.leads} 已開通留資` : `${c.dataset.leads} 已關閉留資：LINE 不再顯示諮詢表單`); main(); }
+    catch (e) { c.checked = !on; throw e; }
   }));
   document.querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => act(b, async () => {
     const r = await api('POST', `/tenants/${b.dataset.reset}/reset-admin`);

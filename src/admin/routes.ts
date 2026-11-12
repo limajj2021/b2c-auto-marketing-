@@ -10,6 +10,7 @@ import type { Env } from '../types';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
 import { registerExtra } from './extra';
+import { metricSum } from '../metrics';
 
 export interface Actor { id: number; name: string; role: 'admin' | 'staff'; brandId: string }
 const SESSION_SEC = 8 * 3600;
@@ -78,6 +79,11 @@ export async function handleApi(rawEnv: Env, req: Request): Promise<Response> {
     return json({ ok: true }, 200, { 'set-cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict' });
   }
 
+  // 留資為加購項目：未開通時，伺服器端直接拒絕所有留資相關操作（不只是隱藏按鈕）
+  if (url.pathname.startsWith('/api/inquiries') && !(await getSettings(env, brand.id)).leads_enabled) {
+    return err(403, '留資功能尚未開通（加購項目），請聯絡服務商');
+  }
+
   for (const r of routes) {
     const m = url.pathname.match(r.re);
     if (m && r.method === req.method) {
@@ -104,7 +110,7 @@ async function login(env: Env, b: any, brandId: string): Promise<Response> {
 }
 
 // ---------- 通用 ----------
-add('GET', '/me', 'staff', async ({ actor }) => json(actor));
+add('GET', '/me', 'staff', async ({ env, actor, brandId }) => json({ ...actor, leads_enabled: !!(await getSettings(env, brandId)).leads_enabled }));
 
 add('POST', '/password', 'staff', async ({ env, req, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
@@ -137,6 +143,9 @@ add('GET', '/dashboard', 'admin', async ({ env, brandId }) => {
     pending_drafts: await n(`SELECT COUNT(*) c FROM posts WHERE brand_id=? AND status='draft'`, brandId),
     inquiries_today: await n(`SELECT COUNT(*) c FROM inquiries WHERE brand_id=? AND created_at>=?`, brandId, dayStart),
     inquiries_pending: await n(`SELECT COUNT(*) c FROM inquiries WHERE brand_id=? AND handling_status='pending'`, brandId),
+    leads_enabled: !!s.leads_enabled,
+    friends_today: await metricSum(env, brandId, 'friend_add', localDate(new Date(), brand.timezone)),
+    handoffs_today: await metricSum(env, brandId, 'handoff', localDate(new Date(), brand.timezone)),
     auto_post_enabled: !!s.auto_post_enabled,
     line_auto_reply_enabled: !!s.line_auto_reply_enabled,
     gen_today: await n('SELECT COUNT(*) c FROM ai_generations WHERE brand_id=? AND created_at>=?', brandId, dayStart),

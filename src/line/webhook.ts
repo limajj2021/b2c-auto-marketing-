@@ -4,7 +4,8 @@ import { verifyLineSignature } from '../util/crypto';
 import { iso } from '../util/time';
 import { getDisplayName, reply } from './api';
 import { parseLineConfig } from './config';
-import { handleText, welcomeReply } from './flow';
+import { handleText, menuFor, welcomeReply } from './flow';
+import { bump } from '../metrics';
 
 export async function handleLineWebhook(env: Env, req: Request): Promise<Response> {
   const raw = await req.text();
@@ -27,11 +28,14 @@ export async function handleLineWebhook(env: Env, req: Request): Promise<Respons
       .bind(brand.id, eventId, ev.type, iso()).run();
     if (claim.meta.changes !== 1) continue;
     try {
-      const contactId = await upsertContact(env, brand.id, ev.source.userId, ev.type === 'follow');
+      // 留資未開通時不另外抓取顧客顯示名稱，只保留轉真人所需的最少資訊
+      const contactId = await upsertContact(env, brand.id, ev.source.userId, ev.type === 'follow' && !!s.leads_enabled);
+      const cfg = menuFor(parseLineConfig(s.line_config), !!s.leads_enabled);
+      if (ev.type === 'follow') await bump(env, 'friend_add').catch(() => {});
       let replies = null;
-      if (ev.type === 'follow') replies = welcomeReply(parseLineConfig(s.line_config));
+      if (ev.type === 'follow') replies = welcomeReply(cfg);
       else if (ev.type === 'message' && ev.message?.type === 'text') replies = await handleText(env, brand.id, contactId, ev.message.text);
-      else if (ev.type === 'message') replies = welcomeReply(parseLineConfig(s.line_config));
+      else if (ev.type === 'message') replies = welcomeReply(cfg);
       if (replies && ev.replyToken) await reply(env, ev.replyToken, replies);
     } catch (e) {
       failed = true;

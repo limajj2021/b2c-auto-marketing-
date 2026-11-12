@@ -17,7 +17,7 @@ async function twoTenants() {
   env.MULTI_TENANT = '1';
   await env.DB.prepare("UPDATE brands SET slug='acme', created_at='2026-01-01' WHERE id='b1'").run();
   await env.DB.prepare("INSERT INTO brands(id,slug,name,industry,description,timezone,created_at) VALUES('b2','beta','Beta 公司','general','','Asia/Taipei','2026-02-01')").run();
-  await env.DB.prepare("INSERT INTO brand_settings(brand_id,updated_at) VALUES('b2','x')").run();
+  await env.DB.prepare("INSERT INTO brand_settings(brand_id,updated_at,leads_enabled) VALUES('b2','x',1)").run();
   await env.DB.prepare("INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES('b2','admin','boss',?)").bind(await hashPassword('beta-password-1')).run();
   return env;
 }

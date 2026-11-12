@@ -264,7 +264,8 @@ window.addEventListener('hashchange', async () => {
   dirty = false; curHash = location.hash; render();
 });
 const TABS = [['home', '首頁', 'home', 'admin'], ['posts', '貼文', 'post', 'admin'], ['line', 'LINE', 'line', 'admin'], ['leads', '留資', 'lead', 'staff'], ['settings', '設定', 'gear', 'admin'], ['account', '帳號', 'user', 'staff-only']];
-const tabsFor = () => TABS.filter((t) => me.role === 'admin' ? t[3] !== 'staff-only' : (t[3] === 'staff' || t[3] === 'staff-only'));
+// 留資為加購項目：未開通時不顯示「留資」分頁
+const tabsFor = () => TABS.filter((t) => (t[0] !== 'leads' || me.leads_enabled) && (me.role === 'admin' ? t[3] !== 'staff-only' : (t[3] === 'staff' || t[3] === 'staff-only')));
 
 function bar({ title, back, right = '', sub = '', dot = '' }) {
   $('#bar').innerHTML = `<div class="in">${back ? `<button class="icon" data-act="back" data-to="${esc(back)}" aria-label="返回">${svg('back')}</button>` : ''}<div class="ttl" style="${back ? '' : 'padding:6px 0'}">${dot ? `<span class="dot ${dot}"></span>` : ''}<div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div></div>${right}<button class="icon" data-act="help" aria-label="說明">${svg('help')}</button></div>`;
@@ -362,7 +363,7 @@ async function homePage() {
   if (failed) todo.push({ dot: 'bad', t: `${failed} 則貼文處理失敗`, s: '查看原因並重試', to: 'posts', seg: 'hist' });
   if (unknown) todo.push({ dot: 'warn', t: `${unknown} 則貼文狀態待核對`, s: '系統正在向 Threads 確認，通常幾分鐘內自動完成', to: 'posts', seg: 'queue' });
   if (d.pending_drafts) todo.push({ dot: 'gold', t: `${d.pending_drafts} 則草稿待審核`, s: '核准後才會依排程發布', to: 'posts', seg: 'draft' });
-  if (d.inquiries_pending) todo.push({ dot: 'gold', t: `${d.inquiries_pending} 筆留資尚未處理`, s: '聯絡顧客後標記為已處理', to: 'leads', lead: 'pending' });
+  if (d.leads_enabled && d.inquiries_pending) todo.push({ dot: 'gold', t: `${d.inquiries_pending} 筆留資尚未處理`, s: '聯絡顧客後標記為已處理', to: 'leads', lead: 'pending' });
   const pct = d.gen_limit ? d.gen_today / d.gen_limit : 0;
   if (pct >= 1) todo.push({ dot: 'warn', t: '今日 AI 生成額度已用完', s: '明天自動恢復；既有草稿不受影響', to: 'posts' });
   else if (pct >= 0.8) todo.push({ dot: 'warn', t: `今日 AI 額度即將用完（${d.gen_today}/${d.gen_limit}）`, s: '', to: 'posts' });
@@ -371,10 +372,10 @@ async function homePage() {
   setView(`
     ${setup.done < setup.steps.length ? (() => { const nx = setup.steps.find((x) => !x.ok); return `<div class="banner"><div class="main"><div class="t-label">開通進度 ${setup.done}/${setup.steps.length}</div><div class="t-sub">下一步：${esc(nx.t)}</div></div><button class="btn sm" data-go="setup">繼續設定</button></div>`; })() : ''}
     <section>${sec('今日')}
-      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${m(d.inquiries_today, '新留資')}${m(d.inquiries_pending, '未處理')}</div>
+      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.friends_today, '新好友') + m(d.handoffs_today, '轉真人')}</div>
       <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停'}</p></section>
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
-    <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button><button class="btn sec" data-go="leads">查看留資</button></section>
+    <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="line">LINE 接待</button>'}</section>
     <section>${sec('自動化')}<div class="list">
       ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程生成並發布' : '已暫停', end: sw('t1', d.auto_post_enabled, '自動發文') })}
       ${row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') })}</div></section>
@@ -535,10 +536,10 @@ async function linePage(r) {
   if (r.sub === 'form') return lineFormPage();
   const [c, faq] = await Promise.all([api('GET', '/line-config'), api('GET', '/faq')]);
   bar({ title: 'LINE 接待' });
-  setView(`<section><div class="list">${row({ act: 'lc', title: '接待內容', sub: '歡迎訊息、服務說明、營業時間、轉專人提示' })}${row({ act: 'lf', title: '留資表單', sub: `${c.services.length} 種服務類型 · ${c.fields.length} 個欄位` })}</div></section>
+  setView(`<section><div class="list">${row({ act: 'lc', title: '接待內容', sub: '歡迎訊息、服務說明、營業時間、轉專人提示' })}${me.leads_enabled ? row({ act: 'lf', title: '留資表單', sub: `${c.services.length} 種服務類型 · ${c.fields.length} 個欄位` }) : row({ go: false, title: '留資表單', sub: '加購項目，尚未開通。開通後顧客可在 LINE 填寫諮詢單，資料存在系統中供你追蹤。', end: '<span class="pill">未開通</span>' })}</div></section>
     <section>${sec('FAQ 固定問答', '<button class="link" data-act="faqnew">新增</button>')}
       ${faq.length ? `<div class="list">${faq.map((f) => row({ act: 'faq', id: f.id, dot: f.enabled ? 'ok' : '', title: esc(f.keyword), sub: `<span class="clip" style="display:block">${esc(f.response)}</span>` })).join('')}</div><p class="t-sub" style="margin-top:8px">顧客訊息包含關鍵字時自動回覆；數字越大越優先比對。</p>` : empty('line', '還沒有 FAQ', '常被問到的問題（例如營業時間）可以設成固定答案，顧客不用等人回覆。', '<button class="btn" data-act="faqnew2">新增第一則 FAQ</button>')}</section>`);
-  $('[data-act=lc]').onclick = () => go('line/content'); $('[data-act=lf]').onclick = () => go('line/form');
+  $('[data-act=lc]').onclick = () => go('line/content'); $('[data-act=lf]')?.addEventListener('click', () => go('line/form'));
   const openFaq = (f) => sheet(f ? '編輯 FAQ' : '新增 FAQ', `${field('fk', '關鍵字', input('fk', f?.keyword || '', 'placeholder="營業時間,幾點"'), '用逗號分隔多個關鍵字，包含任一個就會觸發。')}${field('fr', '固定答案', area('fr', f?.response || ''))}${field('fp', '優先順序', input('fp', f?.priority ?? 0, 'type="number" inputmode="numeric"'), '數字越大越優先。')}
       ${f ? `<div class="list" style="margin-top:16px">${row({ go: false, title: '啟用', end: sw('fe', f.enabled, '啟用') })}</div>` : ''}
       <div class="actions" style="margin-top:20px"><button class="btn" id="fs">儲存</button>${f ? '<button class="btn dng" id="fd">刪除</button>' : ''}</div>`, (el, close) => {
@@ -742,7 +743,7 @@ const HELP = [
   ['threads', '如何連結 Threads（可多個帳號）', `<ol><li>先在 Threads App 登入要發文的帳號。</li><li>到「設定 → Threads 帳號」按<b>連結</b>（已有帳號時按右上角「新增帳號」），並按同意。</li><li>完成後自動回到後台，帳號會出現在清單裡。要再加一個帳號，就在 Threads App 切換帳號後重複一次。</li><li>點進每個帳號可以設定<b>人設</b>、語氣、主題與發文時段；沒填的沿用預設。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，在 Threads App 登入該帳號後按「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡服務商。</div>`],
   ['thread', '串文、改寫分發與【待補數據】', `<ul><li><b>串文：</b>AI 依「爭議化、數據化、具體化」一次寫一整串，第一則是鉤子、最後一則是 CTA（自動附上 LINE 連結）。審核時可以逐則修改、新增或移除。</li><li><b>則數：</b>在「貼文 → 發文設定 → 內容策略」調整，設 1 則就是單篇貼文。</li><li><b>【待補數據】：</b>AI 只能引用你在「可引用數據」填的數字；需要數據但沒有時會留下【待補數據】，補上真實數字前無法核准，避免散布不實數據。</li><li><b>改寫分發：</b>打開一串貼文按「改寫分發」，AI 會用其他帳號的人設重寫，並錯開 45 分鐘發布。</li><li><b>發到一半中斷：</b>系統會記住發到第幾則，按「接續發布」只會補發剩下的，不會重複。</li></ul>`],
   ['modes', '三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接發布。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，核准才發。</li><li><b>C 指定主題：</b>依「本週主題」生成，可選擇是否審核。</li></ul><div class="note bad">金融、放款等受監管產業一律強制人工審核。</div><p>內容檢查會擋下「保證核貸」「免審」等字眼，被擋的草稿需修改後才能核准。</p>`],
-  ['leads', '顧客留資怎麼運作', `<ol><li>顧客在 LINE 點「立即詢問」→ 看隱私告知 → 輸入「同意」。</li><li>回答服務類型與表單問題 → 確認送出。</li><li>你在「留資」看到新紀錄（未處理）。</li><li>聯絡後標記為「已處理」。</li></ol><p>顧客可輸入「查詢我的資料」「刪除我的資料」。超過保存期限（預設 180 天）自動刪除。</p>`],
+  ['leads', '顧客留資怎麼運作（加購項目）', `<p>留資是加購功能，開通後才會出現「留資」分頁。未開通時，系統不會蒐集顧客填寫的任何資料，顧客想諮詢會被引導「聯絡專人」，首頁改顯示新好友數與轉真人次數。</p><ol><li>顧客在 LINE 點「立即詢問」→ 看隱私告知 → 輸入「同意」。</li><li>回答服務類型與表單問題 → 確認送出。</li><li>你在「留資」看到新紀錄（未處理）。</li><li>聯絡後標記為「已處理」。</li></ol><p>顧客可輸入「查詢我的資料」「刪除我的資料」。超過保存期限（預設 180 天）自動刪除。</p>`],
   ['human', '真人接手怎麼運作', `<ul><li>顧客點「聯絡專人」或輸入「真人／客服」後，系統<b>暫停對該顧客自動回覆</b>。</li><li>請到 <b>LINE Official Account Manager</b> 聊天介面親自回覆。</li><li>顧客輸入「選單」或滿 24 小時才會恢復自動回覆。</li></ul>`],
   ['faq', '常見問題排除', `<ul><li><b>LINE 沒回應：</b>① 首頁「LINE 自動接待」是否開啟 ② Developers Console 的 Use webhook ③ 設定 → LINE 按「測試連線」。</li><li><b>LINE 回了兩次：</b>關閉 Official Account Manager 的自動回應訊息與歡迎訊息。</li><li><b>草稿「內容檢查未通過」：</b>含禁止宣稱或禁用詞，改寫後再核准。</li><li><b>開不了自動發文：</b>需要先連好 AI 與 Threads。</li><li><b>貼文「待核對」：</b>系統正在向 Threads 確認，會自動處理，請勿重複建立。</li><li><b>貼文「失敗」：</b>可重試；持續失敗請聯絡開發者。</li></ul>`],
   ['safe', '安全小提醒', `<ul><li>第一次登入後請立刻改密碼。</li><li>客服請使用「客服」角色。</li><li>不再需要的帳號請在「帳號與權限」停用。</li><li>不要把憑證、密碼貼到聊天軟體。</li></ul>`],

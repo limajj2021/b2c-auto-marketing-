@@ -52,7 +52,9 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
   if (path === '/tenants' && req.method === 'GET') {
     const ms = monthStart(url.searchParams.get('month')), me = nextMonth(ms);
     const rows = (await env.DB.prepare(
-      `SELECT b.id,b.slug,b.name,b.industry,b.status,b.plan,b.created_at,b.last_cron_at,s.auto_post_enabled,s.line_auto_reply_enabled,s.daily_gen_limit,
+      `SELECT b.id,b.slug,b.name,b.industry,b.status,b.plan,b.created_at,b.last_cron_at,s.auto_post_enabled,s.line_auto_reply_enabled,s.daily_gen_limit,s.leads_enabled,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.handling_status='pending') leads_pending,
         (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
@@ -66,7 +68,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name IN ('line_channel_secret','line_channel_access_token')) line_creds,
         (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name='gemini_api_key') gemini_key
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.created_at`,
-    ).bind(ms, me, ms, me, ms, me, ms, me).all<any>()).results;
+    ).bind(ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me, ms, me).all<any>()).results;
     const cronAge = (t: string | null) => (t ? Date.now() - new Date(t).getTime() : Infinity);
     return json({
       month: ms.slice(0, 7),
@@ -79,7 +81,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
           if (r.post_errors) issues.push(`${r.post_errors} 則貼文異常`);
           if (r.auto_post_enabled && cronAge(r.last_cron_at) > 30 * 60000) issues.push('排程超過 30 分鐘未執行');
         }
-        return { ...r, line_configured: r.line_creds >= 2, gemini_own_key: !!r.gemini_key, health: r.status !== 'active' ? 'paused' : issues.length ? 'attention' : 'ok', issues };
+        return { ...r, leads_enabled: !!r.leads_enabled, line_configured: r.line_creds >= 2, gemini_own_key: !!r.gemini_key, health: r.status !== 'active' ? 'paused' : issues.length ? 'attention' : 'ok', issues };
       }),
     });
   }
@@ -88,13 +90,15 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
   if (path === '/usage' && req.method === 'GET') {
     const ms = monthStart(url.searchParams.get('month')), me = nextMonth(ms);
     const rows = (await env.DB.prepare(
-      `SELECT b.slug,b.name,b.plan,
+      `SELECT b.slug,b.name,b.plan,s.leads_enabled,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
         (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
         (SELECT COUNT(*) FROM threads_accounts a WHERE a.brand_id=b.id) threads_accounts,
         (SELECT COUNT(*) FROM ai_generations g WHERE g.brand_id=b.id AND g.created_at>=? AND g.created_at<?) generations
-       FROM brands b ORDER BY b.slug`,
-    ).bind(ms, me, ms, me, ms, me).all()).results;
+       FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.slug`,
+    ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me).all()).results;
     return json({ month: ms.slice(0, 7), rows });
   }
 
@@ -123,6 +127,12 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
     const sets: string[] = [], vals: unknown[] = [];
     if (b.status !== undefined) { if (!['active', 'suspended'].includes(b.status)) return err(400, '狀態不合法'); sets.push('status=?'); vals.push(b.status); }
     if (b.plan !== undefined) { if (typeof b.plan !== 'string' || b.plan.length > 40) return err(400, '方案不合法'); sets.push('plan=?'); vals.push(b.plan); }
+    if (typeof b.leads_enabled === 'boolean') {
+      // 加購項目：開通或關閉留資（存在 brand_settings）
+      const r = await env.DB.prepare('UPDATE brand_settings SET leads_enabled=? WHERE brand_id=(SELECT id FROM brands WHERE slug=?)').bind(b.leads_enabled ? 1 : 0, m[1]).run();
+      if (!r.meta.changes) return err(404, '找不到工作區');
+      if (!sets.length) { await log(env, op.username, 'tenant_leads', `${m[1]}:${b.leads_enabled}`); return json({ ok: true }); }
+    }
     if (!sets.length) return err(400, 'nothing to update');
     const r = await env.DB.prepare(`UPDATE brands SET ${sets.join(',')} WHERE slug=?`).bind(...vals, m[1]).run();
     if (!r.meta.changes) return err(404, '找不到工作區');

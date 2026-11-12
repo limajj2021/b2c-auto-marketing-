@@ -4,6 +4,7 @@ import { iso } from '../util/time';
 import type { Reply } from './api';
 import { parseLineConfig, type LineConfig } from './config';
 import { matchFaq } from './faq';
+import { bump } from '../metrics';
 
 const HUMAN_TTL_MS = 24 * 3600 * 1000;
 const SKIP = ['略過', '跳過'];
@@ -26,20 +27,27 @@ async function saveState(env: Env, brandId: string, contactId: number, flow: str
   ).bind(brandId, contactId, flow, step, JSON.stringify(data ?? {}), iso()).run();
 }
 
-const mainQuick = (c: LineConfig) => [c.menu.info, c.menu.inquiry, c.menu.human];
+const mainQuick = (c: LineConfig) => [c.menu.info, c.menu.inquiry, c.menu.human].filter(Boolean);
+
+/** 留資未開通（加購項目）時，選單拿掉「立即詢問」。 */
+export function menuFor(c: LineConfig, leadsEnabled: boolean): LineConfig {
+  return leadsEnabled ? c : { ...c, menu: { ...c.menu, inquiry: '' } };
+}
 
 export function welcomeReply(c: LineConfig): Reply[] {
   return [{ text: c.welcome, quick: mainQuick(c) }];
 }
 
 export async function handleText(env: Env, brandId: string, contactId: number, rawText: string, now = new Date()): Promise<Reply[]> {
-  const row = await env.DB.prepare('SELECT line_config FROM brand_settings WHERE brand_id=?').bind(brandId).first<{ line_config: string }>();
-  const cfg = parseLineConfig(row?.line_config ?? '{}');
+  const row = await env.DB.prepare('SELECT line_config,leads_enabled FROM brand_settings WHERE brand_id=?').bind(brandId).first<{ line_config: string; leads_enabled: number }>();
+  const leads = !!row?.leads_enabled;
+  const cfg = menuFor(parseLineConfig(row?.line_config ?? '{}'), leads);
   const t = rawText.trim();
   const st = await loadState(env, brandId, contactId);
   const idle = () => saveState(env, brandId, contactId, 'idle', null, {});
   const toHuman = async (): Promise<Reply[]> => {
     await saveState(env, brandId, contactId, 'human', null, { since: iso(now) });
+    await bump(env, 'handoff', now).catch(() => {});
     return [{ text: cfg.humanNotice }];
   };
 
@@ -64,7 +72,10 @@ export async function handleText(env: Env, brandId: string, contactId: number, r
     return [{ text: '已取消刪除。', quick: mainQuick(cfg) }];
   }
 
-  if (st.flow_state === 'form') return formStep(env, brandId, contactId, cfg, st, t);
+  if (st.flow_state === 'form') {
+    if (!leads) { await idle(); return welcomeReply(cfg); } // 留資已關閉：結束進行中的表單，不再蒐集
+    return formStep(env, brandId, contactId, cfg, st, t);
+  }
 
   // idle
   if (t.includes('刪除我的資料') || t.includes('查詢我的資料')) {
@@ -76,7 +87,10 @@ export async function handleText(env: Env, brandId: string, contactId: number, r
     return [{ text: '將刪除您所有的諮詢紀錄，無法復原。請輸入「確認刪除」，或任意文字取消。' }];
   }
   if (t === cfg.menu.info) return [{ text: `${cfg.serviceInfo}\n\n營業時間：${cfg.businessHours}`, quick: mainQuick(cfg) }];
-  if (t === cfg.menu.inquiry || /(諮詢|詢問|申請)/.test(t)) return startForm(env, brandId, contactId, cfg);
+  if ((cfg.menu.inquiry && t === cfg.menu.inquiry) || /(諮詢|詢問|申請)/.test(t)) {
+    if (!leads) return [{ text: `想諮詢的話，請點「${cfg.menu.human}」，我們會由專人回覆您。`, quick: mainQuick(cfg) }];
+    return startForm(env, brandId, contactId, cfg);
+  }
   if (/(真人|專人|客服|人工)/.test(t)) return toHuman();
 
   const faqs = await env.DB.prepare('SELECT keyword,response,priority FROM faq_rules WHERE brand_id=? AND enabled=1').bind(brandId).all<any>();
