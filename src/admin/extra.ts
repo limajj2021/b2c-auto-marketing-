@@ -1,4 +1,5 @@
 // 連線設定（LINE / Gemini / Threads）與帳號管理。由 routes.ts 註冊。
+import { LineCredError, issueLineToken } from '../line/token';
 import { audit, getBrand, isMulti } from '../db';
 import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
@@ -27,7 +28,7 @@ export function registerExtra(add: Add, json: J, err: E) {
     const st = await credStatus(env);
     const accts = await listAccounts(env);
     return json({
-      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null },
+      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null, auto_token: !!st.line_channel_access_token.meta.auto },
       gemini: { configured: st.gemini_api_key.set },
       threads: {
         configured: accts.length > 0,
@@ -39,17 +40,28 @@ export function registerExtra(add: Add, json: J, err: E) {
     });
   });
 
-  // 貼上 LINE 憑證 → 驗證 token → 設定 Webhook → 用 LINE 官方測試驗證簽章
+  // 貼上 LINE 憑證 → 取得／驗證 token → 設定 Webhook → 用 LINE 官方測試驗證簽章
+  // 建議：只貼 Channel ID + secret，系統自動申請 token 並在到期前更新；也接受自行發行的 long-lived token
   add('POST', '/integrations/line', 'admin', async ({ env, req, actor, url, brandId }) => {
     const b: any = await req.json().catch(() => ({}));
-    const secret = String(b.channel_secret ?? '').trim();
-    const token = String(b.channel_access_token ?? '').trim();
+    const secret = String(b.channel_secret ?? '').replace(/\s+/g, '');
+    const channelId = String(b.channel_id ?? '').replace(/\s+/g, '');
+    let token = String(b.channel_access_token ?? '').replace(/\s+/g, '');
     if (!/^[0-9a-f]{32}$/i.test(secret)) return err(400, 'Channel secret 應為 32 位英數字');
-    if (token.length < 50) return err(400, 'Channel access token 看起來不完整');
+    let meta: Record<string, unknown> = {};
+    if (!token) {
+      if (!/^\d{6,12}$/.test(channelId)) return err(400, 'Channel ID 應為 10 位左右的數字');
+      try {
+        const t = await issueLineToken(channelId, secret);
+        token = t.token; meta = { auto: true, expires_at: t.expiresAt };
+      } catch (e) { return err(e instanceof LineCredError ? 400 : 502, (e as Error).message); }
+    } else if (token.length < 50) return err(400, 'Channel access token 看起來不完整');
     const info = await lineInfo(token);
     if (!info.ok) return err(400, 'Access token 無效，LINE 拒絕了這組憑證');
     await setCred(env, brandId, 'line_channel_secret', secret);
-    await setCred(env, brandId, 'line_channel_access_token', token, { name: info.name, basic_id: info.basicId });
+    await setCred(env, brandId, 'line_channel_access_token', token, { ...meta, name: info.name, basic_id: info.basicId });
+    if (meta.auto) await setCred(env, brandId, 'line_channel_id', channelId);
+    else await deleteCreds(env, ['line_channel_id']); // 改用自行發行的 token：不再自動更新
     const ws = await getBrand(env);
     const endpoint = isMulti(env) ? `${url.origin}/line/webhook/${ws.slug}` : `${url.origin}/line/webhook`;
     const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };

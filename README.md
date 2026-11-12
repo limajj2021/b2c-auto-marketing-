@@ -75,6 +75,11 @@ npm run provision -- --brand acme
 - 客戶可在「設定 → 匯出我的資料」隨時下載全部資料。
 - **留資為加購項目（預設關閉）**：由營運總後台逐一開通。未開通時 LINE 選單沒有「立即詢問」、不蒐集顧客填寫的資料、伺服器拒絕留資 API；改以不含個資的「新好友數」「轉真人次數」（`metrics_daily`）作為成效依據。
 
+## LINE 串接（2026-11-12 起）
+
+客戶只需在「設定 → LINE 官方帳號」貼上 **Channel ID** 與 **Channel secret**。系統以 client credentials 向 LINE 申請發訊用 token（有效 30 天），排程每小時檢查，到期前 7 天自動換新（`src/line/token.ts`），並自動設定、測試 Webhook。仍可在「進階」改貼自行發行的 long-lived token（不會自動更新）。
+LINE 沒有開放一般開發者一鍵授權官方帳號；「啟用 Messaging API」與「關閉 OA 自動回應」仍須客戶在 LINE Official Account Manager 自行操作。
+
 ## 導流成效（公域 → 私域）
 
 產品主打「免廣告費提升曝光與轉換」，因此系統量測整條導流漏斗（全部為計數，不含個資）：

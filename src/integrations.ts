@@ -7,6 +7,7 @@ import { getBrand, isMulti } from './db';
 export const CRED_ENV = {
   line_channel_secret: 'LINE_CHANNEL_SECRET',
   line_channel_access_token: 'LINE_CHANNEL_ACCESS_TOKEN',
+  line_channel_id: 'LINE_CHANNEL_ID',
   threads_access_token: 'THREADS_ACCESS_TOKEN',
   threads_user_id: 'THREADS_USER_ID',
   gemini_api_key: 'GEMINI_API_KEY',
@@ -19,13 +20,16 @@ const encKey = (env: Env) => env.CRED_ENC_KEY || env.SESSION_SECRET;
 export async function withCreds(env: Env): Promise<Env> {
   const out: Env = { ...env };
   // 共用架構：LINE、Threads 憑證一律來自該工作區自己的設定，不可沿用平台層的 secret（避免 A 客戶用到 B 的帳號）
-  if (isMulti(env)) for (const k of ['LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'THREADS_ACCESS_TOKEN', 'THREADS_USER_ID'] as const) (out as any)[k] = '';
-  let rows: { name: string; value_enc: string }[] = [];
+  if (isMulti(env)) for (const k of ['LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_ID', 'THREADS_ACCESS_TOKEN', 'THREADS_USER_ID'] as const) (out as any)[k] = '';
+  let rows: { name: string; value_enc: string; meta: string | null }[] = [];
   try {
     const brand = await getBrand(env);
-    rows = (await env.DB.prepare('SELECT name,value_enc FROM integrations WHERE brand_id=?').bind(brand.id).all<{ name: string; value_enc: string }>()).results;
+    rows = (await env.DB.prepare('SELECT name,value_enc,meta FROM integrations WHERE brand_id=?').bind(brand.id).all<{ name: string; value_enc: string; meta: string | null }>()).results;
   } catch { return out; }
   for (const r of rows) {
+    if (r.name === 'line_channel_access_token') {
+      try { const m = JSON.parse(r.meta || '{}'); out.LINE_TOKEN_AUTO_EXPIRES = m.auto ? String(m.expires_at ?? '') : undefined; } catch { /* 忽略 */ }
+    }
     const k = CRED_ENV[r.name as CredName];
     if (!k) continue;
     try { (out as any)[k] = await decryptText(encKey(env), r.value_enc); } catch { /* 金鑰不符則忽略該筆 */ }

@@ -357,7 +357,7 @@ async function getSetup() {
   TZ = st.brand.timezone; BRAND = st.brand.name;
   const s = st.settings, steps = [
     { id: 'brand', t: '填寫品牌資料', d: '品牌介紹與服務內容，AI 會依此撰寫貼文', ok: !!(st.brand.description && s.services && !s.services.startsWith('（')), to: 'settings/brand', help: 'start' },
-    { id: 'line', t: '連接 LINE 官方帳號', d: '貼上 Channel secret 與 access token', ok: ig.line.configured, to: 'settings/line', help: 'line' },
+    { id: 'line', t: '連接 LINE 官方帳號', d: '貼上 Channel ID 與 Channel secret', ok: ig.line.configured, to: 'settings/line', help: 'line' },
     { id: 'gemini', t: '連接 AI（Gemini）', d: '貼上 API key', ok: ig.gemini.configured, to: 'settings/gemini', help: 'gemini' },
     { id: 'threads', t: '連結 Threads 帳號', d: '授權後即可自動發文', ok: ig.threads.configured, to: 'settings/threads', help: 'threads' },
     { id: 'linecontent', t: '編輯 LINE 服務說明', d: '顧客點「了解服務」時看到的內容', ok: !!s.line_ready, to: 'line/content', help: 'start' },
@@ -772,16 +772,20 @@ async function threadsAccountPage(id) {
 }
 async function lineConnPage() {
   const ig = await api('GET', '/integrations'); const l = ig.line; bar({ title: 'LINE 官方帳號', back: 'settings' });
-  setView(`<div data-form>${l.configured ? `<div class="list" style="margin-bottom:20px">${row({ go: false, dot: 'ok', title: esc(l.name || '已連線'), sub: '重新輸入並儲存即可更換憑證' })}</div>` : ''}
-    ${field('lsec', 'Channel secret', input('lsec', '', 'autocomplete="off" autocapitalize="none" placeholder="32 位英數字"'), 'LINE Developers → Basic settings。')}
-    ${field('ltok', 'Channel access token（long-lived）', input('ltok', '', 'autocomplete="off" autocapitalize="none"'), 'Messaging API 分頁 → Issue。請貼上完整內容。')}
+  setView(`<div data-form>${l.configured ? `<div class="list" style="margin-bottom:20px">${row({ go: false, dot: 'ok', title: esc(l.name || '已連線'), sub: l.auto_token ? '發訊憑證由系統自動更新，不需要再處理' : '重新輸入並儲存即可更換憑證' })}</div>` : ''}
+    <ol class="t-sub" style="margin:0 0 20px;padding-left:20px;line-height:1.8"><li>LINE Official Account Manager → 設定 → Messaging API → <b>啟用</b></li><li>到 LINE Developers Console → 你的 channel → <b>Basic settings</b></li><li>複製頁面上的 <b>Channel ID</b> 與 <b>Channel secret</b> 貼到下面</li></ol>
+    ${field('lid', 'Channel ID', input('lid', '', 'inputmode="numeric" autocomplete="off" placeholder="例如：2001234567"'), 'Basic settings 最上方的一串數字。')}
+    ${field('lsec', 'Channel secret', input('lsec', '', 'autocomplete="off" autocapitalize="none" placeholder="32 位英數字"'), '同一頁往下，按 Show 後複製。')}
+    <details style="margin-top:8px"><summary class="t-sub" style="cursor:pointer">進階：改用自行發行的 long-lived access token</summary>
+    ${field('ltok', 'Channel access token（long-lived，選填）', input('ltok', '', 'autocomplete="off" autocapitalize="none"'), '一般不需要。填了這欄就不使用 Channel ID，也不會自動更新。')}</details>
     <div class="note" style="margin-top:16px">儲存時會自動驗證，並把 Webhook 設為：<br><code>${esc(l.webhook_url)}</code></div>
     <div class="actions" style="margin-top:20px"><button class="btn" id="ls">驗證並儲存</button>${l.configured ? '<button class="btn sec" id="lt">測試連線</button>' : ''}</div>
     <button class="link" data-go="help">如何取得憑證？</button></div>`, 'form');
   $('#ls').onclick = async (e) => {
-    const btn = e.currentTarget; $('#lsec').value = $('#lsec').value.replace(/\s+/g, ''); $('#ltok').value = $('#ltok').value.replace(/\s+/g, '');
-    if (!check([[$('#lsec'), !/^[0-9a-fA-F]{32}$/.test($('#lsec').value), 'Channel secret 應為 32 位英數字'], [$('#ltok'), $('#ltok').value.length < 50, 'Access token 看起來不完整，請重新複製']])) return;
-    const r = await act(btn, () => api('POST', '/integrations/line', { channel_secret: $('#lsec').value, channel_access_token: $('#ltok').value }));
+    const btn = e.currentTarget; for (const k of ['#lid', '#lsec', '#ltok']) $(k).value = $(k).value.replace(/\s+/g, '');
+    const tok = $('#ltok').value;
+    if (!check([[$('#lid'), !tok && !/^\d{6,12}$/.test($('#lid').value), 'Channel ID 應為一串數字（Basic settings 最上方）'], [$('#lsec'), !/^[0-9a-fA-F]{32}$/.test($('#lsec').value), 'Channel secret 應為 32 位英數字'], [$('#ltok'), tok && tok.length < 50, 'Access token 看起來不完整，請重新複製']])) return;
+    const r = await act(btn, () => api('POST', '/integrations/line', tok ? { channel_secret: $('#lsec').value, channel_access_token: tok } : { channel_id: $('#lid').value, channel_secret: $('#lsec').value }));
     if (r && r !== true) { dirty = false; toast(r.webhook_verified ? `已連線（${r.bot}），Webhook 驗證通過` : `已儲存（${r.bot}）；Webhook 驗證未通過，請到 LINE 後台開啟 Use webhook`, r.webhook_verified ? 'ok' : ''); render(); }
   };
   $('#lt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'line' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
@@ -853,8 +857,8 @@ async function accountPage() {
    說明中心
    ====================================================================== */
 const HELP = [
-  ['start', '第一次使用，照這 5 步', `<ol><li><b>設定 → LINE 官方帳號：</b>貼上 Channel secret 與 access token。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」。</li></ol><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
-  ['line', '如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 複製 <b>Channel secret</b>（32 位英數字）。</li><li><b>Messaging API</b> 按 <b>Issue</b> 產生 <b>Channel access token (long-lived)</b> 並複製。</li><li>貼到「設定 → LINE 官方帳號」，按「驗證並儲存」，系統會自動設定 Webhook。</li><li>回到 LINE Developers，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，<b>關閉「自動回應訊息」與「加入好友的歡迎訊息」</b>，否則會重複回覆。</li></ol><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
+  ['start', '第一次使用，照這 5 步', `<ol><li><b>設定 → LINE 官方帳號：</b>貼上 Channel ID 與 Channel secret。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>LINE：</b>把「服務說明」「營業時間」改成你們的內容。</li><li><b>首頁：</b>打開「自動發文」「LINE 自動接待」。</li></ol><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
+  ['line', '如何取得 LINE 憑證', `<ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 複製 <b>Channel ID</b>（一串數字）與 <b>Channel secret</b>（32 位英數字）。</li><li>貼到「設定 → LINE 官方帳號」，按「驗證並儲存」。系統會自動取得發訊憑證（到期前自動更新）並設定 Webhook。</li><li>回到 LINE Developers，確認 <b>Use webhook</b> 是開的。</li><li>回到 Official Account Manager → 回應設定，<b>關閉「自動回應訊息」與「加入好友的歡迎訊息」</b>，否則會重複回覆。</li></ol><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
   ['gemini', '如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b> 並複製。</li><li>貼到「設定 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p>AI 只用來寫 Threads 貼文，不讀取顧客資料。每日生成次數有上限，用完自動停止，不會多收費。</p>`],
   ['threads', '如何連結 Threads（可多個帳號）', `<ol><li>先在 Threads App 登入要發文的帳號。</li><li>到「設定 → Threads 帳號」按<b>連結</b>（已有帳號時按右上角「新增帳號」），並按同意。</li><li>完成後自動回到後台，帳號會出現在清單裡。要再加一個帳號，就在 Threads App 切換帳號後重複一次。</li><li>點進每個帳號可以設定<b>人設</b>、語氣、主題與發文時段；沒填的沿用預設。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，在 Threads App 登入該帳號後按「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡服務商。</div>`],
   ['thread', '串文、改寫分發與【待補數據】', `<ul><li><b>串文：</b>AI 依「爭議化、數據化、具體化」一次寫一整串，第一則是鉤子、最後一則是 CTA（自動附上 LINE 連結）。審核時可以逐則修改、新增或移除。</li><li><b>則數：</b>在「貼文 → 發文設定 → 內容策略」調整，設 1 則就是單篇貼文。</li><li><b>【待補數據】：</b>AI 只能引用你在「可引用數據」填的數字；需要數據但沒有時會留下【待補數據】，補上真實數字前無法核准，避免散布不實數據。</li><li><b>改寫分發：</b>打開一串貼文按「改寫分發」，AI 會用其他帳號的人設重寫，並錯開 45 分鐘發布。</li><li><b>發到一半中斷：</b>系統會記住發到第幾則，按「接續發布」只會補發剩下的，不會重複。</li></ul>`],

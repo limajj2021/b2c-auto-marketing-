@@ -5,6 +5,10 @@ export interface Env {
   SESSION_SECRET: string;
   LINE_CHANNEL_SECRET: string;
   LINE_CHANNEL_ACCESS_TOKEN: string;
+  /** 有值時 access token 由系統以 Channel ID + secret 自動申請與更新 */
+  LINE_CHANNEL_ID?: string;
+  /** 系統自動申請的 LINE token 到期時間（withCreds 載入；空字串代表未知） */
+  LINE_TOKEN_AUTO_EXPIRES?: string;
   THREADS_ACCESS_TOKEN: string;
   THREADS_USER_ID: string;
   GEMINI_API_KEY: string;

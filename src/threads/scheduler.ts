@@ -7,6 +7,7 @@ import { effective, listAccounts, markAccount, resolveCred, type Account } from 
 import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, postInsights, publishContainer } from './api';
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
+import { renewLineTokenIfNeeded } from '../line/token';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
 const MAX_GEN_ATTEMPTS = 3;
@@ -52,6 +53,8 @@ async function housekeeping(env: Env, now: Date) {
   await env.DB.prepare('DELETE FROM processed_events WHERE brand_id=? AND processed_at<?').bind(brand.id, new Date(now.getTime() - 7 * 86400000).toISOString()).run();
   await env.DB.prepare(`UPDATE posts SET status='gen_failed', updated_at=? WHERE brand_id=? AND status='generating' AND updated_at<?`).bind(iso(now), brand.id, new Date(now.getTime() - STALE_MS).toISOString()).run();
   await env.DB.prepare('UPDATE brands SET last_housekeeping_at=? WHERE id=?').bind(iso(now), brand.id).run();
+  // LINE token（系統自動申請者）到期前更新；失敗不影響其他清理，下一小時再試
+  await renewLineTokenIfNeeded(env, now).catch((e) => { if (e instanceof BudgetError) throw e; console.error('line:renew', (e as Error).message); });
 }
 
 /** 為每個啟用中的帳號，在今天與明天的每個時段確保有一串貼文（slot_key 唯一約束防重複）。 */
