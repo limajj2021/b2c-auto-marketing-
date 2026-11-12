@@ -54,7 +54,7 @@ async function api(method, path, body) {
 const act = async (b, fn) => { b?.setAttribute('aria-busy', 'true'); try { return await fn(); } catch (e) { toast(e.message, true); } finally { b?.removeAttribute('aria-busy'); } };
 const ago = (t) => { if (!t) return '從未'; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.floor(m / 60)} 小時前` : `${Math.floor(m / 1440)} 天前`; };
 const HEALTH = { ok: '正常', attention: '需處理', paused: '已暫停' };
-let month = new Date().toISOString().slice(0, 7);
+let month = new Date().toISOString().slice(0, 7), ADMIN = false;
 
 function login() {
   $('#app').innerHTML = `<div class="login"><h1>營運總後台</h1><p class="sub">僅限服務商營運與維護人員</p>
@@ -66,33 +66,38 @@ function login() {
 
 async function main() {
   let me; try { me = await api('GET', '/me'); } catch { return; }
+  ADMIN = me.role === 'admin';
   const d = await api('GET', '/tenants?month=' + month);
   const t = d.tenants, sum = (k) => t.reduce((a, x) => a + (x[k] || 0), 0);
-  $('#app').innerHTML = `<div class="top"><div class="grow"><h1>營運總後台</h1><div class="sub">${esc(me.username)} · ${t.length} 個工作區</div></div>
+  $('#app').innerHTML = `<div class="top"><div class="grow"><h1>營運總後台</h1><div class="sub">${esc(me.username)}（${ADMIN ? '營運管理者' : '維護人員'}）· ${t.length} 個工作區</div></div>
     <label class="sub">月份 <input type="month" id="mo" value="${month}"></label><button class="btn sec" id="csv">下載計費用量 CSV</button><button class="btn sec" id="out">登出</button></div>
     <div class="kpis"><div><b>${t.filter((x) => x.health === 'attention').length}</b><span>需處理</span></div><div><b>${t.filter((x) => x.status === 'active').length}</b><span>使用中</span></div>
-    <div><b>${sum('friends')}</b><span>${month} 新好友</span></div><div><b>${sum('handoffs')}</b><span>${month} 轉真人</span></div><div><b>${sum('leads')}</b><span>${month} 留資</span></div><div><b>${sum('published')}</b><span>${month} 發文</span></div><div><b>${sum('generations')}</b><span>${month} AI 生成</span></div></div>
-    <div class="tbl"><table><thead><tr><th>工作區</th><th>狀態</th><th>待處理</th><th>留資加購</th><th class="n">新好友</th><th class="n">轉真人</th><th class="n">留資</th><th class="n">未處理</th><th class="n">發文</th><th class="n">AI</th><th>Threads</th><th>LINE</th><th>排程</th><th></th></tr></thead><tbody>
+    <div><b>${sum('views')}</b><span>${month} 曝光</span></div><div><b>${sum('clicks')}</b><span>${month} LINE 點擊</span></div><div><b>${sum('friends')}</b><span>${month} 新好友</span></div><div><b>${sum('handoffs')}</b><span>${month} 轉真人</span></div><div><b>${sum('leads')}</b><span>${month} 留資</span></div><div><b>${sum('published')}</b><span>${month} 發文</span></div><div><b>${sum('generations')}</b><span>${month} AI 生成</span></div></div>
+    <div class="tbl"><table><thead><tr><th>工作區</th><th>狀態</th><th>待處理</th><th>留資加購</th><th class="n">曝光</th><th class="n">LINE 點擊</th><th class="n">新好友</th><th class="n">轉真人</th><th class="n">留資</th><th class="n">未處理</th><th class="n">發文</th><th class="n">AI</th><th>Threads</th><th>LINE</th><th>排程</th><th></th></tr></thead><tbody>
     ${t.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="sub">${esc(x.slug)} · ${esc(x.plan)}</div></td>
       <td><span class="pill ${x.health}">${HEALTH[x.health]}</span></td><td class="issues">${x.issues.map(esc).join('<br>') || '<span class="z">—</span>'}</td>
-      <td><label style="display:flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" data-leads="${esc(x.slug)}" ${x.leads_enabled ? 'checked' : ''} style="min-height:0;width:18px;height:18px"> ${x.leads_enabled ? '已開通' : '未開通'}</label></td>
-      <td class="n">${x.friends}</td><td class="n">${x.handoffs}</td>
+      <td><label style="display:flex;gap:6px;align-items:center;white-space:nowrap"><input type="checkbox" data-leads="${esc(x.slug)}" ${x.leads_enabled ? 'checked' : ''} ${ADMIN ? '' : 'disabled'} style="min-height:0;width:18px;height:18px"> ${x.leads_enabled ? '已開通' : '未開通'}</label></td>
+      <td class="n ${x.views ? '' : 'z'}">${x.views}</td><td class="n ${x.clicks ? '' : 'z'}">${x.clicks}</td><td class="n">${x.friends}</td><td class="n">${x.handoffs}</td>
       <td class="n ${x.leads_enabled ? '' : 'z'}">${x.leads_enabled ? x.leads : '—'}</td><td class="n ${x.leads_pending && x.leads_enabled ? '' : 'z'}">${x.leads_enabled ? x.leads_pending : '—'}</td><td class="n">${x.published}</td><td class="n">${x.generations}<div class="sub">${x.gemini_own_key ? '自有金鑰' : '平台金鑰'}</div></td>
       <td>${x.threads_accounts} 個${x.threads_invalid ? `<div class="issues">${x.threads_invalid} 個失效</div>` : ''}${x.threads_expires ? `<div class="sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}</td>
       <td>${x.line_configured ? '已連接' : '<span class="z">未連接</span>'}</td><td><span class="sub">${ago(x.last_cron_at)}</span><div class="sub">${x.auto_post_enabled ? '自動發文開' : '自動發文關'}</div></td>
-      <td style="white-space:nowrap"><button class="btn sm sec" data-reset="${esc(x.slug)}">重設管理員密碼</button> ${x.status === 'active' ? `<button class="btn sm dng" data-sus="${esc(x.slug)}">暫停</button>` : `<button class="btn sm sec" data-res="${esc(x.slug)}">恢復</button>`}</td></tr>`).join('')}
+      <td style="white-space:nowrap"><button class="btn sm sec" data-reset="${esc(x.slug)}">重設管理員密碼</button> ${!ADMIN ? '' : x.status === 'active' ? `<button class="btn sm dng" data-sus="${esc(x.slug)}">暫停</button>` : `<button class="btn sm sec" data-res="${esc(x.slug)}">恢復</button>`}</td></tr>`).join('')}
     </tbody></table></div>
-    <div class="card"><h2>開通新工作區</h2><div class="row">
+    ${ADMIN ? '' : '<p class="sub" style="margin-top:14px">你的角色是「維護人員」：可查看狀態、協助客戶重設密碼；開通、暫停與人員管理需由營運管理者處理。</p>'}
+    <div class="card ${ADMIN ? '' : 'hide'}"><h2>開通新工作區</h2><div class="row">
       <label>工作區代號<input id="ns" placeholder="例如：acme" autocapitalize="none"></label><label>品牌名稱<input id="nn"></label>
       <label>產業<select id="ni"><option value="general">一般</option><option value="lending">放款（強制審核）</option><option value="finance">金融（強制審核）</option></select></label>
       <label>方案<select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></label>
       <label>管理員帳號<input id="na" value="owner" autocapitalize="none"></label><button class="btn" id="create">建立</button></div><div id="made"></div></div>
+    <div class="card ${ADMIN ? '' : 'hide'}" id="people"><h2>營運人員</h2><div id="plist" class="sub">載入中…</div>
+      <div class="row" style="margin-top:12px"><label>帳號<input id="ou" autocapitalize="none"></label><label>角色<select id="or"><option value="support">維護人員（查看、重設客戶密碼）</option><option value="admin">營運管理者（全部權限）</option></select></label><button class="btn" id="oadd">新增人員</button></div><div id="omade"></div></div>
+    <div class="card"><h2>變更我的密碼</h2><div class="row"><label>目前密碼<input type="password" id="pc" autocomplete="current-password"></label><label>新密碼（至少 12 字元）<input type="password" id="pn" autocomplete="new-password"></label><button class="btn sec" id="pchg">變更密碼</button></div></div>
     <p class="sub" style="margin-top:20px">營運人員只看得到計數與狀態，看不到顧客的留資內容。需要協助客戶時，請客戶授權並由客戶操作，或重設其管理員密碼。</p>`;
   $('#mo').onchange = (e) => { month = e.target.value; main(); };
   $('#out').onclick = async () => { await api('POST', '/logout').catch(() => {}); login(); };
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
-    const rows = [['工作區代號', '品牌名稱', '方案', '留資加購', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
+    const rows = [['工作區代號', '品牌名稱', '方案', '留資加購', '曝光', 'LINE 點擊', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
@@ -110,6 +115,20 @@ async function main() {
     $('#made').innerHTML = `<div class="result">已重設 <b>${esc(b.dataset.reset)}</b> 的管理員 <code>${esc(r.admin_username)}</code> 密碼：<code>${esc(r.password)}</code><br><span class="sub">只顯示這一次，請以安全方式交給客戶，並請對方登入後立即變更。</span></div>`;
     $('#made').scrollIntoView({ block: 'center' });
   }));
+  $('#pchg').onclick = (e) => act(e.currentTarget, async () => {
+    if ($('#pn').value.length < 12) throw new Error('新密碼至少 12 字元');
+    await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = ''; toast('密碼已變更');
+  });
+  if (ADMIN) {
+    const ops = await api('GET', '/operators');
+    $('#plist').innerHTML = `<table style="min-width:0"><tbody>${ops.map((o) => `<tr><td><b>${esc(o.username)}</b>${o.username === me.username ? ' <span class="sub">（你）</span>' : ''}</td><td>${o.role === 'admin' ? '營運管理者' : '維護人員'}</td><td>${o.enabled ? '啟用中' : '<span class="z">已停用</span>'}</td>
+      <td style="text-align:right;white-space:nowrap">${o.username === me.username ? '' : `<button class="btn sm sec" data-opw="${o.id}">重設密碼</button> <button class="btn sm ${o.enabled ? 'dng' : 'sec'}" data-oen="${o.id}" data-v="${o.enabled ? 0 : 1}">${o.enabled ? '停用' : '啟用'}</button>`}</td></tr>`).join('')}</tbody></table>`;
+    document.querySelectorAll('[data-oen]').forEach((b) => b.onclick = () => act(b, async () => { await api('PATCH', '/operators/' + b.dataset.oen, { enabled: b.dataset.v === '1' }); toast(b.dataset.v === '1' ? '已啟用' : '已停用，對方立即無法登入'); main(); }));
+    document.querySelectorAll('[data-opw]').forEach((b) => b.onclick = () => act(b, async () => { const r = await api('PATCH', '/operators/' + b.dataset.opw, { reset_password: true });
+      $('#omade').innerHTML = `<div class="result">新的一次性密碼：<code>${esc(r.password)}</code><br><span class="sub">只顯示一次，請以安全方式交給對方。</span></div>`; }));
+    $('#oadd').onclick = (e) => act(e.currentTarget, async () => { const r = await api('POST', '/operators', { username: $('#ou').value.trim(), role: $('#or').value });
+      await main(); $('#omade').innerHTML = `<div class="result">已新增 <code>${esc(r.username)}</code>（${r.role === 'admin' ? '營運管理者' : '維護人員'}）　一次性密碼：<code>${esc(r.password)}</code><br><span class="sub">只顯示一次；請對方登入後在「變更我的密碼」改掉。</span></div>`; });
+  }
   $('#create').onclick = (e) => act(e.currentTarget, async () => {
     const r = await api('POST', '/tenants', { slug: $('#ns').value.trim().toLowerCase(), name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim() });
     await main();

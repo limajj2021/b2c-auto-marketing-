@@ -3,6 +3,7 @@ import { brandBySlug, forBrand, getBrand, isMulti } from './db';
 import { withCreds } from './integrations';
 import { handleLineWebhook } from './line/webhook';
 import { runAllTenants } from './tenants';
+import { handleGo } from './links';
 import { handleCallback, handleMetaCallback } from './threads/oauth';
 import type { Env } from './types';
 
@@ -17,6 +18,8 @@ export default {
         if (!b || b.status === 'suspended') return new Response('not found', { status: 404 });
         return await handleLineWebhook(await withCreds(forBrand(raw, b.id)), req);
       }
+      const go = pathname.match(/^\/go\/([A-Za-z0-9]{6,16})$/);
+      if (go && (req.method === 'GET' || req.method === 'HEAD')) return await handleGo(raw, req, go[1]);
       if (pathname === '/threads/callback' && req.method === 'GET') return await handleCallback(raw, req);
       if (pathname === '/threads/deauthorize' && req.method === 'POST') return await handleMetaCallback(raw, req, 'deauthorize');
       if (pathname === '/threads/delete' && req.method === 'POST') return await handleMetaCallback(raw, req, 'delete');

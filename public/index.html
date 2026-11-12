@@ -163,6 +163,7 @@ details.acc .body{padding:0 16px 16px;color:var(--text2);line-height:1.75}.body 
 nav.tabs .brand{display:none}
 /* 觸控裝置：所有可點元件至少 44px（WCAG 2.2 AA 最低 24px，這裡採更嚴格的原生 App 標準） */
 @media (pointer:coarse){.btn.sm,.link,.chip,.tabs-h button{min-height:44px}.link{padding:10px 4px}.tabs-h button{min-width:44px;padding:0 2px}.chip input{min-height:32px!important}.foot a{display:inline-block;padding:12px 6px}}
+@media print{nav.tabs,.bar .icon,#toasts,#rm{display:none!important}.bar{position:static}main{padding:0;margin:0!important}body{background:#fff;color:#000}.list{border:1px solid #ddd}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
 </head>
@@ -278,7 +279,7 @@ async function render() {
   if (!me) { try { me = await api('GET', '/me'); } catch { me = null; } }
   if (!me) return loginView();
   const r = route(), tabs = tabsFor();
-  const ok = r.tab === 'help' || r.tab === 'setup' || tabs.some((t) => t[0] === r.tab);
+  const ok = r.tab === 'help' || r.tab === 'setup' || (r.tab === 'report' && me.role === 'admin') || tabs.some((t) => t[0] === r.tab);
   if (!ok) { suppress = true; location.hash = '#/' + tabs[0][0]; return render(); }
   if (!$('#view')) {
     $('#app').innerHTML = `<header class="bar" id="bar"></header><main id="view"></main><nav class="tabs" aria-label="主選單"><div class="in" id="tabs"></div></nav>`;
@@ -353,7 +354,7 @@ async function getSetup() {
 }
 
 async function homePage() {
-  const [d, setup, posts, audit] = await Promise.all([api('GET', '/dashboard'), getSetup(), api('GET', '/posts'), api('GET', '/audit')]);
+  const [d, setup, posts, audit, fn] = await Promise.all([api('GET', '/dashboard'), getSetup(), api('GET', '/posts'), api('GET', '/audit'), api('GET', '/funnel').catch(() => null)]);
   const qs = new URLSearchParams(location.search);
   if (qs.get('threads')) { qs.get('threads') === 'connected' ? toast('Threads 已連結成功', 'ok') : toast('Threads 連結失敗：' + (qs.get('reason') || '請重試'), 'bad'); history.replaceState(null, '', '/'); }
   const failed = posts.filter((p) => p.status === 'failed' || p.status === 'gen_failed').length, unknown = posts.filter((p) => p.status === 'unknown').length;
@@ -374,6 +375,7 @@ async function homePage() {
     <section>${sec('今日')}
       <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.friends_today, '新好友') + m(d.handoffs_today, '轉真人')}</div>
       <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停'}</p></section>
+    ${fn ? funnelBlock(fn, '導流成效・近 30 天', true) : ''}
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
     <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="line">LINE 接待</button>'}</section>
     <section>${sec('自動化')}<div class="list">
@@ -408,6 +410,36 @@ async function openGenerate() {
   });
 }
 
+const nf = (n) => n === null || n === undefined ? '—' : n >= 10000 ? (n / 10000).toFixed(n >= 100000 ? 0 : 1) + ' 萬' : Number(n).toLocaleString('zh-TW');
+const pct = (a, b) => (b > 0 && a !== null ? (a / b * 100).toFixed(a / b < 0.1 ? 1 : 0) + '%' : '—');
+/** 導流漏斗：曝光 → 互動 → 點擊 → 新好友 → 轉真人（全部是期間內的總數，比率為估算） */
+function funnelBlock(f, title, compact) {
+  const t = f.totals, eng = t.likes + t.replies + t.reposts + t.quotes + t.shares, noIns = f.insights !== 'ok';
+  const steps = [
+    ['曝光', noIns ? null : t.views, ''], ['互動', noIns ? null : eng, noIns ? '' : '互動率 ' + pct(eng, t.views)],
+    ['點擊 LINE', f.tracking ? t.clicks : null, noIns || !f.tracking ? '' : '點擊率 ' + pct(t.clicks, t.views)],
+    ['新好友', t.friends, f.tracking ? '點擊→加好友 ' + pct(t.friends, t.clicks) : ''], ['轉真人', t.handoffs, '好友→轉真人 ' + pct(t.handoffs, t.friends)],
+  ];
+  const note = noIns ? (f.insights === 'no_permission' ? '曝光與互動數據需要 Threads「成效數據」權限，請聯絡服務商開通後重新連結帳號。' : '曝光與互動數據會在貼文發布後數小時內開始出現。') : '';
+  return `<section>${sec(title, compact ? '<button class="link" data-go="report">完整報告</button>' : '')}
+    <div class="metrics" style="flex-wrap:wrap;row-gap:12px">${steps.map(([l, v, sub]) => `<div style="min-width:96px"><b class="${v === 0 || v === null ? 'z' : ''}">${nf(v)}</b><span>${l}</span>${sub ? `<div class="t-sub" style="font-size:11.5px">${sub}</div>` : ''}</div>`).join('')}</div>
+    ${note ? `<p class="t-sub" style="margin-top:10px">${note}</p>` : ''}${!f.tracking ? '<p class="t-sub" style="margin-top:6px">LINE 連結點擊追蹤尚未啟用。</p>' : ''}</section>`;
+}
+let RMONTH = new Date().toISOString().slice(0, 7);
+async function reportPage() {
+  const [y, m] = RMONTH.split('-').map(Number), from = `${RMONTH}-01`, to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const f = await api('GET', `/funnel?from=${from}&to=${to}`);
+  bar({ title: '成效報告', back: 'home', right: '<button class="icon" id="pr" aria-label="列印或另存 PDF"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6h-2M7 14h10v7H7z"/></svg></button>' });
+  setView(`<div class="tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 class="t-page">${esc(BRAND)}</h2><p class="t-sub">${RMONTH.replace('-', ' 年 ')} 月・Threads 導流成效</p></div>
+      <input type="month" id="rm" value="${RMONTH}" style="width:auto" aria-label="選擇月份"></div>
+    ${funnelBlock(f, '導流漏斗', false)}
+    <p class="t-sub">本月發布 ${nf(f.totals.posts)} 串${f.insights === 'ok' && f.totals.posts ? `，平均每串曝光 ${nf(Math.round(f.totals.views / Math.max(1, f.totals.posts_with_metrics)))}` : ''}。</p>
+    <section>${sec('表現最好的貼文')}${f.top.length ? `<div class="list">${f.top.map((p, i) => row({ go: false, title: `${i + 1}. ${esc(p.hook || '（空白）')}`, sub: `${fmt(p.published_at)}${p.username ? ' · @' + esc(p.username) : ''} · 曝光 ${nf(p.views)} · 讚 ${nf(p.likes)} · 回覆 ${nf(p.replies)} · 點擊 ${nf(p.clicks)}` })).join('')}</div>` : empty('post', '這個月還沒有發布的貼文', '貼文發布後，成效會顯示在這裡。')}</section>
+    <p class="t-sub">比率以期間內的總數估算，不追蹤個別訪客；點擊只計算真人瀏覽器，排除平台的連結預覽。曝光與互動來自 Threads 官方數據，於發布後 14 天內定期更新。</p>`);
+  $('#rm').onchange = (e) => { RMONTH = e.target.value || RMONTH; render(); };
+  $('#pr').onclick = () => window.print();
+}
+
 /* ======================================================================
    開通引導（獨立頁）
    ====================================================================== */
@@ -436,7 +468,7 @@ async function postsPage(r) {
   setView(`${multi ? `<div class="chips tight">${chip(0, '全部帳號')}${ACCTS.map((a) => chip(a.id, '@' + esc(a.username || a.id))).join('')}</div>` : ''}
     <div class="tight"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div>
     ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${esc((p.parts?.[0] || p.content).split('\n')[0] || '（空白）')}</span>`,
-      sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.parts?.length > 1 ? ` · 串文 ${p.parts.length} 則` : ''}${multi && p.account_id ? ` · ${esc(acctName(p.account_id))}` : ''}${p.source_post_id ? ' · 改寫' : ''}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '')}`);
+      sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.status === 'published' && (p.views !== null && p.views !== undefined || p.clicks) ? ` · 曝光 ${nf(p.views)} · 點擊 ${nf(p.clicks || 0)}` : ''}${p.parts?.length > 1 ? ` · 串文 ${p.parts.length} 則` : ''}${multi && p.account_id ? ` · ${esc(acctName(p.account_id))}` : ''}${p.source_post_id ? ' · 改寫' : ''}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '')}`);
   $$('[data-seg]').forEach((b) => b.onclick = () => { S.postSeg = b.dataset.seg; render(); });
   $$('[data-acct]').forEach((b) => b.onclick = () => { S.postAcct = +b.dataset.acct || 0; render(); });
   $('[data-act=gen2]')?.addEventListener('click', openGenerate);
@@ -618,10 +650,11 @@ async function settingsPage(r) {
       ${row({ act: 'threads', title: 'Threads 帳號', sub: ig.threads.accounts?.length ? ig.threads.accounts.map((a) => '@' + esc(a.username || '')).join('、') : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
       ${row({ act: 'line', title: 'LINE 官方帳號', sub: ig.line.configured ? esc(ig.line.name || '') : '自動接待需要', end: stat(ig.line.configured) })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
-    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'audit', title: '操作紀錄' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
+    <section>${sec('工作區')}<div class="list">${row({ act: 'brand', title: '品牌資訊', sub: esc(st.brand.name) })}${row({ act: 'users', title: '帳號與權限' })}${row({ act: 'report', title: '成效報告', sub: '每月導流成效，可列印或另存 PDF 給團隊' })}${row({ act: 'audit', title: '操作紀錄' })}${row({ act: 'export', title: '匯出我的資料', sub: '貼文、留資、設定等全部資料（JSON），資料永遠屬於你' })}</div></section>
     <section><div class="list">${row({ act: 'password', title: '變更我的密碼' })}${row({ act: 'help', title: '說明中心' })}${row({ act: 'out', title: '登出', go: false })}</div>
       <p class="t-sub foot" style="margin-top:10px"><a href="/privacy">隱私政策</a> · <a href="/terms">服務條款</a> · <a href="/data-deletion">資料刪除說明</a></p></section>`);
   for (const k of ['threads', 'line', 'gemini', 'brand', 'users', 'audit', 'password']) $(`[data-act=${k}]`).onclick = () => go('settings/' + k);
+  $('[data-act=report]').onclick = () => go('report');
   $('[data-act=out]').onclick = logout;
   $('[data-act=export]').onclick = (e) => act(e.currentTarget, async () => {
     const r = await fetch('/api/export', { headers: { 'x-requested-with': 'admin-ui' } });
@@ -753,7 +786,7 @@ async function helpPage() {
   setView(`<div class="list">${HELP.map(([id, t, b]) => `<details class="acc" id="h-${id}" ${S.helpOpen === id ? 'open' : ''}><summary>${t}</summary><div class="body">${b}</div></details>`).join('')}</div>`);
 }
 
-const PAGES = { home: homePage, posts: postsPage, line: linePage, leads: leadsPage, settings: settingsPage, account: accountPage, help: helpPage, setup: setupPage };
+const PAGES = { report: reportPage, home: homePage, posts: postsPage, line: linePage, leads: leadsPage, settings: settingsPage, account: accountPage, help: helpPage, setup: setupPage };
 if (!location.hash) history.replaceState(null, '', '#/');
 render();
 </script>

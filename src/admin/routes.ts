@@ -8,7 +8,7 @@ import { validateLineConfig, parseLineConfig } from '../line/config';
 import { needsReview, partsOf, publishOne } from '../threads/scheduler';
 import type { Env } from '../types';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
-import { isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
+import { addDays, isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
 import { registerExtra } from './extra';
 import { metricSum } from '../metrics';
 
@@ -247,8 +247,9 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
 add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
-    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,a.username
-     FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id
+    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,a.username,
+       m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks
+     FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,
   ).bind(brandId, st, st).all<any>();
   return json(rows.results.map((r) => ({ ...r, parts: partsOf(r), part_ids: r.part_ids ? JSON.parse(r.part_ids) : [] })));
@@ -431,6 +432,42 @@ add('GET', '/export', 'admin', async ({ env, actor, brandId }) => {
   await audit(env, brandId, actor.name, 'data_export');
   return new Response(JSON.stringify(data, null, 2), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store',
     'content-disposition': `attachment; filename="export-${data.workspace.slug ?? brandId}-${iso().slice(0, 10)}.json"` } });
+});
+
+// 導流漏斗：曝光 → 互動 → 點擊 LINE 連結 → 新好友 → 轉真人（全部為計數，不含個資）
+add('GET', '/funnel', 'admin', async ({ env, url, brandId }) => {
+  const brand = await getBrand(env);
+  const s = await getSettings(env, brandId);
+  const day = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const today = localDate(new Date(), brand.timezone);
+  const from = day(url.searchParams.get('from')) ?? addDays(today, -29);
+  const to = day(url.searchParams.get('to')) ?? addDays(today, 1); // 不含當天
+  const fromIso = zonedToUtc(from, '00:00', brand.timezone).toISOString(), toIso = zonedToUtc(to, '00:00', brand.timezone).toISOString();
+  const posts = (await env.DB.prepare(
+    `SELECT p.id,p.content,p.parts,p.account_id,p.published_at,a.username,m.views,m.likes,m.replies,m.reposts,m.quotes,m.shares,
+       (SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks
+     FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
+     WHERE p.brand_id=? AND p.status='published' AND p.published_at>=? AND p.published_at<? ORDER BY p.published_at DESC LIMIT 500`,
+  ).bind(brandId, fromIso, toIso).all<any>()).results;
+  const sum = (k: string) => posts.reduce((a, p) => a + (p[k] ?? 0), 0);
+  const withMetrics = posts.filter((p) => p.views !== null && p.views !== undefined).length;
+  const accts = await listAccounts(env);
+  const insights = accts.some((a) => (a as any).insights_status === 'ok') || withMetrics > 0 ? 'ok'
+    : accts.some((a) => (a as any).insights_status === 'no_permission') ? 'no_permission' : 'pending';
+  const first = (p: any) => (partsOf(p)[0] || '').split('\n')[0].slice(0, 80);
+  return json({
+    from, to, timezone: brand.timezone, insights, tracking: !!env.PUBLIC_BASE_URL, leads_enabled: !!s.leads_enabled,
+    totals: {
+      posts: posts.length, posts_with_metrics: withMetrics,
+      views: sum('views'), likes: sum('likes'), replies: sum('replies'), reposts: sum('reposts'), quotes: sum('quotes'), shares: sum('shares'),
+      clicks: await metricSum(env, brandId, 'link_click', from, to),
+      friends: await metricSum(env, brandId, 'friend_add', from, to),
+      handoffs: await metricSum(env, brandId, 'handoff', from, to),
+      leads: s.leads_enabled ? ((await env.DB.prepare('SELECT COUNT(*) c FROM inquiries WHERE brand_id=? AND created_at>=? AND created_at<?').bind(brandId, fromIso, toIso).first<{ c: number }>())?.c ?? 0) : null,
+    },
+    top: [...posts].sort((a, b) => (b.views ?? -1) - (a.views ?? -1) || (b.clicks ?? 0) - (a.clicks ?? 0)).slice(0, 5)
+      .map((p) => ({ id: p.id, hook: first(p), username: p.username, published_at: p.published_at, views: p.views, likes: p.likes, replies: p.replies, reposts: p.reposts, clicks: p.clicks ?? 0 })),
+  });
 });
 
 registerExtra(add, json, err);

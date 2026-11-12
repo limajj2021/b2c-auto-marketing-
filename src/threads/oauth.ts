@@ -24,8 +24,8 @@ export async function buildAuthorizeUrl(env: Env, origin: string, adminId: numbe
   return `https://threads.net/oauth/authorize?${q}`;
 }
 
-async function jget(url: string, init?: RequestInit) {
-  const r = await fetch(url, init);
+async function jget(url: string, init?: RequestInit, f: typeof fetch = fetch) {
+  const r = await f(url, init);
   const b: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(b?.error?.message ?? `HTTP ${r.status}`);
   return b;
@@ -77,7 +77,7 @@ export async function refreshIfNeeded(env: Env, now = new Date()): Promise<void>
     if (left > REFRESH_BEFORE_DAYS * 86400000) continue;
     try {
       const c = await credFor(env, a);
-      const r = await jget(`${OAUTH}/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(c.token)}`);
+      const r = await jget(`${OAUTH}/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(c.token)}`, undefined, c.f);
       await setAccountToken(env, a.id, r.access_token, new Date(now.getTime() + (r.expires_in ?? 5184000) * 1000).toISOString());
       await audit(env, brand.id, null, 'threads_token_refreshed', a.username ?? '');
     } catch (e) {

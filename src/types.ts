@@ -20,6 +20,13 @@ export interface Env {
   CRON_BATCH?: string;
   /** 由請求解析出的工作區；只在程式內部設定 */
   BRAND_ID?: string;
+  /** 對外網址（例如 https://xxx.workers.dev），用來產生貼文追蹤短連結 */
+  PUBLIC_BASE_URL?: string;
+  /** 每次排程最多使用的請求數（含資料庫查詢）。免費方案建議 45，付費方案可設 5000 */
+  CRON_SUBREQUEST_LIMIT?: string;
+  /** 排程期間由 budget.ts 注入 */
+  SUBFETCH?: typeof fetch;
+  BUDGET?: import('./budget').Budget;
 }
 
 export interface Brand {

@@ -22,7 +22,7 @@ const nextMonth = (start: string) => { const d = new Date(start); d.setUTCMonth(
 async function operator(env: Env, req: Request) {
   const tok = cookieOf(req); if (!tok) return null;
   const v = await verifyToken(opSecret(env), tok, Math.floor(Date.now() / 1000)); if (!v) return null;
-  return env.DB.prepare('SELECT id,username FROM operators WHERE id=? AND enabled=1').bind(v.uid).first<{ id: number; username: string }>();
+  return env.DB.prepare('SELECT id,username,role FROM operators WHERE id=? AND enabled=1').bind(v.uid).first<{ id: number; username: string; role: 'admin' | 'support' }>();
 }
 
 export async function handleOps(env: Env, req: Request): Promise<Response> {
@@ -46,7 +46,52 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
   const op = await operator(env, req);
   if (!op) return err(401, 'unauthorized');
   if (path === '/logout') return json({ ok: true }, 200, { 'set-cookie': 'osid=; Path=/api/op; Max-Age=0; HttpOnly; Secure; SameSite=Strict' });
-  if (path === '/me') return json({ username: op.username });
+  if (path === '/me') return json({ username: op.username, role: op.role });
+
+  // 自己變更密碼
+  if (path === '/password' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const row = await env.DB.prepare('SELECT password_hash FROM operators WHERE id=?').bind(op.id).first<any>();
+    if (!(await verifyPassword(String(b.current ?? ''), row.password_hash))) return err(400, '目前密碼錯誤');
+    if (String(b.next ?? '').length < 12) return err(400, '新密碼至少 12 字元');
+    await env.DB.prepare('UPDATE operators SET password_hash=? WHERE id=?').bind(await hashPassword(b.next), op.id).run();
+    await log(env, op.username, 'op_password_change');
+    return json({ ok: true });
+  }
+
+  // 維護人員（support）只能查看狀態與協助重設客戶密碼；其餘變更限管理者（admin）
+  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/reset-admin$/.test(path);
+  if (writes && op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
+
+  if (path === '/operators' && req.method === 'GET') {
+    if (op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
+    return json((await env.DB.prepare('SELECT id,username,role,enabled,created_at FROM operators ORDER BY id').all()).results);
+  }
+  if (path === '/operators' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const username = String(b.username ?? '').trim();
+    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) return err(400, '帳號需為 3–32 字英數');
+    if (!['admin', 'support'].includes(b.role)) return err(400, '角色不合法');
+    const pw = randomPassword();
+    const r = await env.DB.prepare('INSERT OR IGNORE INTO operators(username,password_hash,role,created_at) VALUES(?,?,?,?)').bind(username, await hashPassword(pw), b.role, iso()).run();
+    if (r.meta.changes !== 1) return err(409, '帳號已存在');
+    await log(env, op.username, 'operator_create', `${username}:${b.role}`);
+    return json({ username, role: b.role, password: pw }, 201);
+  }
+  const om = path.match(/^\/operators\/(\d+)$/);
+  if (om && req.method === 'PATCH') {
+    if (Number(om[1]) === op.id) return err(400, '不能修改自己的帳號狀態或角色');
+    const b: any = await req.json().catch(() => ({}));
+    const sets: string[] = [], vals: unknown[] = [];
+    if (typeof b.enabled === 'boolean') { sets.push('enabled=?'); vals.push(b.enabled ? 1 : 0); }
+    if (b.role !== undefined) { if (!['admin', 'support'].includes(b.role)) return err(400, '角色不合法'); sets.push('role=?'); vals.push(b.role); }
+    if (b.reset_password === true) { const pw = randomPassword(); sets.push('password_hash=?'); vals.push(await hashPassword(pw)); (b as any)._pw = pw; }
+    if (!sets.length) return err(400, 'nothing to update');
+    const r = await env.DB.prepare(`UPDATE operators SET ${sets.join(',')} WHERE id=?`).bind(...vals, om[1]).run();
+    if (!r.meta.changes) return err(404, '找不到人員');
+    await log(env, op.username, 'operator_update', `${om[1]}:${JSON.stringify({ enabled: b.enabled, role: b.role, reset: !!b.reset_password })}`);
+    return json({ ok: true, password: (b as any)._pw });
+  }
 
   // 所有工作區的健康狀態與本月用量（一次查詢彙總，不逐一開啟工作區）
   if (path === '/tenants' && req.method === 'GET') {
@@ -55,6 +100,8 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
       `SELECT b.id,b.slug,b.name,b.industry,b.status,b.plan,b.created_at,b.last_cron_at,s.auto_post_enabled,s.line_auto_reply_enabled,s.daily_gen_limit,s.leads_enabled,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
+        (SELECT COALESCE(SUM(m.views),0) FROM post_metrics m JOIN posts p ON p.id=m.post_id WHERE m.brand_id=b.id AND p.published_at>=? AND p.published_at<?) views,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.handling_status='pending') leads_pending,
         (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
@@ -68,7 +115,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name IN ('line_channel_secret','line_channel_access_token')) line_creds,
         (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name='gemini_api_key') gemini_key
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.created_at`,
-    ).bind(ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me, ms, me).all<any>()).results;
+    ).bind(ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me, ms, me, ms, me).all<any>()).results;
     const cronAge = (t: string | null) => (t ? Date.now() - new Date(t).getTime() : Infinity);
     return json({
       month: ms.slice(0, 7),
@@ -94,11 +141,13 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
+        (SELECT COALESCE(SUM(m.views),0) FROM post_metrics m JOIN posts p ON p.id=m.post_id WHERE m.brand_id=b.id AND p.published_at>=? AND p.published_at<?) views,
         (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
         (SELECT COUNT(*) FROM threads_accounts a WHERE a.brand_id=b.id) threads_accounts,
         (SELECT COUNT(*) FROM ai_generations g WHERE g.brand_id=b.id AND g.created_at>=? AND g.created_at<?) generations
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.slug`,
-    ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me).all()).results;
+    ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me).all()).results;
     return json({ month: ms.slice(0, 7), rows });
   }
 

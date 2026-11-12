@@ -3,6 +3,7 @@ import { getBrand } from '../db';
 import type { Env, Settings } from '../types';
 import { decryptText, encryptText } from '../util/secrets';
 import { iso } from '../util/time';
+import { xfetch } from '../budget';
 
 export interface Account {
   id: number; brand_id: string; threads_user_id: string; username: string | null; token_enc: string; expires_at: string | null;
@@ -10,7 +11,7 @@ export interface Account {
   publishing_times: string | null; cta_text: string | null; auto_post_enabled: number;
 }
 /** 發文用的憑證；legacy 代表沿用 wrangler secret 的單帳號設定（無 threads_accounts 時）。 */
-export interface Cred { accountId: number | null; token: string; userId: string; username?: string | null }
+export interface Cred { accountId: number | null; token: string; userId: string; username?: string | null; f?: typeof fetch }
 
 const key = (env: Env) => env.CRED_ENC_KEY || env.SESSION_SECRET;
 
@@ -47,7 +48,7 @@ export async function upsertAccount(env: Env, brandId: string, a: { userId: stri
   const enc = await encryptText(key(env), a.token);
   await env.DB.prepare(
     `INSERT INTO threads_accounts(brand_id,threads_user_id,username,token_enc,expires_at,status,created_at,updated_at) VALUES(?,?,?,?,?,'ok',?,?)
-     ON CONFLICT(brand_id,threads_user_id) DO UPDATE SET username=excluded.username,token_enc=excluded.token_enc,expires_at=excluded.expires_at,status='ok',updated_at=excluded.updated_at`,
+     ON CONFLICT(brand_id,threads_user_id) DO UPDATE SET username=excluded.username,token_enc=excluded.token_enc,expires_at=excluded.expires_at,status='ok',insights_status='unknown',updated_at=excluded.updated_at`,
   ).bind(brandId, a.userId, a.username, enc, a.expiresAt, iso(), iso()).run();
   return (await env.DB.prepare('SELECT id FROM threads_accounts WHERE brand_id=? AND threads_user_id=?').bind(brandId, a.userId).first<{ id: number }>())!.id;
 }
@@ -64,7 +65,7 @@ export async function markAccount(env: Env, id: number | null, status: 'ok' | 't
 }
 
 export async function credFor(env: Env, a: Account): Promise<Cred> {
-  return { accountId: a.id, token: await decryptText(key(env), a.token_enc), userId: a.threads_user_id, username: a.username };
+  return { accountId: a.id, token: await decryptText(key(env), a.token_enc), userId: a.threads_user_id, username: a.username, f: xfetch(env) };
 }
 /** 依貼文所屬帳號取得憑證；未指定時用第一個帳號，再退回舊版 wrangler secret。 */
 export async function resolveCred(env: Env, accountId: number | null): Promise<Cred | null> {
@@ -72,7 +73,7 @@ export async function resolveCred(env: Env, accountId: number | null): Promise<C
   const a = accountId ? accts.find((x) => x.id === accountId) : accts[0];
   if (a) return a.status === 'ok' ? credFor(env, a) : null;
   if (accountId) return null; // 指定的帳號已被移除
-  return env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID ? { accountId: null, token: env.THREADS_ACCESS_TOKEN, userId: env.THREADS_USER_ID } : null;
+  return env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID ? { accountId: null, token: env.THREADS_ACCESS_TOKEN, userId: env.THREADS_USER_ID, f: xfetch(env) } : null;
 }
 
 /** 帳號的有效設定：未覆寫的欄位沿用品牌預設。 */

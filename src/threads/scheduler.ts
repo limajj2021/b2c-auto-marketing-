@@ -4,7 +4,9 @@ import type { Env, Post, Settings } from '../types';
 import { REGULATED_INDUSTRIES } from '../types';
 import { addDays, iso, localDate, zonedToUtc } from '../util/time';
 import { effective, listAccounts, markAccount, resolveCred, type Account } from './accounts';
-import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, publishContainer } from './api';
+import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, postInsights, publishContainer } from './api';
+import { BudgetError, canAfford } from '../budget';
+import { trackedParts } from '../links';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
 const MAX_GEN_ATTEMPTS = 3;
@@ -28,12 +30,17 @@ const idsOf = (p: Pick<Post, 'part_ids'>): string[] => { try { const a = JSON.pa
 export async function runCron(env: Env, now = new Date()): Promise<void> {
   const brand = await getBrand(env);
   const s = await getSettings(env, brand.id);
-  const step = async (name: string, fn: () => Promise<void>) => { try { await fn(); } catch (e) { console.error(`cron:${name}`, (e as Error).message); } };
-  await step('housekeeping', () => housekeeping(env, now));
-  if (!s.auto_post_enabled) return; // 暫停：不生成、不發布
-  await step('reconcile', () => reconcile(env, now));
-  await step('generate', () => ensureSlots(env, now));
-  await step('publish', () => publishDue(env, now));
+  const step = async (name: string, fn: () => Promise<void>) => {
+    try { await fn(); } catch (e) { if (e instanceof BudgetError) throw e; console.error(`cron:${name}`, (e as Error).message); }
+  };
+  if (now.getUTCMinutes() < 5) await step('housekeeping', () => housekeeping(env, now)); // 每小時一次即可，節省額度
+  if (s.auto_post_enabled) {
+    // 額度有限時的優先順序：先核對與發布，再生成新草稿
+    await step('reconcile', () => reconcile(env, now));
+    await step('publish', () => publishDue(env, now));
+    await step('generate', () => ensureSlots(env, now));
+  }
+  await step('insights', () => refreshInsights(env, now));
 }
 
 async function housekeeping(env: Env, now: Date) {
@@ -64,6 +71,7 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
         const slot = `${day}#${i}${a ? `@a${a.id}` : ''}`;
         const ins = await env.DB.prepare(`INSERT OR IGNORE INTO posts(brand_id,account_id,status,slot_key,scheduled_at,updated_at,created_at) VALUES(?,?,?,?,?,?,?)`)
           .bind(brand.id, a?.id ?? null, 'generating', slot, at.toISOString(), iso(now), iso(now)).run();
+        if (!canAfford(env, 8)) return; // 生成一串約需 8 次請求，不夠就留到下一輪
         let postId: number | null = ins.meta.changes === 1 ? (ins.meta.last_row_id as number) : null;
         if (postId === null) {
           const row = await env.DB.prepare(`SELECT id FROM posts WHERE brand_id=? AND slot_key=? AND status='gen_failed' AND gen_attempts<?`).bind(brand.id, slot, MAX_GEN_ATTEMPTS).first<{ id: number }>();
@@ -79,6 +87,7 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
             .bind(g.parts[0], JSON.stringify(g.parts), status, g.generationId, status === 'scheduled' ? 'auto' : null,
               g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(now), postId).run();
         } catch (err) {
+          if (err instanceof BudgetError) throw err;
           if (err instanceof QuotaError) {
             await env.DB.prepare(`DELETE FROM posts WHERE id=? AND status='generating'`).bind(postId).run();
             console.warn('cron:quota', err.message);
@@ -98,11 +107,15 @@ export async function publishDue(env: Env, now: Date): Promise<void> {
   const accts = await listAccounts(env);
   if (!accts.length && s.threads_status === 'token_invalid') return;
   const due = await env.DB.prepare(
-    `SELECT p.id FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id
+    `SELECT p.id,p.parts,p.part_ids,p.content FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id
      WHERE p.brand_id=? AND p.status='scheduled' AND p.scheduled_at<=? AND (p.account_id IS NULL OR a.status='ok')
      ORDER BY p.scheduled_at LIMIT 3`,
-  ).bind(brand.id, iso(now)).all<{ id: number }>();
-  for (const r of due.results) await publishOne(env, r.id, now);
+  ).bind(brand.id, iso(now)).all<{ id: number; parts: string | null; part_ids: string | null; content: string }>();
+  for (const r of due.results) {
+    // 每則約 2 次對外呼叫 + 資料庫寫入；額度不夠就留到下一輪，不會發到一半
+    if (!canAfford(env, (partsOf(r).length - idsOf(r).length) * 3 + 8)) return;
+    await publishOne(env, r.id, now);
+  }
 }
 
 /** 發布一則或一整串；每發出一則就記錄 ID，中斷後從下一則接續，不會重複發已發出的部分。 */
@@ -112,7 +125,8 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
   ).bind(iso(now), id).run();
   if (claim.meta.changes !== 1) return;
   const post = (await env.DB.prepare('SELECT * FROM posts WHERE id=?').bind(id).first<Post>())!;
-  const parts = partsOf(post), ids = idsOf(post);
+  const ids = idsOf(post);
+  const parts = await trackedParts(env, post, partsOf(post)); // LINE 連結換成追蹤短連結
   const setErr = (status: string, msg: string) => env.DB.prepare('UPDATE posts SET status=?,error_message=?,updated_at=? WHERE id=?').bind(status, msg.slice(0, 300), iso(now), id).run();
   const cred = await resolveCred(env, post.account_id);
   if (!cred) { await setErr('failed', '發文帳號未連結或授權已失效，請到「設定 → Threads」重新連結後重試'); return; }
@@ -129,6 +143,7 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
     }
     await env.DB.prepare(`UPDATE posts SET status='published',published_at=?,error_message=NULL,updated_at=? WHERE id=?`).bind(iso(now), iso(now), id).run();
   } catch (e) {
+    if (e instanceof BudgetError) throw e; // 額度檢查已事先預留，理論上不會發生
     const n = ids.length + 1, chain = parts.length > 1;
     if (e instanceof ThreadsUnknownError) {
       // 第一則結果未知 → 交給 reconcile 核對；串文中途未知 → 請人工確認，避免重複
@@ -148,7 +163,7 @@ export async function reconcile(env: Env, now: Date): Promise<void> {
   const rows = await env.DB.prepare(`SELECT * FROM posts WHERE brand_id=? AND (status='unknown' OR (status='publishing' AND updated_at<?))`)
     .bind(brand.id, new Date(now.getTime() - STALE_MS).toISOString()).all<Post>();
   for (const p of rows.results) {
-    const parts = partsOf(p), ids = idsOf(p);
+    const ids = idsOf(p), parts = await trackedParts(env, p, partsOf(p));
     const upd = (status: string, msg: string | null) => env.DB.prepare('UPDATE posts SET status=?,error_message=?,updated_at=? WHERE id=?').bind(status, msg, iso(now), p.id).run();
     if (ids.length) { await upd('failed', `第 ${ids.length + 1} 則狀態不明，請到 Threads 確認；未發出可按「重試」接續`); continue; }
     const cred = await resolveCred(env, p.account_id);
@@ -160,5 +175,33 @@ export async function reconcile(env: Env, now: Date): Promise<void> {
       if (parts.length > 1) await upd('scheduled', null); // 首則已發出，繼續發後面的串文
       else await env.DB.prepare(`UPDATE posts SET status='published',published_at=?,error_message=NULL WHERE id=?`).bind(hit.timestamp ?? iso(now), p.id).run();
     } else await upd(p.attempts >= MAX_PUBLISH_ATTEMPTS ? 'failed' : 'scheduled', '核對後平台無此貼文，重新排入');
+  }
+}
+
+/** 補抓近 14 天已發布貼文的成效數據（每 6 小時更新一次）。沒有權限的帳號會被標記，重新連結後再試。 */
+export async function refreshInsights(env: Env, now: Date): Promise<void> {
+  const brand = await getBrand(env);
+  const rows = (await env.DB.prepare(
+    `SELECT p.id,p.account_id,p.threads_post_id FROM posts p
+       LEFT JOIN post_metrics m ON m.post_id=p.id LEFT JOIN threads_accounts a ON a.id=p.account_id
+     WHERE p.brand_id=? AND p.status='published' AND p.threads_post_id IS NOT NULL AND p.published_at>=?
+       AND (m.fetched_at IS NULL OR m.fetched_at<?) AND (p.account_id IS NULL OR (a.status='ok' AND a.insights_status<>'no_permission'))
+     ORDER BY COALESCE(m.fetched_at,'') LIMIT 5`,
+  ).bind(brand.id, new Date(now.getTime() - 14 * 86400000).toISOString(), new Date(now.getTime() - 6 * 3600000).toISOString())
+    .all<{ id: number; account_id: number | null; threads_post_id: string }>()).results;
+  for (const r of rows) {
+    if (!canAfford(env, 4)) return;
+    const cred = await resolveCred(env, r.account_id);
+    if (!cred) continue;
+    const m = await postInsights(cred, r.threads_post_id);
+    if (m === null) {
+      if (cred.accountId) await env.DB.prepare(`UPDATE threads_accounts SET insights_status='no_permission' WHERE id=?`).bind(cred.accountId).run();
+      continue;
+    }
+    if (cred.accountId) await env.DB.prepare(`UPDATE threads_accounts SET insights_status='ok' WHERE id=? AND insights_status<>'ok'`).bind(cred.accountId).run();
+    await env.DB.prepare(
+      `INSERT INTO post_metrics(post_id,brand_id,views,likes,replies,reposts,quotes,shares,fetched_at) VALUES(?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(post_id) DO UPDATE SET views=excluded.views,likes=excluded.likes,replies=excluded.replies,reposts=excluded.reposts,quotes=excluded.quotes,shares=excluded.shares,fetched_at=excluded.fetched_at`,
+    ).bind(r.id, brand.id, m.views ?? 0, m.likes ?? 0, m.replies ?? 0, m.reposts ?? 0, m.quotes ?? 0, m.shares ?? 0, iso(now)).run();
   }
 }

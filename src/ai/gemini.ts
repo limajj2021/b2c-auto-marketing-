@@ -4,6 +4,7 @@ import type { Brand, Env, Settings } from '../types';
 import { REGULATED_INDUSTRIES } from '../types';
 import { localDate, iso, zonedToUtc } from '../util/time';
 import { THREADS_MAX_CHARS, checkParts } from './compliance';
+import { xfetch } from '../budget';
 
 export class QuotaError extends Error {}
 
@@ -81,7 +82,7 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
       `INSERT INTO ai_generations(brand_id,provider,model,prompt_version,input_tokens,output_tokens,status,result,error_message,duration_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(brand.id, 'gemini', model, s.prompt_version, inT, outT, status, text, err, Date.now() - started, iso(now)).run()).meta.last_row_id as number;
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    const res = await xfetch(env)(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
       body: JSON.stringify({

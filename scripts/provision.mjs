@@ -74,6 +74,8 @@ compatibility_date = "2025-01-01"
 GEMINI_MODEL = "${cfg.geminiModel ?? 'gemini-3.5-flash-lite'}"
 THREADS_APP_ID = "${threadsAppId}"
 MULTI_TENANT = "${cfg.multiTenant ? '1' : ''}"
+PUBLIC_BASE_URL = "${cfg.publicBaseUrl ?? ''}"
+CRON_SUBREQUEST_LIMIT = "${cfg.cronSubrequestLimit ?? ''}"
 
 [assets]
 directory = "../public"

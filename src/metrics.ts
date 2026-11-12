@@ -3,7 +3,7 @@ import { getBrand } from './db';
 import type { Env } from './types';
 import { localDate } from './util/time';
 
-export type MetricName = 'friend_add' | 'handoff';
+export type MetricName = 'friend_add' | 'handoff' | 'link_click';
 
 export async function bump(env: Env, name: MetricName, now = new Date()): Promise<void> {
   const b = await getBrand(env);
