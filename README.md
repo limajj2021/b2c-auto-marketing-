@@ -78,6 +78,7 @@ npm run provision -- --brand acme
 ## LINE 串接（2026-11-12 起）
 
 客戶只需在「設定 → LINE 官方帳號」貼上 **Channel ID** 與 **Channel secret**。系統以 client credentials 向 LINE 申請發訊用 token（有效 30 天），排程每小時檢查，到期前 7 天自動換新（`src/line/token.ts`），並自動設定、測試 Webhook。仍可在「進階」改貼自行發行的 long-lived token（不會自動更新）。
+設定頁另有：輸入官方帳號 ID 產生 LINE 後台直達連結、把 Basic settings 整頁貼上自動抓出 Channel ID／secret、偵測「聊天」功能開啟時提醒，以及「請服務商代設定」（客戶把服務商加為官方帳號管理員）。
 LINE 沒有開放一般開發者一鍵授權官方帳號；「啟用 Messaging API」與「關閉 OA 自動回應」仍須客戶在 LINE Official Account Manager 自行操作。
 
 ## 導流成效（公域 → 私域）

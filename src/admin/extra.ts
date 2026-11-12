@@ -17,11 +17,12 @@ type E = (status: number, message: string) => Response;
 
 const GEMINI_MODELS = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1';
 
-async function lineInfo(token: string): Promise<{ ok: boolean; name?: string; basicId?: string }> {
+/** chatMode：'chat' 代表官方帳號的「聊天」功能開啟中（真人聊天與自動回覆可能同時出現） */
+async function lineInfo(token: string): Promise<{ ok: boolean; name?: string; basicId?: string; chatMode?: string }> {
   const r = await fetch('https://api.line.me/v2/bot/info', { headers: { authorization: `Bearer ${token}` } });
   if (!r.ok) return { ok: false };
   const b: any = await r.json();
-  return { ok: true, name: b.displayName, basicId: b.basicId };
+  return { ok: true, name: b.displayName, basicId: b.basicId, chatMode: b.chatMode };
 }
 
 export function registerExtra(add: Add, json: J, err: E) {
@@ -29,7 +30,7 @@ export function registerExtra(add: Add, json: J, err: E) {
     const st = await credStatus(env);
     const accts = await listAccounts(env);
     return json({
-      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null, auto_token: !!st.line_channel_access_token.meta.auto },
+      line: { configured: st.line_channel_secret.set && st.line_channel_access_token.set, webhook_url: isMulti(env) ? `${url.origin}/line/webhook/${(await getBrand(env)).slug}` : `${url.origin}/line/webhook`, name: st.line_channel_access_token.meta.name ?? null, auto_token: !!st.line_channel_access_token.meta.auto, basic_id: st.line_channel_access_token.meta.basic_id ?? null, chat_mode: st.line_channel_access_token.meta.chat_mode ?? null },
       gemini: { configured: st.gemini_api_key.set },
       threads: {
         configured: accts.length > 0,
@@ -66,7 +67,7 @@ export function registerExtra(add: Add, json: J, err: E) {
       return err(400, 'Access token 無效，LINE 拒絕了這組憑證');
     }
     await setCred(env, brandId, 'line_channel_secret', secret);
-    await setCred(env, brandId, 'line_channel_access_token', token, { ...meta, name: info.name, basic_id: info.basicId });
+    await setCred(env, brandId, 'line_channel_access_token', token, { ...meta, name: info.name, basic_id: info.basicId, chat_mode: info.chatMode ?? null });
     if (meta.auto) await setCred(env, brandId, 'line_channel_id', channelId);
     else await deleteCreds(env, ['line_channel_id']); // 改用自行發行的 token：不再自動更新
     const ws = await getBrand(env);
@@ -82,7 +83,7 @@ export function registerExtra(add: Add, json: J, err: E) {
     await logEvent(env, brandId, verified ? 'info' : 'warn', 'line_connect',
       verified ? `已連接 LINE「${info.name}」，Webhook 驗證通過` : set.ok ? `已連接 LINE「${info.name}」，但 Webhook 測試未通過：請到 LINE Developers 開啟 Use webhook` : `已連接 LINE「${info.name}」，但設定 Webhook 網址失敗（HTTP ${set.status}）`,
       { endpoint, auto_token: !!meta.auto });
-    return json({ ok: true, bot: info.name, webhook_set: set.ok, webhook_verified: verified });
+    return json({ ok: true, bot: info.name, basic_id: info.basicId ?? null, chat_mode: info.chatMode ?? null, webhook_set: set.ok, webhook_verified: verified });
   });
 
   add('POST', '/integrations/gemini', 'admin', async ({ env, req, actor, brandId }) => {
@@ -116,7 +117,12 @@ export function registerExtra(add: Add, json: J, err: E) {
       if (b.target === 'line') {
         if (!env.LINE_CHANNEL_ACCESS_TOKEN) return json({ ok: false, message: '尚未設定' });
         const i = await lineInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
-        return json({ ok: i.ok, message: i.ok ? `已連線：${i.name}` : 'Token 無效' });
+        if (i.ok) { // 順便更新聊天模式，讓設定頁的提醒保持正確
+          const meta = await getMeta(env, 'line_channel_access_token');
+          if (meta && meta.chat_mode !== (i.chatMode ?? null)) await env.DB.prepare('UPDATE integrations SET meta=? WHERE brand_id=? AND name=?')
+            .bind(JSON.stringify({ ...meta, chat_mode: i.chatMode ?? null }), (await getBrand(env)).id, 'line_channel_access_token').run();
+        }
+        return json({ ok: i.ok, chat_mode: i.chatMode ?? null, message: !i.ok ? 'Token 無效' : i.chatMode === 'chat' ? `已連線：${i.name}。提醒：「聊天」功能開啟中，顧客可能同時收到自動回覆與真人訊息` : `已連線：${i.name}` });
       }
       if (b.target === 'gemini') {
         if (!env.GEMINI_API_KEY) return json({ ok: false, message: '尚未設定' });

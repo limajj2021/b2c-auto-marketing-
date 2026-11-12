@@ -22,7 +22,7 @@ describe('LINE: connect with Channel ID + secret only', () => {
         if (p.get('client_secret') !== SECRET) return jres({ error: 'invalid_client' }, 400);
         return jres({ access_token: `TOK${++n}`, expires_in: 2592000, token_type: 'Bearer' });
       }
-      if (u.endsWith('/v2/bot/info')) return jres({ displayName: 'VUCA', basicId: '@vuca' });
+      if (u.endsWith('/v2/bot/info')) return jres({ displayName: 'VUCA', basicId: '@vuca', chatMode: 'chat' });
       if (u.endsWith('/webhook/test')) return jres({ success: true });
       return jres({});
     }); restore = m.restore;
@@ -32,7 +32,11 @@ describe('LINE: connect with Channel ID + secret only', () => {
     expect(((await bad.json()) as any).error).toContain('不正確');
     const ok = await api(env, 'POST', '/api/integrations/line', { channel_id: '2001234567', channel_secret: SECRET }, c);
     expect(ok.status).toBe(200);
-    expect(((await ok.json()) as any).webhook_verified).toBe(true);
+    const okBody = (await ok.json()) as any;
+    expect(okBody.webhook_verified).toBe(true);
+    expect(okBody).toMatchObject({ basic_id: '@vuca', chat_mode: 'chat' }); // 聊天功能開啟中要提醒
+    const ig = (await (await api(env, 'GET', '/api/integrations', undefined, c)).json()) as any;
+    expect(ig.line).toMatchObject({ configured: true, basic_id: '@vuca', chat_mode: 'chat', auto_token: true });
     const e1 = await withCreds({ ...env, LINE_CHANNEL_ACCESS_TOKEN: '', LINE_CHANNEL_SECRET: '' });
     expect(e1.LINE_CHANNEL_ACCESS_TOKEN).toBe('TOK1');
     expect(e1.LINE_CHANNEL_ID).toBe('2001234567');
