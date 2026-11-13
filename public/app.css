@@ -26,7 +26,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .hide{display:none!important}.grow{flex:1;min-width:0}
 .t-page{font-size:22px;line-height:1.3;font-weight:600;letter-spacing:.02em}
 .t-sec{font-size:16px;font-weight:600}
-.t-sub{font-size:12.5px;color:var(--text2);line-height:1.5}
+.t-sub{font-size:13px;color:var(--text2);line-height:1.55}
 .t-label{font-size:13.5px;font-weight:500}
 .mut{color:var(--text2)}.clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -53,12 +53,12 @@ nav.tabs .in{max-width:720px;margin:0 auto;display:flex}
 /* ============ Primitives ============ */
 .page>*+*{margin-top:28px}.page>.tight+*{margin-top:12px}
 .sec-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;min-height:24px}
-.sec-h .lbl{font-size:12.5px;color:var(--text2);font-weight:500;letter-spacing:.06em}
+.sec-h .lbl{font-size:15px;color:var(--text);font-weight:600;letter-spacing:.02em}
 .link{background:none;border:0;padding:6px 0;min-height:32px;color:var(--gold-text);font-size:13.5px;font-weight:500;cursor:pointer}
 .list{background:var(--bg1);border-radius:var(--r-lg);overflow:hidden}
 .row{display:flex;align-items:center;gap:12px;min-height:52px;padding:10px 16px;width:100%;background:none;border:0;border-top:1px solid var(--line);text-align:left;cursor:pointer;color:inherit;text-decoration:none}
 .row:first-child{border-top:0}
-.row .main{flex:1;min-width:0}.row .ttl{font-size:14.5px;font-weight:500;line-height:1.4}.row .sub{font-size:12.5px;color:var(--text2);line-height:1.45;margin-top:1px}
+.row .main{flex:1;min-width:0}.row .ttl{font-size:14.5px;font-weight:500;line-height:1.4}.row .sub{font-size:13px;color:var(--text2);line-height:1.5;margin-top:2px}
 .row .end{flex:none;color:var(--text2);font-size:13px;display:flex;align-items:center;gap:8px}
 .row .chev{width:16px;height:16px;stroke:var(--text3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .row.static{cursor:default}
@@ -120,6 +120,21 @@ details.acc summary::-webkit-details-marker{display:none}
 details.acc summary:after{content:"";width:8px;height:8px;border-right:1.8px solid var(--text3);border-bottom:1.8px solid var(--text3);transform:rotate(45deg);transition:transform .15s;margin-right:4px}
 details.acc[open] summary:after{transform:rotate(-135deg)}
 details.acc .body{padding:0 16px 16px;color:var(--text2);line-height:1.75}.body ol,.body ul{margin:6px 0;padding-left:20px}.body li{margin:6px 0}.body b{color:var(--text)}
+
+/* ============ 導流漏斗（產品的核心畫面：逐層收窄，層與層之間標轉換率） ============ */
+.funnel{background:var(--bg1);border-radius:var(--r-lg);padding:16px}
+.fs{display:grid;grid-template-columns:104px 1fr;align-items:center;column-gap:14px}
+.fs .fv{display:flex;flex-direction:column;min-width:0}
+.fs .fn{font-size:24px;line-height:1.15;font-weight:500;letter-spacing:0;white-space:nowrap}.fs .fn.z{color:var(--text3)}
+.fs .fk{font-size:13px;color:var(--text2);margin-top:2px}
+.fs .fb{position:relative;height:14px;border-radius:7px;background:var(--bg2);overflow:hidden}
+.fs .fb i{position:absolute;left:0;top:0;bottom:0;border-radius:7px;background:var(--gold)}
+.fs:nth-of-type(2) .fb i{opacity:.85}.fs:nth-of-type(3) .fb i{opacity:.72}.fs:nth-of-type(4) .fb i{opacity:.6}.fs:nth-of-type(5) .fb i{opacity:.5}
+.fr{display:grid;grid-template-columns:104px 1fr;column-gap:14px;margin:6px 0 8px;font-size:12.5px;color:var(--text2)}
+.fr span{grid-column:2;display:flex;align-items:center;gap:6px}.fr b{color:var(--text);font-weight:600}
+.fr span:before{content:"";width:1px;height:14px;background:var(--line)}.fr span:empty:before{display:none}
+.fhint{margin-top:10px;font-size:13px;color:var(--text2);line-height:1.6}
+@media print{.funnel{border:1px solid #ddd}.fs .fb{border:1px solid #ccc}}
 
 /* ============ Overlays ============ */
 .sheet{position:fixed;inset:0;z-index:30;background:rgba(6,6,5,.6);display:flex;align-items:flex-end;justify-content:center;animation:fade .18s}

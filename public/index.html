@@ -187,7 +187,7 @@ function loginView() {
 /* ======================================================================
    首頁：現在需要處理什麼 → 今日摘要 → 快速操作 → 自動化 → 最近活動
    ====================================================================== */
-const ACTION = { settings_update: '更新設定', post_approve: '核准貼文', post_generate: 'AI 生成貼文', post_edit: '編輯貼文', post_delete: '刪除貼文', post_retry: '重試發布', inquiry_status: '更新留資狀態', inquiry_delete: '刪除留資', line_config_update: '更新 LINE 接待設定', faq_create: '新增 FAQ', faq_update: '更新 FAQ', faq_delete: '刪除 FAQ', toggle: '切換自動化', integration_line: '設定 LINE 連線', integration_gemini: '設定 AI 連線', threads_connected: '連結 Threads', threads_disconnect: '中斷 Threads', threads_token_refreshed: 'Threads 授權自動續期', threads_deauthorize: 'Threads 解除授權', threads_delete: 'Threads 資料刪除', user_create: '新增帳號', user_update: '更新帳號', password_change: '變更密碼' };
+const ACTION = { account_update: '更新 Threads 帳號設定', account_disconnect: '中斷 Threads 帳號', user_password_reset: '重設同事密碼', user_update: '更新帳號', post_unschedule: '取消排程', post_reschedule: '調整發布時間', post_distribute: '改寫分發', data_export: '匯出資料', integration_line_webhook: '設定 LINE 自動接待', line_token_renewed: 'LINE 憑證自動更新', settings_update: '更新設定', post_approve: '核准貼文', post_generate: 'AI 生成貼文', post_edit: '編輯貼文', post_delete: '刪除貼文', post_retry: '重試發布', inquiry_status: '更新留資狀態', inquiry_delete: '刪除留資', line_config_update: '更新 LINE 接待設定', faq_create: '新增 FAQ', faq_update: '更新 FAQ', faq_delete: '刪除 FAQ', toggle: '切換自動化', integration_line: '設定 LINE 連線', integration_gemini: '設定 AI 連線', threads_connected: '連結 Threads', threads_disconnect: '中斷 Threads', threads_token_refreshed: 'Threads 授權自動續期', threads_deauthorize: 'Threads 解除授權', threads_delete: 'Threads 資料刪除', user_create: '新增帳號', user_update: '更新帳號', password_change: '變更密碼' };
 const rel = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.floor(m / 60)} 小時前` : fmt(iso); };
 
 async function getSetup() {
@@ -231,8 +231,8 @@ async function homePage() {
     <section>${sec('自動化')}<div class="list">
       ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程生成並發布' : '已暫停', end: sw('t1', d.auto_post_enabled, '自動發文') })}
       ${d.leads_enabled ? row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') }) : ''}</div></section>
-    <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 5).map((a) => row({ go: false, title: esc(ACTION[a.action] || a.action), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
-      <p class="t-sub" style="margin-top:12px">今日 AI 生成 ${d.gen_today}/${d.gen_limit}${audit.length > 5 ? ' · <a href="#/settings/audit">全部紀錄</a>' : ''}</p></section>`);
+    <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 3).map((a) => row({ go: false, title: esc(ACTION[a.action] || '其他操作'), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
+      <p class="t-sub" style="margin-top:12px">今日 AI 生成 ${d.gen_today}/${d.gen_limit}${audit.length > 3 ? ' · <a href="#/settings/audit">全部紀錄</a>' : ''}</p></section>`);
   S.todo = todo;
   $$('[data-act=todo]').forEach((b) => b.onclick = () => { const x = todo[+b.dataset.id]; if (x.seg) S.postSeg = x.seg; if (x.lead) { S.leadStatus = x.lead; } go(x.to); });
   $('[data-act=gen]').onclick = openGenerate;
@@ -262,21 +262,32 @@ async function openGenerate() {
 
 const nf = (n) => n === null || n === undefined ? '—' : n >= 10000 ? (n / 10000).toFixed(n >= 100000 ? 0 : 1) + ' 萬' : Number(n).toLocaleString('zh-TW');
 const pct = (a, b) => (b > 0 && a !== null ? (a / b * 100).toFixed(a / b < 0.1 ? 1 : 0) + '%' : '—');
-/** 導流漏斗：曝光 → 互動 → 點擊 → 新好友 → 轉真人（全部是期間內的總數，比率為估算） */
+/** 導流漏斗：曝光 → 互動 → 點擊 LINE → 新好友 →（加購）轉真人。長條以對數比例收窄，層與層之間標示轉換率。 */
 function funnelBlock(f, title, compact) {
   const t = f.totals, eng = t.likes + t.replies + t.reposts + t.quotes + t.shares, noIns = f.insights !== 'ok';
   // 點擊以不重複人數為主（同一人同一天同一連結只算一次）；舊資料沒有人數時退回點擊次數
-  const uc = t.unique_clicks > 0 ? t.unique_clicks : t.clicks, cl = t.unique_clicks > 0 ? '點擊人數' : '點擊 LINE';
-  const steps = [
-    ['曝光', noIns ? null : t.views, ''], ['互動', noIns ? null : eng, noIns ? '' : '互動率 ' + pct(eng, t.views)],
-    [cl, f.tracking ? uc : null, !f.tracking ? '' : [noIns ? '' : '點擊率 ' + pct(uc, t.views), t.unique_clicks > 0 && t.clicks !== uc ? `共 ${nf(t.clicks)} 次` : ''].filter(Boolean).join(' · ')],
-    ['新好友', t.friends_source === 'none' ? null : t.friends, t.friends_source !== 'none' && f.tracking ? '點擊→加好友 ' + pct(t.friends, uc) : ''],
-    ...(f.leads_enabled ? [['轉真人', t.handoffs, '好友→轉真人 ' + pct(t.handoffs, t.friends)]] : []),
+  const uc = t.unique_clicks > 0 ? t.unique_clicks : t.clicks;
+  const stages = [
+    { k: '曝光', v: noIns ? null : t.views },
+    { k: '互動', v: noIns ? null : eng, r: '互動率', base: noIns ? null : t.views },
+    { k: t.unique_clicks > 0 ? '點擊人數' : '點擊 LINE', v: f.tracking ? uc : null, r: '點擊率', base: noIns ? null : t.views, extra: t.unique_clicks > 0 && t.clicks !== uc ? `共 ${nf(t.clicks)} 次點擊` : '' },
+    { k: '新好友', v: t.friends_source === 'none' ? null : t.friends, r: '加好友率', base: f.tracking ? uc : null },
+    ...(f.leads_enabled ? [{ k: '轉真人', v: t.handoffs, r: '轉真人率', base: t.friends_source === 'none' ? null : t.friends }] : []),
   ];
-  const note = noIns ? (f.insights === 'no_permission' ? '曝光與互動數據需要 Threads「成效數據」權限，請聯絡服務商開通後重新連結帳號。' : '曝光與互動數據會在貼文發布後數小時內開始出現。') : '';
+  const max = Math.max(1, ...stages.map((x) => x.v || 0)), w = (v) => (v ? Math.max(3, (Math.log10(v + 1) / Math.log10(max + 1)) * 100) : 0);
+  let html = '';
+  for (const st of stages) {
+    const has = st.v !== null && st.base;
+    if (st.r) html += `<div class="fr"><span>${has ? `${st.r} <b>${pct(st.v, st.base)}</b>` : ''}${st.extra ? `${has ? '・' : ''}${st.extra}` : ''}</span></div>`;
+    html += `<div class="fs"><div class="fv"><span class="fn ${st.v ? '' : 'z'}">${nf(st.v)}</span><span class="fk">${st.k}</span></div><div class="fb" role="img" aria-label="${esc(st.k)} ${st.v ?? '尚無資料'}"><i style="width:${w(st.v)}%"></i></div></div>`;
+  }
+  const notes = [
+    noIns ? (f.insights === 'no_permission' ? '曝光與互動需要 Threads「成效數據」權限，請聯絡服務商開通後重新連結帳號。' : '曝光與互動會在貼文發布後幾小時內開始出現。') : '',
+    !f.tracking ? 'LINE 連結點擊追蹤尚未啟用。' : '',
+    t.friends_source === 'none' ? '新好友數要先在「設定 → LINE 官方帳號」連接 LINE 數據（選用）。' : t.friends_source === 'daily' ? '新好友數來自 LINE 每日統計，隔天更新。' : '',
+  ].filter(Boolean);
   return `<section>${sec(title, compact ? '<button class="link" data-go="report">完整報告</button>' : '')}
-    <div class="metrics" style="flex-wrap:wrap;row-gap:12px">${steps.map(([l, v, sub]) => `<div style="min-width:72px"><b style="white-space:nowrap" class="${v === 0 || v === null ? 'z' : ''}">${nf(v)}</b><span>${l}</span>${sub ? `<div class="t-sub" style="font-size:11.5px">${sub}</div>` : ''}</div>`).join('')}</div>
-    ${note ? `<p class="t-sub" style="margin-top:10px">${note}</p>` : ''}${t.friends_source === 'none' ? '<p class="t-sub" style="margin-top:6px">新好友數需要「連接 LINE 數據」（設定 → LINE 官方帳號，選用）。</p>' : t.friends_source === 'daily' ? '<p class="t-sub" style="margin-top:6px">新好友數來自 LINE 每日統計，隔天更新。</p>' : ''}${!f.tracking ? '<p class="t-sub" style="margin-top:6px">LINE 連結點擊追蹤尚未啟用。</p>' : ''}</section>`;
+    <div class="funnel">${html}</div>${notes.length ? `<p class="fhint">${notes.join('<br>')}</p>` : ''}</section>`;
 }
 const ctrTxt = (r) => (r === null || r === undefined ? '曝光不足' : (r * 100).toFixed(r < 0.1 ? 1 : 0) + '%');
 /** 導流分析：最會導流的貼文、依帳號與時段比較、推估每篇帶來的好友 */
@@ -787,7 +798,7 @@ async function passwordPage() {
 }
 async function auditPage() {
   const logs = await api('GET', '/audit'); bar({ title: '操作紀錄', back: 'settings' });
-  setView(logs.length ? `<div class="list">${logs.map((l) => row({ go: false, title: esc(ACTION[l.action] || l.action), sub: `${esc(l.actor || '系統')} · ${fmt(l.created_at)}` })).join('')}</div><p class="t-sub">顯示最近 50 筆。</p>` : empty('inbox', '尚無紀錄', '設定與操作變更會記錄在這裡。'));
+  setView(logs.length ? `<div class="list">${logs.map((l) => row({ go: false, title: esc(ACTION[l.action] || '其他操作'), sub: `${esc(l.actor || '系統')} · ${fmt(l.created_at)}` })).join('')}</div><p class="t-sub">顯示最近 50 筆。</p>` : empty('inbox', '尚無紀錄', '設定與操作變更會記錄在這裡。'));
 }
 async function logsPage() {
   const lv = S.logLevel || '';
