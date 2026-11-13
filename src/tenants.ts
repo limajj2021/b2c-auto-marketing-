@@ -6,6 +6,7 @@ import { refreshIfNeeded } from './threads/oauth';
 import { runCron } from './threads/scheduler';
 import type { Env } from './types';
 import { logEvent, pruneLogs } from './log';
+import { pruneVisitors } from './links';
 import { iso } from './util/time';
 
 export async function runAllTenants(raw: Env, now = new Date()): Promise<{ processed: string[] }> {
@@ -18,7 +19,7 @@ export async function runAllTenants(raw: Env, now = new Date()): Promise<{ proce
   const processed: string[] = [];
   let budgetHit = false;
   // 系統紀錄保留 30 天：每小時清一次（整個平台一次）
-  if (now.getUTCMinutes() < 5) await pruneLogs(benv, now).catch(() => {});
+  if (now.getUTCMinutes() < 5) { await pruneLogs(benv, now).catch(() => {}); await pruneVisitors(benv, now).catch(() => {}); }
   for (const { id } of rows) {
     if (!canAfford(benv, 12)) break; // 剩下的工作區留到下一輪（最久沒處理的優先）
     try {

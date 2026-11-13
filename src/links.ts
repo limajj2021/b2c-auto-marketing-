@@ -2,7 +2,8 @@
 import { forBrand, getSettings } from './db';
 import { bump } from './metrics';
 import type { Env, Post } from './types';
-import { iso } from './util/time';
+import { iso, localDate } from './util/time';
+import { hmacBase64 } from './util/crypto';
 
 const ALPHA = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const randomCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => ALPHA[b % ALPHA.length]).join('');
@@ -25,13 +26,38 @@ export async function trackedParts(env: Env, post: Pick<Post, 'id' | 'brand_id' 
   return parts.map((p) => p.split(url).join(link));
 }
 
-export async function handleGo(raw: Env, req: Request, code: string): Promise<Response> {
-  const row = await raw.DB.prepare('SELECT brand_id,target_url FROM post_links WHERE code=?').bind(code).first<{ brand_id: string; target_url: string }>();
+/**
+ * 訪客去重代碼：網路位址＋裝置資訊，以「每天更換」的密鑰做 HMAC。只用來判斷同一天是否點過同一個連結，
+ * 不存原始位址；隔天密鑰不同，無法跨日追蹤，2 天後連代碼都刪除。
+ */
+async function visitorHash(raw: Env, req: Request, day: string): Promise<string> {
+  const ip = req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '';
+  const ua = req.headers.get('user-agent') ?? '';
+  return (await hmacBase64(`${raw.SESSION_SECRET}:click-visitor:${day}`, `${ip}|${ua}`)).slice(0, 22);
+}
+
+export async function handleGo(raw: Env, req: Request, code: string, now = new Date()): Promise<Response> {
+  const row = await raw.DB.prepare('SELECT l.brand_id,l.post_id,l.target_url,b.timezone FROM post_links l JOIN brands b ON b.id=l.brand_id WHERE l.code=?')
+    .bind(code).first<{ brand_id: string; post_id: number | null; target_url: string; timezone: string }>();
   if (!row || !/^https:\/\//.test(row.target_url)) return new Response('連結不存在或已失效', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   const ua = req.headers.get('user-agent') ?? '';
   if (req.method === 'GET' && ua && !BOT.test(ua)) {
-    await raw.DB.prepare('UPDATE post_links SET clicks=clicks+1 WHERE code=?').bind(code).run();
-    await bump(forBrand(raw, row.brand_id), 'link_click').catch(() => {});
+    const day = localDate(now, row.timezone || 'Asia/Taipei');
+    // 同一位訪客同一天重複點同一個連結，次數照算，但人數只算一次
+    const first = (await raw.DB.prepare('INSERT OR IGNORE INTO link_visitors(code,day,vh) VALUES(?,?,?)').bind(code, day, await visitorHash(raw, req, day)).run()).meta.changes === 1 ? 1 : 0;
+    await raw.DB.prepare('UPDATE post_links SET clicks=clicks+1,uniques=uniques+? WHERE code=?').bind(first, code).run();
+    if (row.post_id !== null) {
+      await raw.DB.prepare(`INSERT INTO link_daily(brand_id,post_id,day,clicks,uniques) VALUES(?,?,?,1,?)
+        ON CONFLICT(brand_id,post_id,day) DO UPDATE SET clicks=clicks+1,uniques=uniques+excluded.uniques`).bind(row.brand_id, row.post_id, day, first).run();
+    }
+    const benv = forBrand(raw, row.brand_id);
+    await bump(benv, 'link_click', now).catch(() => {});
+    if (first) await bump(benv, 'link_unique', now).catch(() => {});
   }
   return new Response(null, { status: 302, headers: { location: row.target_url, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
+}
+
+/** 訪客去重代碼只保留 2 天 */
+export async function pruneVisitors(env: Env, now = new Date()): Promise<void> {
+  await env.DB.prepare('DELETE FROM link_visitors WHERE day<?').bind(new Date(now.getTime() - 2 * 86400000).toISOString().slice(0, 10)).run();
 }

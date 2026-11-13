@@ -102,6 +102,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_unique' AND d.day>=? AND d.day<?) uniques,
         (SELECT COALESCE(SUM(m.views),0) FROM post_metrics m JOIN posts p ON p.id=m.post_id WHERE m.brand_id=b.id AND p.published_at>=? AND p.published_at<?) views,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
         (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.handling_status='pending') leads_pending,
@@ -116,7 +117,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name IN ('line_channel_secret','line_channel_access_token')) line_creds,
         (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name='gemini_api_key') gemini_key
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.created_at`,
-    ).bind(ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me, ms, me, ms, me).all<any>()).results;
+    ).bind(ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me, ms, me, ms, me).all<any>()).results;
     const cronAge = (t: string | null) => (t ? Date.now() - new Date(t).getTime() : Infinity);
     return json({
       month: ms.slice(0, 7),
@@ -143,12 +144,13 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
         (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_unique' AND d.day>=? AND d.day<?) uniques,
         (SELECT COALESCE(SUM(m.views),0) FROM post_metrics m JOIN posts p ON p.id=m.post_id WHERE m.brand_id=b.id AND p.published_at>=? AND p.published_at<?) views,
         (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
         (SELECT COUNT(*) FROM threads_accounts a WHERE a.brand_id=b.id) threads_accounts,
         (SELECT COUNT(*) FROM ai_generations g WHERE g.brand_id=b.id AND g.created_at>=? AND g.created_at<?) generations
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.slug`,
-    ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me).all()).results;
+    ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me).all()).results;
     return json({ month: ms.slice(0, 7), rows });
   }
 

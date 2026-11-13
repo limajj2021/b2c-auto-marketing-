@@ -138,19 +138,19 @@ async function tenantsPage() {
   view(`${lg && lg.last24h.error ? `<button class="banner" id="errs" style="width:100%;border:0;text-align:left;cursor:pointer;color:inherit"><span class="dot bad"></span><span class="main"><b>近 24 小時有 ${lg.last24h.error} 個錯誤</b><div class="t-sub">點這裡查看系統紀錄</div></span>${chev}</button>` : ''}
     <section>${sec('本月成效', '')}
       <div class="toolbar" style="margin-bottom:10px"><input type="month" id="mo" value="${month}" aria-label="月份"><button class="btn sec" id="csv">下載計費用量 CSV</button></div>
-      <div class="kpi">${k(need, '需處理', need ? 'bad' : '')}${k(sum('views'), '曝光')}${k(sum('clicks'), 'LINE 點擊')}${k(sum('friends'), '新好友')}${k(sum('handoffs'), '轉真人')}${k(sum('published'), '發文')}${k(sum('generations'), 'AI 生成')}${k(sum('leads'), '留資')}${k(T.reduce((a, x) => a + x.threads_accounts, 0), 'Threads 帳號')}</div></section>
+      <div class="kpi">${k(need, '需處理', need ? 'bad' : '')}${k(sum('views'), '曝光')}${k(sum('uniques'), 'LINE 點擊（人）')}${k(sum('friends'), '新好友')}${k(sum('handoffs'), '轉真人')}${k(sum('published'), '發文')}${k(sum('generations'), 'AI 生成')}${k(sum('leads'), '留資')}${k(T.reduce((a, x) => a + x.threads_accounts, 0), 'Threads 帳號')}</div></section>
     <section>${sec('全部工作區')}${T.length ? `<div class="list">${T.map((x) => {
       const [dot, label] = HEALTH[x.health] || ['', x.health];
       return `<button class="row" data-ws="${esc(x.slug)}"><span class="dot ${dot}"></span><span class="main"><span class="ttl" style="display:block">${esc(x.name)} <span class="mut" style="font-weight:400">· ${esc(x.slug)}</span></span>
         <span class="sub" style="display:block">${x.issues.length ? `<span style="color:var(--warn)">${x.issues.map(esc).join('、')}</span>` : label}</span>
-        <span class="nums"><span>發文 ${x.published}</span><span>曝光 ${x.views}</span><span>點擊 ${x.clicks}</span><span>新好友 ${x.friends}</span><span>排程 ${ago(x.last_cron_at)}</span></span></span>${chev}</button>`;
+        <span class="nums"><span>發文 ${x.published}</span><span>曝光 ${x.views}</span><span>點擊 ${x.uniques} 人</span><span>新好友 ${x.friends}</span><span>排程 ${ago(x.last_cron_at)}</span></span></span>${chev}</button>`;
     }).join('')}</div>` : empty('還沒有工作區', '到「開通」建立第一個客戶工作區。')}</section>
     <p class="t-sub">營運人員只看得到計數與狀態，看不到顧客的留資內容。</p>`);
   $('#mo').onchange = (e) => { month = e.target.value; render(); };
   $('#errs')?.addEventListener('click', () => { L.level = 'error'; location.hash = '#/logs'; });
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
-    const rows = [['工作區代號', '品牌名稱', '方案', 'LINE 自動接待加購', '曝光', 'LINE 點擊', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
+    const rows = [['工作區代號', '品牌名稱', '方案', 'LINE 自動接待加購', '曝光', 'LINE 點擊次數', 'LINE 點擊人數', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.uniques, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
@@ -167,7 +167,7 @@ function tenantSheet(x) {
       ${kv('LINE', x.line_add_url ? `${esc((x.line_add_url.match(/@[\w.-]+/) || [x.line_add_url])[0])}${x.line_configured ? ' · 已連接數據' : ''}` : '<span class="mut">未設定加好友連結</span>')}
       ${kv('自動發文', x.auto_post_enabled ? '開啟' : '關閉')}${kv('排程', `上次執行 ${ago(x.last_cron_at)}`)}
       ${kv('AI 金鑰', x.gemini_own_key ? '客戶自有' : '平台提供')}
-      ${kv('本月成效', `發文 ${x.published} · 曝光 ${x.views} · LINE 點擊 ${x.clicks} · 新好友 ${x.friends} · 轉真人 ${x.handoffs} · AI 生成 ${x.generations}${x.leads_enabled ? ` · 留資 ${x.leads}（未處理 ${x.leads_pending}）` : ''}`)}</dl>
+      ${kv('本月成效', `發文 ${x.published} · 曝光 ${x.views} · LINE 點擊 ${x.uniques} 人（${x.clicks} 次）· 新好友 ${x.friends} · 轉真人 ${x.handoffs} · AI 生成 ${x.generations}${x.leads_enabled ? ` · 留資 ${x.leads}（未處理 ${x.leads_pending}）` : ''}`)}</dl>
     <div class="list" style="margin-top:16px"><div class="row static"><span class="main"><span class="ttl" style="display:block">LINE 自動接待＋留資（加購）</span><span class="sub" style="display:block">開通後由系統回覆 LINE 選單、FAQ 與諮詢表單；未開通時只導流，回覆交給官方帳號自己的設定</span></span>
       <label class="switch"><input type="checkbox" role="switch" id="tl" ${x.leads_enabled ? 'checked' : ''} ${admin ? '' : 'disabled'} aria-label="LINE 自動接待加購"><i></i></label></div></div>
     <div class="actions" style="margin-top:16px"><button class="btn sec" id="tlog">查看系統紀錄</button><button class="btn sec" id="trp">重設管理員密碼</button></div>

@@ -2,6 +2,7 @@ import { generateThread, QuotaError } from '../ai/gemini';
 import { checkParts } from '../ai/compliance';
 import { getAccount, listAccounts } from '../threads/accounts';
 import { lineAddUrl, lineIdFromUrl } from '../line/links';
+import { buildTraffic } from '../attribution';
 import { audit, brandBySlug, forBrand, getBrand, getSettings, isMulti, jsonArr } from '../db';
 import { withCreds } from '../integrations';
 import { handleOps } from './ops';
@@ -279,7 +280,7 @@ add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
     `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,a.username,
-       m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks
+       m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,(SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,
   ).bind(brandId, st, st).all<any>();
@@ -514,7 +515,8 @@ add('GET', '/funnel', 'admin', async ({ env, url, brandId }) => {
   const fromIso = zonedToUtc(from, '00:00', brand.timezone).toISOString(), toIso = zonedToUtc(to, '00:00', brand.timezone).toISOString();
   const posts = (await env.DB.prepare(
     `SELECT p.id,p.content,p.parts,p.account_id,p.published_at,a.username,m.views,m.likes,m.replies,m.reposts,m.quotes,m.shares,
-       (SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks
+       (SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,
+       (SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status='published' AND p.published_at>=? AND p.published_at<? ORDER BY p.published_at DESC LIMIT 500`,
   ).bind(brandId, fromIso, toIso).all<any>()).results;
@@ -523,21 +525,32 @@ add('GET', '/funnel', 'admin', async ({ env, url, brandId }) => {
   const accts = await listAccounts(env);
   const insights = accts.some((a) => (a as any).insights_status === 'ok') || withMetrics > 0 ? 'ok'
     : accts.some((a) => (a as any).insights_status === 'no_permission') ? 'no_permission' : 'pending';
-  const first = (p: any) => (partsOf(p)[0] || '').split('\n')[0].slice(0, 80);
+  // 舊資料可能含有字面上的 \n，一併當作換行
+  const first = (p: any) => (partsOf(p)[0] || '').split(/\n|\\n/)[0].trim().slice(0, 80);
+  // 導流分析：每篇點擊率、依帳號／時段比較、推估每篇帶來的好友（期間內每日點擊與每日新好友）
+  const friendsSource = s.leads_enabled ? 'live' : env.LINE_CHANNEL_ACCESS_TOKEN ? 'daily' : 'none';
+  const daily = (await env.DB.prepare('SELECT day,post_id,uniques FROM link_daily WHERE brand_id=? AND day>=? AND day<?')
+    .bind(brandId, from, to).all<{ day: string; post_id: number; uniques: number }>()).results;
+  const friendsByDay = new Map((await env.DB.prepare(`SELECT day,count FROM metrics_daily WHERE brand_id=? AND name='friend_add' AND day>=? AND day<?`)
+    .bind(brandId, from, to).all<{ day: string; count: number }>()).results.map((r) => [r.day, r.count]));
+  const traffic = buildTraffic(posts.map((p) => ({ id: p.id, hook: first(p), username: p.username, published_at: p.published_at, views: p.views ?? null, clicks: p.clicks ?? 0, uniques: p.uniques ?? 0 })),
+    daily, friendsByDay, brand.timezone, friendsSource !== 'none');
   return json({
     from, to, timezone: brand.timezone, insights, tracking: !!env.PUBLIC_BASE_URL, leads_enabled: !!s.leads_enabled,
     totals: {
       posts: posts.length, posts_with_metrics: withMetrics,
       views: sum('views'), likes: sum('likes'), replies: sum('replies'), reposts: sum('reposts'), quotes: sum('quotes'), shares: sum('shares'),
       clicks: await metricSum(env, brandId, 'link_click', from, to),
+      unique_clicks: await metricSum(env, brandId, 'link_unique', from, to),
       friends: await metricSum(env, brandId, 'friend_add', from, to),
       // 新好友的來源：加購客戶即時（Webhook）；其他客戶連接 LINE 數據後每日更新（隔天才有）；都沒有則無法統計
-      friends_source: s.leads_enabled ? 'live' : env.LINE_CHANNEL_ACCESS_TOKEN ? 'daily' : 'none',
+      friends_source: friendsSource,
       handoffs: await metricSum(env, brandId, 'handoff', from, to),
       leads: s.leads_enabled ? ((await env.DB.prepare('SELECT COUNT(*) c FROM inquiries WHERE brand_id=? AND created_at>=? AND created_at<?').bind(brandId, fromIso, toIso).first<{ c: number }>())?.c ?? 0) : null,
     },
     top: [...posts].sort((a, b) => (b.views ?? -1) - (a.views ?? -1) || (b.clicks ?? 0) - (a.clicks ?? 0)).slice(0, 5)
-      .map((p) => ({ id: p.id, hook: first(p), username: p.username, published_at: p.published_at, views: p.views, likes: p.likes, replies: p.replies, reposts: p.reposts, clicks: p.clicks ?? 0 })),
+      .map((p) => ({ id: p.id, hook: first(p), username: p.username, published_at: p.published_at, views: p.views, likes: p.likes, replies: p.replies, reposts: p.reposts, clicks: p.clicks ?? 0, uniques: p.uniques ?? 0 })),
+    traffic,
   });
 });
 

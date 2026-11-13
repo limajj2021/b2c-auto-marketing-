@@ -4,7 +4,8 @@ import type { Env } from './types';
 import { localDate } from './util/time';
 
 // line_followers：LINE 統計的累計加好友次數（每日快照，用來算 friend_add）
-export type MetricName = 'friend_add' | 'handoff' | 'link_click' | 'line_followers';
+// link_unique：短連結不重複點擊人數（同一位訪客同一天同一連結只算一次）
+export type MetricName = 'friend_add' | 'handoff' | 'link_click' | 'link_unique' | 'line_followers';
 
 export async function bump(env: Env, name: MetricName, now = new Date()): Promise<void> {
   const b = await getBrand(env);
