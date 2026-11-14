@@ -89,4 +89,29 @@ describe('three-step Threads connection', () => {
     const made = (await (await call(env, 'POST', '/api/threads/invites', { username: 'newcomer' }, c)).json()) as any;
     expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${made.id}`, undefined, c)).status).toBe(200);
   });
+
+  it('operator pre-registers the customer’s account at onboarding, so the customer starts directly at "accept the invite"', async () => {
+    const env: any = await makeEnv();
+    env.MULTI_TENANT = '1';
+    const op = await operator(env, 'support'); // 維護人員也可以代為建立
+    const adminOp = await operator(env, 'admin');
+    // 開通新客戶時一併帶入 Threads 帳號，並標示已在 Meta 送出邀請
+    const made = (await (await call(env, 'POST', '/api/op/tenants', { name: '阿福咖啡', admin_username: 'afu-admin', threads_usernames: '@Afu.Coffee, afu_shop', invites_sent: true }, adminOp)).json()) as any;
+    expect(made.invites).toBe(2);
+    const c = ck(await call(env, 'POST', '/api/login', { username: 'afu-admin', password: made.password }));
+    expect((await invites(env, c)).invites.map((i: any) => [i.username, i.status])).toEqual([['afu.coffee', 'invited'], ['afu_shop', 'invited']]);
+    // 客戶一鍵：已接受 → 可直接授權
+    const id = (await invites(env, c)).invites[0].id;
+    expect((await call(env, 'POST', `/api/threads/invites/${id}/accepted`, undefined, c)).status).toBe(200);
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${id}`, undefined, c)).status).toBe(200);
+    // 替既有客戶補新增；已存在的申請只會往前推進，不會倒退；格式錯誤會被擋下
+    expect((await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'afu_shop', status: 'requested' }, op)).status).toBe(200);
+    expect((await invites(env, c)).invites.find((i: any) => i.username === 'afu_shop').status).toBe('invited');
+    expect((await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'bad name!' }, op)).status).toBe(400);
+    expect((await call(env, 'POST', '/api/op/invites', { slug: 'nobody', usernames: 'x' }, op)).status).toBe(404);
+    // 沒勾「已送出邀請」時，狀態是待送出，會出現在營運後台的待辦
+    await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'later.one' }, op);
+    expect(((await (await call(env, 'GET', '/api/op/invites', undefined, op)).json()) as any).rows.map((r: any) => [r.username, r.status])).toEqual([['later.one', 'requested'], ['afu_shop', 'invited']]);
+  });
 });

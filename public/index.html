@@ -619,10 +619,12 @@ async function threadsConnectPage() {
   const card = (i) => {
     const s = i.status, u = esc(i.username);
     const started = i.authorize_started_at && (Date.now() - new Date(i.authorize_started_at).getTime() > 90000) && (Date.now() - new Date(i.authorize_started_at).getTime() < 6 * 3600000);
-    const s1 = step(1, 'done', '通知服務商', '已通知。服務商會在 Meta 把這個帳號加為測試人員，通常 1 個工作天內完成。');
+    const s1 = step(1, 'done', s === 'requested' ? '通知服務商' : '服務商已替你送出邀請', s === 'requested' ? '已通知。服務商會在 Meta 把這個帳號加為測試人員，通常 1 個工作天內完成。' : '你不需要再申請，直接做下一步。');
     const s2 = s === 'requested' ? step(2, 'wait', '在 Threads 同意邀請', '服務商送出邀請後，這裡會通知你。')
       : s === 'invited' ? step(2, 'now', '在 Threads 同意邀請', `用 <b>@${u}</b> 登入 Threads，到「設定 → 帳號 → 網站權限 → 邀請」，找到邀請按「接受」。`,
-          `<div class="actions" style="margin-top:10px"><a class="btn sec sm" href="https://www.threads.com/" target="_blank" rel="noopener" style="text-decoration:none">開啟 Threads ↗</a><button class="btn sm" data-acc="${i.id}">我已接受邀請</button></div>`)
+          `<div class="actions" style="margin-top:10px"><a class="btn sec sm" href="https://www.threads.com/" target="_blank" rel="noopener" style="text-decoration:none">開啟 Threads ↗</a></div>
+          <div class="note" style="margin-top:10px">接受後按下面的按鈕，會直接帶你去授權。請先確認這個瀏覽器登入的 Threads 是 <b>@${u}</b>。</div>
+          <div class="actions" style="margin-top:10px"><button class="btn" data-acc="${i.id}" data-go-auth="1">我已接受，前往授權</button></div>`)
       : step(2, 'done', '在 Threads 同意邀請', '已接受。');
     const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `請先確認這個瀏覽器登入的 Threads 是 <b>@${u}</b>，再按下面的按鈕，在 Threads 頁面按「允許」。`,
           `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button></div>`)
@@ -640,7 +642,11 @@ async function threadsConnectPage() {
     if (!check([[$('#nu'), !/^[A-Za-z0-9._]{1,30}$/.test(v), '帳號名稱只有英文、數字、底線與句點，不含 @']])) return;
     if (await act(e.currentTarget, () => api('POST', '/threads/invites', { username: v }), t.requires_invite ? '已通知服務商' : '')) { dirty = false; render(); }
   };
-  $$('[data-acc]').forEach((b) => b.onclick = () => act(b, async () => { await api('POST', `/threads/invites/${b.dataset.acc}/accepted`); render(); }));
+  // 「我已接受」與「授權」合成一步：先記錄已接受，再直接跳去授權
+  $$('[data-acc]').forEach((b) => b.onclick = () => act(b, async () => {
+    await api('POST', `/threads/invites/${b.dataset.acc}/accepted`);
+    location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.acc)).url;
+  }));
   $$('[data-cancel]').forEach((b) => b.onclick = async () => { if (!(await confirmSheet('取消這個帳號的連結申請？', '取消申請'))) return; await act(b, () => api('DELETE', '/threads/invites/' + b.dataset.cancel)); render(); });
   $$('[data-auth]').forEach((b) => b.onclick = () => act(b, async () => { location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.auth)).url; }));
 }

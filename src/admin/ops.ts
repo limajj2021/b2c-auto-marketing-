@@ -1,7 +1,9 @@
 // 營運總後台 API：跨工作區的健康狀態、用量計量、開通與暫停。
 // 原則：營運人員只看「計數與狀態」，不讀顧客留資內容等個資。
 import type { Env } from '../types';
+import { forBrand } from '../db';
 import { SOURCES, logEvent } from '../log';
+import { normUsername, requestInvite } from '../threads/invites';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso } from '../util/time';
 
@@ -62,7 +64,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
 
   // 維護人員（support）只能查看狀態與協助重設客戶密碼；其餘變更限管理者（admin）
   // 處理 Threads 測試邀請屬於日常工作，維護人員也可以做
-  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/reset-admin$/.test(path) && !/^\/invites\/\d+$/.test(path);
+  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/reset-admin$/.test(path) && !/^\/invites(\/\d+)?$/.test(path);
   if (writes && op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
 
   if (path === '/operators' && req.method === 'GET') {
@@ -161,6 +163,19 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
       WHERE i.status IN ('requested','invited') ORDER BY (i.status='requested') DESC, i.id`).all()).results;
     return json({ rows, app_mode: env.THREADS_APP_MODE === 'live' ? 'live' : 'development' });
   }
+  // 替客戶建立 Threads 連結申請：開通時就知道客戶的帳號，先在 Meta 送出邀請，客戶第一次登入就直接看到「接受邀請」
+  if (path === '/invites' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const t = await env.DB.prepare('SELECT id,name FROM brands WHERE slug=?').bind(String(b.slug ?? '')).first<{ id: string; name: string }>();
+    if (!t) return err(404, '找不到這個工作區');
+    const names = String(b.usernames ?? b.username ?? '').split(/[\s,，、]+/).filter(Boolean).map(normUsername);
+    if (!names.length || names.some((n) => !n)) return err(400, 'Threads 帳號名稱格式不正確（不含 @，多個用逗號分隔）');
+    const status = b.status === 'accepted' ? 'accepted' : b.status === 'invited' ? 'invited' : 'requested';
+    const out = [];
+    for (const n of names as string[]) out.push({ username: n, result: await requestInvite(forBrand(env, t.id), t.id, n, status, `營運人員 ${op.username}`) });
+    await log(env, op.username, 'threads_invite_create', `${t.id}:${names.join(',')}:${status}`);
+    return json({ ok: true, invites: out });
+  }
   const im = path.match(/^\/invites\/(\d+)$/);
   if (im && req.method === 'PATCH') {
     const b: any = await req.json().catch(() => ({}));
@@ -223,7 +238,10 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
     await env.DB.prepare(`INSERT INTO brand_settings(brand_id,updated_at,auto_post_enabled,line_auto_reply_enabled) VALUES(?,?,0,1)`).bind(id, now).run();
     await env.DB.prepare(`INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,'admin',?,?)`).bind(id, admin, await hashPassword(pw)).run();
     await log(env, op.username, 'tenant_create', slug);
-    return json({ slug, name, admin_username: admin, password: pw, login_url: url.origin }, 201);
+    // 開通時已知客戶的 Threads 帳號：一併建立連結申請（已在 Meta 送出邀請時狀態直接是 invited）
+    const hint = String(b.threads_usernames ?? '').split(/[\s,，、]+/).map(normUsername).filter((x): x is string => !!x);
+    for (const n of hint) await requestInvite(forBrand(env, id), id, n, b.invites_sent ? 'invited' : 'requested', `營運人員 ${op.username}`);
+    return json({ slug, name, admin_username: admin, password: pw, login_url: url.origin, invites: hint.length }, 201);
   }
 
   const m = path.match(/^\/tenants\/([a-z0-9-]{2,40})$/);

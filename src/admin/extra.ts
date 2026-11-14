@@ -1,5 +1,6 @@
 // 連線設定（LINE / Gemini / Threads）與帳號管理。由 routes.ts 註冊。
 import { LineCredError, issueLineToken } from '../line/token';
+import { normUsername, requestInvite } from '../threads/invites';
 import { SOURCES, logEvent } from '../log';
 import { lineAddUrl } from '../line/links';
 import { audit, getBrand, getSettings, isMulti } from '../db';
@@ -126,21 +127,13 @@ export function registerExtra(add: Add, json: J, err: E) {
   });
 
   // ---- Threads 測試邀請：觸發（客戶提出）→ 同意（客戶接受）→ 授權 ----
-  const normUser = (v: unknown) => String(v ?? '').trim().replace(/^https?:\/\/(www\.)?threads\.(net|com)\/@?/i, '').replace(/^@/, '').split(/[/?#]/)[0].toLowerCase();
-
   add('POST', '/threads/invites', 'admin', async ({ env, req, actor, brandId }) => {
     const b: any = await req.json().catch(() => ({}));
-    const username = normUser(b.username);
-    if (!/^[a-z0-9._]{1,30}$/.test(username)) return err(400, 'Threads 帳號名稱格式不正確（不含 @，只有英文、數字、底線與句點）');
-    if ((await listAccounts(env)).some((a) => (a.username ?? '').toLowerCase() === username)) return err(409, `@${username} 已經連結了`);
-    const now = iso();
-    const cur = await env.DB.prepare('SELECT id,status FROM threads_invites WHERE brand_id=? AND lower(username)=?').bind(brandId, username).first<{ id: number; status: string }>();
-    if (cur && ['requested', 'invited', 'accepted'].includes(cur.status)) return json({ id: cur.id, status: cur.status, username });
-    if (cur) await env.DB.prepare(`UPDATE threads_invites SET status='requested',requested_by=?,authorize_started_at=NULL,updated_at=? WHERE id=?`).bind(actor.name, now, cur.id).run();
-    else await env.DB.prepare('INSERT INTO threads_invites(brand_id,username,status,requested_by,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind(brandId, username, 'requested', actor.name, now, now).run();
-    await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 申請連結 Threads @${username}：等待服務商在 Meta 送出測試邀請`);
-    const row = await env.DB.prepare('SELECT id,status FROM threads_invites WHERE brand_id=? AND lower(username)=?').bind(brandId, username).first<{ id: number; status: string }>();
-    return json({ id: row!.id, status: row!.status, username }, 201);
+    const username = normUsername(b.username);
+    if (!username) return err(400, 'Threads 帳號名稱格式不正確（不含 @，只有英文、數字、底線與句點）');
+    const r = await requestInvite(env, brandId, username, 'requested', actor.name);
+    if (r === 'connected') return err(409, `@${username} 已經連結了`);
+    return json({ id: r.id, status: r.status, username }, 201);
   });
 
   // 客戶：我已在 Threads 接受邀請（只有服務商送出邀請之後才能按）
