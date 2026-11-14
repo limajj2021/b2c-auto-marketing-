@@ -387,6 +387,31 @@ function timePicker(host, initMs, onDone, onCancel) {
   show();
 }
 
+/** 手動發布：不需要授權。每一則一個按鈕，開啟 Threads 發文視窗（內容已填好）；串文的後續則數要貼上前一則的網址，才能接成回覆。 */
+const threadsIntent = (text, replyTo) => `https://www.threads.com/intent/post?text=${encodeURIComponent(text)}${replyTo ? `&reply_post_shortcode=${encodeURIComponent(replyTo)}` : ''}`;
+const shortcodeOf = (v) => (String(v || '').match(/\/post\/([A-Za-z0-9_-]+)/) || String(v || '').trim().match(/^([A-Za-z0-9_-]{6,})$/) || [])[1] || '';
+function manualSheet(p, parts) {
+  const card = (t, i) => `<div class="list" style="margin-bottom:12px"><div style="padding:12px 16px">
+      <div class="t-label">第 ${i + 1} 則${parts.length > 1 ? (i === 0 ? '（鉤子）' : i === parts.length - 1 ? '（CTA）' : '') : ''}</div>
+      <div class="note" style="white-space:pre-wrap;color:var(--text);margin:8px 0;max-height:132px;overflow:auto">${esc(t)}</div>
+      ${i > 0 ? `<div class="f" style="margin-top:8px"><label for="mu${i}">先貼上第 ${i} 則發出後的網址</label><input id="mu${i}" data-mu="${i}" placeholder="https://www.threads.com/@…/post/…" inputmode="url" autocapitalize="none" autocorrect="off"><div class="hint">在 Threads 點那則貼文的分享 → 複製連結。這樣第 ${i + 1} 則才會接在它後面當回覆。</div></div>` : ''}
+      <div class="actions" style="margin-top:10px"><a class="btn ${i === 0 ? '' : 'sec'}" data-open="${i}" href="${i === 0 ? esc(threadsIntent(t)) : '#'}" target="_blank" rel="noopener" style="text-decoration:none${i > 0 ? ';opacity:.5;pointer-events:none' : ''}">開啟 Threads ↗</a><button class="btn sec" data-copy="${i}">複製文字</button></div></div></div>`;
+  sheet('手動發到 Threads', `<p class="t-sub" style="margin-bottom:12px">不需要授權。按「開啟 Threads」會跳到 Threads，內容已經填好，確認後按「發佈」就完成。連結已換成可統計點擊的短連結，加好友數照常計算。</p>
+    ${parts.map(card).join('')}
+    <div class="note" style="margin-bottom:12px">手動發布沒有 Threads 的曝光與互動數字，但點擊人數與新好友照常統計。</div>
+    <button class="btn block" id="mdone">全部發完了，標記為已發布</button>`, (el, close) => {
+    $$('[data-copy]', el).forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(parts[+b.dataset.copy]); toast('已複製', 'ok'); } catch { toast('無法複製，請手動選取文字', 'bad'); } });
+    $$('[data-mu]', el).forEach((inp) => inp.oninput = () => {
+      const i = +inp.dataset.mu, sc = shortcodeOf(inp.value), a = $(`[data-open="${i}"]`, el);
+      a.href = sc ? threadsIntent(parts[i], sc) : '#'; a.style.opacity = sc ? '1' : '.5'; a.style.pointerEvents = sc ? 'auto' : 'none';
+      inp.classList.toggle('err', !!inp.value && !sc);
+    });
+    $('#mdone', el).onclick = (e) => act(e.currentTarget, async () => {
+      if (!(await confirmSheet('確定每一則都已經在 Threads 發出了嗎？', '都發好了', false))) return;
+      await api('POST', `/posts/${p.id}/manual-done`); close(); S.postSeg = 'hist'; toast('已標記為已發布', 'ok'); render();
+    });
+  });
+}
 function openPost(p) {
   const draft = p.status === 'draft', parts = p.parts?.length ? [...p.parts] : [p.content], done = p.part_ids?.length || 0;
   const role = (i, n) => n === 1 ? '' : i === 0 ? '鉤子' : i === n - 1 ? 'CTA' : '';
@@ -401,7 +426,8 @@ function openPost(p) {
     <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="ok">核准發布</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}
     ${p.status === 'failed' ? `<button class="btn" data-a="retry">${done ? `從第 ${done + 1} 則接續發布` : '重試發布'}</button>` : ''}
     ${others.length ? '<button class="btn sec" data-a="dist">改寫分發</button>' : ''}
-    ${draft || p.status === 'failed' ? '<button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn sec" data-a="unsched">退回待審核</button>' : ''}</div>`, (el, close) => {
+    ${draft || p.status === 'failed' ? '<button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn sec" data-a="unsched">退回待審核</button>' : ''}</div>
+    ${draft || p.status === 'scheduled' || (p.status === 'failed' && !done) ? '<button class="link" data-a="manual" style="margin-top:8px">不想等授權？手動發到 Threads</button>' : ''}`, (el, close) => {
     // 草稿：選好的時間在核准時才送出；已排程：選好就直接更新
     let pickAt = p.scheduled_at && Date.parse(p.scheduled_at) > Date.now() ? Date.parse(p.scheduled_at) : null;
     const label = () => { const w = $('#twhen', el); if (w) w.textContent = pickAt ? fmtW(pickAt) : '核准後立即發布'; };
@@ -415,6 +441,10 @@ function openPost(p) {
     if (draft) bind();
     $$('[data-a]', el).forEach((b) => b.onclick = () => {
       if (b.dataset.a === 'dist') { close(); return openDistribute(p, others, () => {}); }
+      if (b.dataset.a === 'manual') return act(b, async () => {
+        if (draft) { sync(); const ps = parts.map((x) => x.trim()); if (ps.some((x) => !x)) throw new Error('有空白的則數，請填寫或移除'); await api('PUT', '/posts/' + p.id, { parts: ps }); }
+        const m = await api('GET', `/posts/${p.id}/manual`); close(); manualSheet(p, m.parts);
+      });
       if (b.dataset.a === 'time') {
         const host = $('#tpick', el); if (host.innerHTML) { host.innerHTML = ''; return; }
         return timePicker(host, pickAt, async (ms, btn) => {
@@ -633,6 +663,7 @@ async function threadsConnectPage() {
   };
   setView(`<div data-form>
     ${t.requires_invite ? `<p class="t-sub">系統目前在測試階段，每個 Threads 帳號第一次連結都要先經過三步。之後換新憑證或重新連結同一個帳號，不需要再做一次。</p>` : ''}
+    ${t.requires_invite ? '<div class="note" style="margin-bottom:16px"><b>不想等？先手動發也行</b><br>在「貼文」裡打開任一則草稿，按「手動發到 Threads」，不需要授權就能發出去。授權完成後再改成全自動。</div>' : ''}
     ${inv.map(card).join('')}
     <section>${sec(inv.length ? '再新增一個帳號' : '第一步：輸入要連結的 Threads 帳號')}
       <div class="list" style="padding:4px 16px 16px">${field('nu', 'Threads 帳號名稱', input('nu', '', 'placeholder="例如：vuca.canada（不含 @）" autocapitalize="none" autocorrect="off"'), '個人檔案頁面上，名稱下方的帳號。')}

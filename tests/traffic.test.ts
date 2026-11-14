@@ -25,7 +25,7 @@ describe('unique clicks (same visitor, same link, same day counts once)', () => 
     expect(m).toEqual([{ name: 'link_click', count: 5 }, { name: 'link_unique', count: 3 }]);
     const stored = JSON.stringify((await env.DB.prepare('SELECT * FROM link_visitors').all()).results);
     expect(stored).not.toContain('1.1.1.1'); expect(stored).not.toContain('iPhone');
-    await pruneVisitors(env, new Date(Date.now() + 3 * 86400000));
+    await pruneVisitors(env, new Date(Date.now() + 5 * 86400000)); // 資料用工作區時區的日期、清除用 UTC，留足一天以上的差距避免跨日誤判
     expect(((await env.DB.prepare('SELECT COUNT(*) c FROM link_visitors').first()) as any).c).toBe(0);
   });
 });

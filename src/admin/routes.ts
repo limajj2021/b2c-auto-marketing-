@@ -13,6 +13,8 @@ import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/cr
 import { addDays, isValidTimezone, iso, localDate, zonedToUtc } from '../util/time';
 import { registerExtra } from './extra';
 import { metricSum } from '../metrics';
+import { trackedParts } from '../links';
+import { logEvent } from '../log';
 
 export interface Actor { id: number; name: string; role: 'admin' | 'staff'; brandId: string }
 const SESSION_SEC = 8 * 3600;
@@ -348,6 +350,29 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
   const hasAcct = (await listAccounts(env)).length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID);
   return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
+});
+
+// ---- 手動發布（不需要 Threads 授權）：用 Threads Web Intent 開啟發文視窗，內容已填好，使用者按「發佈」即可 ----
+// 與自動發布走同一套合規檢查，並同樣換上追蹤短連結，所以點擊與加好友的統計照常運作。
+const MANUAL_OK = `('draft','scheduled','failed')`;
+add('GET', '/posts/(\\d+)/manual', 'admin', async ({ env, m, brandId }) => {
+  const brand = await getBrand(env);
+  const s = await getSettings(env, brandId);
+  const post = await env.DB.prepare(`SELECT id,brand_id,account_id,content,parts FROM posts WHERE id=? AND brand_id=? AND status IN ${MANUAL_OK}`).bind(m[1], brandId).first<any>();
+  if (!post) return err(409, '這則貼文已經發布或不存在');
+  const parts: string[] = partsOf(post);
+  const issues = checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
+  if (issues.length) return err(422, `內容檢查未通過，請先修改：${issues.join('；')}`);
+  return json({ parts: await trackedParts(env, post, parts) });
+});
+
+add('POST', '/posts/(\\d+)/manual-done', 'admin', async ({ env, m, actor, brandId }) => {
+  const r = await env.DB.prepare(`UPDATE posts SET status='published',approved_by=?,published_at=?,error_message=NULL,updated_at=? WHERE id=? AND brand_id=? AND status IN ${MANUAL_OK}`)
+    .bind(actor.name, iso(), iso(), m[1], brandId).run();
+  if (r.meta.changes !== 1) return err(409, '這則貼文已經發布或不存在');
+  await audit(env, brandId, actor.name, 'post_manual_publish', m[1]);
+  await logEvent(env, brandId, 'info', 'threads_publish', `貼文 #${m[1]} 由 ${actor.name} 手動發布到 Threads`);
+  return json({ ok: true });
 });
 
 // 調整已排程（或草稿）的發布時間
