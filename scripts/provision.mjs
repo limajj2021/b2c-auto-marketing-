@@ -69,7 +69,7 @@ mkdirSync(dir, { recursive: true });
 writeFileSync(tomlPath, `name = "${cfg.workerName}"
 main = "../src/index.ts"
 compatibility_date = "2025-01-01"
-
+${cfg.customDomain ? `workers_dev = true\nroutes = [{ pattern = "${cfg.customDomain}", custom_domain = true }]\n` : ''}
 [vars]
 GEMINI_MODEL = "${cfg.geminiModel ?? 'gemini-3.5-flash-lite'}"
 THREADS_APP_ID = "${threadsAppId}"

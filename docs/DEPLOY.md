@@ -71,3 +71,15 @@ npx wrangler d1 execute DB --remote --config <toml> --file backups/<file>.sql
 - 更新 Secret：`npx wrangler secret put <NAME> --config <toml>`。
 - Threads 憑證失效：後台首頁會顯示警示；更新 `THREADS_ACCESS_TOKEN` 後執行
   `UPDATE brand_settings SET threads_status='ok'`（`wrangler d1 execute`）。
+
+
+## 自訂網域（2026-11-14）
+
+正式網址：`https://login.ego-office.org`（`brands/app.json` 的 `customDomain`，provision 會寫成 `routes = [{ pattern, custom_domain = true }]`）。
+網域必須在同一個 Cloudflare 帳號且由 Cloudflare 管理 DNS；部署時 Cloudflare 會自動建立 DNS 紀錄與憑證。
+`workers_dev = true` 保留舊網址 `app.vucamade.workers.dev`，已發出的貼文短連結、LINE Webhook 與 Meta 舊設定照常可用。
+
+改用新網址後需要在 Meta App 加上（舊網址可先保留）：
+- 重新導向回呼：`https://login.ego-office.org/threads/callback`
+- 解除安裝／刪除回呼：`/threads/deauthorize`、`/threads/delete`
+- 應用程式網域、隱私政策、服務條款、資料刪除網址
