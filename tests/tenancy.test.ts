@@ -154,6 +154,20 @@ describe('login without a workspace code', () => {
     expect((await loginTo(env, undefined, 'delta-admin', ok.password)).status).toBe(200);
   });
 
+  it('onboarding needs no workspace code: the system generates an internal ID, an admin username is required', async () => {
+    const env = await twoTenants();
+    await env.DB.prepare("INSERT INTO operators(username,password_hash,created_at) VALUES('ops',?,'x')").bind(await hashPassword('operator-pass-1')).run();
+    const op = ((await call(env, 'POST', '/api/op/login', { username: 'ops', password: 'operator-pass-1' })).headers.get('set-cookie') ?? '').split(';')[0];
+    expect((await call(env, 'POST', '/api/op/tenants', { name: '阿福咖啡' }, op)).status).toBe(400); // 沒給管理員帳號
+    const made = await (await call(env, 'POST', '/api/op/tenants', { name: '阿福咖啡', admin_username: 'afu-admin' }, op)).json() as any;
+    expect(made.slug).toMatch(/^w[0-9a-z]{6}$/); expect(made.name).toBe('阿福咖啡');
+    const second = await (await call(env, 'POST', '/api/op/tenants', { name: '小花', admin_username: 'hua-admin' }, op)).json() as any;
+    expect(second.slug).not.toBe(made.slug);
+    expect((await loginTo(env, undefined, 'afu-admin', made.password)).status).toBe(200);
+    // LINE Webhook 仍以內部編號分辨客戶
+    expect(((await env.DB.prepare('SELECT slug FROM brands WHERE name=?').bind('阿福咖啡').first()) as any).slug).toBe(made.slug);
+  });
+
   it('a suspended workspace is only revealed after a correct password; failures are throttled per username', async () => {
     const env = await twoTenants();
     await env.DB.prepare("UPDATE brands SET status='suspended' WHERE id='b2'").run();

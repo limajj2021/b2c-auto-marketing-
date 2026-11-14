@@ -141,7 +141,7 @@ async function tenantsPage() {
       <div class="kpi">${k(need, '需處理', need ? 'bad' : '')}${k(sum('views'), '曝光')}${k(sum('uniques'), 'LINE 點擊（人）')}${k(sum('friends'), '新好友')}${k(sum('handoffs'), '轉真人')}${k(sum('published'), '發文')}${k(sum('generations'), 'AI 生成')}${k(sum('leads'), '留資')}${k(T.reduce((a, x) => a + x.threads_accounts, 0), 'Threads 帳號')}</div></section>
     <section>${sec('全部工作區')}${T.length ? `<div class="list">${T.map((x) => {
       const [dot, label] = HEALTH[x.health] || ['', x.health];
-      return `<button class="row" data-ws="${esc(x.slug)}"><span class="dot ${dot}"></span><span class="main"><span class="ttl" style="display:block">${esc(x.name)} <span class="mut" style="font-weight:400">· ${esc(x.slug)}</span></span>
+      return `<button class="row" data-ws="${esc(x.slug)}"><span class="dot ${dot}"></span><span class="main"><span class="ttl" style="display:block">${esc(x.name)}</span>
         <span class="sub" style="display:block">${x.issues.length ? `<span style="color:var(--warn)">${x.issues.map(esc).join('、')}</span>` : label}</span>
         <span class="nums"><span>發文 ${x.published}</span><span>曝光 ${x.views}</span><span>點擊 ${x.uniques} 人</span><span>新好友 ${x.friends}</span><span>排程 ${ago(x.last_cron_at)}</span></span></span>${chev}</button>`;
     }).join('')}</div>` : empty('還沒有工作區', '到「開通」建立第一個客戶工作區。')}</section>
@@ -150,7 +150,7 @@ async function tenantsPage() {
   $('#errs')?.addEventListener('click', () => { L.level = 'error'; location.hash = '#/logs'; });
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
-    const rows = [['工作區代號', '品牌名稱', '方案', 'LINE 自動接待加購', '曝光', 'LINE 點擊次數', 'LINE 點擊人數', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.uniques, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
+    const rows = [['工作區 ID', '品牌名稱', '方案', 'LINE 自動接待加購', '曝光', 'LINE 點擊次數', 'LINE 點擊人數', '新好友數', '轉真人次數', '留資數', '發文數', 'Threads 帳號數', 'AI 生成次數'], ...u.rows.map((r) => [r.slug, r.name, r.plan, r.leads_enabled ? '已開通' : '未開通', r.views, r.clicks, r.uniques, r.friends, r.handoffs, r.leads, r.published, r.threads_accounts, r.generations])];
     const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
@@ -160,7 +160,7 @@ async function tenantsPage() {
 function tenantSheet(x) {
   const admin = me.role === 'admin', [dot, label] = HEALTH[x.health] || ['', x.health];
   const kv = (a, b) => `<dt>${a}</dt><dd>${b}</dd>`;
-  sheet(x.name, `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="dot ${dot}"></span><b>${label}</b><span class="t-sub">${esc(x.slug)} · ${esc(PLAN[x.plan] || x.plan)}</span></div>
+  sheet(x.name, `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="dot ${dot}"></span><b>${label}</b><span class="t-sub">${esc(PLAN[x.plan] || x.plan)}</span></div>
     ${x.issues.length ? `<div class="note warn" style="margin-bottom:14px">${x.issues.map(esc).join('<br>')}</div>` : ''}
     <dl class="kv">${kv('登入網址', `<code>${esc(location.origin)}</code>`)}
       ${kv('Threads', `${x.threads_accounts} 個帳號${x.threads_invalid ? `，<span style="color:var(--bad)">${x.threads_invalid} 個失效</span>` : ''}${x.threads_expires ? `<div class="t-sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}`)}
@@ -234,20 +234,17 @@ async function logsPage() {
 /* ---------- 開通 ---------- */
 function newPage() {
   bar('開通新工作區');
-  view(`<div>${field('ns', '工作區代號', '<input id="ns" placeholder="例如：acme" autocapitalize="none" autocorrect="off">', '英文小寫、數字或連字號。只給內部辨識與 LINE Webhook 網址使用，客戶登入時不需要輸入。')}
-    ${field('nn', '品牌名稱', '<input id="nn">')}
+  view(`<div>${field('nn', '品牌名稱', '<input id="nn" placeholder="例如：阿福咖啡">')}
     <div class="two" style="margin-top:16px"><div class="f" style="margin:0"><label for="ni">產業</label><select id="ni"><option value="general">一般</option><option value="lending">放款（強制審核）</option><option value="finance">金融（強制審核）</option></select></div>
       <div class="f" style="margin:0"><label for="np">方案</label><select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></div></div>
     ${field('na', '管理員帳號', '<input id="na" placeholder="例如：acme-admin" autocapitalize="none" autocorrect="off">', '客戶用這個帳號登入。帳號在整個系統內不可重複，客戶登入後可以自己改。')}
     <button class="btn block" id="create" style="margin-top:24px">建立工作區</button><div id="made" style="margin-top:16px"></div></div>`);
-  let naTouched = false; $('#na').addEventListener('input', () => { naTouched = true; });
-  $('#ns').addEventListener('input', () => { if (!naTouched) { const v = $('#ns').value.trim().toLowerCase(); $('#na').value = v ? v.slice(0, 24) + '-admin' : ''; } });
   $('#create').onclick = (e) => act(e.currentTarget, async () => {
-    const r = await api('POST', '/tenants', { slug: $('#ns').value.trim().toLowerCase(), name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim() });
+    const r = await api('POST', '/tenants', { name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim() });
     T = [];
-    $('#made').innerHTML = secret(`已建立 <b>${esc(r.slug)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>帳號：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>`) +
+    $('#made').innerHTML = secret(`已建立 <b>${esc(r.name)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>帳號：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>`) +
       '<p class="t-sub" style="margin-top:10px">客戶登入後，首頁的「開通進度」會帶他完成 LINE、AI、Threads 設定。Meta App 仍在開發模式時，記得先把客戶的 Threads 帳號加為測試人員。</p>';
-    $('#ns').value = $('#nn').value = '';
+    $('#nn').value = $('#na').value = '';
   });
 }
 
