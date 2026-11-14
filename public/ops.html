@@ -162,7 +162,7 @@ function tenantSheet(x) {
   const kv = (a, b) => `<dt>${a}</dt><dd>${b}</dd>`;
   sheet(x.name, `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="dot ${dot}"></span><b>${label}</b><span class="t-sub">${esc(x.slug)} · ${esc(PLAN[x.plan] || x.plan)}</span></div>
     ${x.issues.length ? `<div class="note warn" style="margin-bottom:14px">${x.issues.map(esc).join('<br>')}</div>` : ''}
-    <dl class="kv">${kv('登入網址', `<code>${esc(location.origin)}/?w=${esc(x.slug)}</code>`)}
+    <dl class="kv">${kv('登入網址', `<code>${esc(location.origin)}</code>`)}
       ${kv('Threads', `${x.threads_accounts} 個帳號${x.threads_invalid ? `，<span style="color:var(--bad)">${x.threads_invalid} 個失效</span>` : ''}${x.threads_expires ? `<div class="t-sub">最早到期 ${esc(x.threads_expires.slice(0, 10))}</div>` : ''}`)}
       ${kv('LINE', x.line_add_url ? `${esc((x.line_add_url.match(/@[\w.-]+/) || [x.line_add_url])[0])}${x.line_configured ? ' · 已連接數據' : ''}` : '<span class="mut">未設定加好友連結</span>')}
       ${kv('自動發文', x.auto_post_enabled ? '開啟' : '關閉')}${kv('排程', `上次執行 ${ago(x.last_cron_at)}`)}
@@ -234,16 +234,18 @@ async function logsPage() {
 /* ---------- 開通 ---------- */
 function newPage() {
   bar('開通新工作區');
-  view(`<div>${field('ns', '工作區代號', '<input id="ns" placeholder="例如：acme" autocapitalize="none" autocorrect="off">', '英文小寫、數字或連字號。客戶登入網址會是 /?w=代號')}
+  view(`<div>${field('ns', '工作區代號', '<input id="ns" placeholder="例如：acme" autocapitalize="none" autocorrect="off">', '英文小寫、數字或連字號。只給內部辨識與 LINE Webhook 網址使用，客戶登入時不需要輸入。')}
     ${field('nn', '品牌名稱', '<input id="nn">')}
     <div class="two" style="margin-top:16px"><div class="f" style="margin:0"><label for="ni">產業</label><select id="ni"><option value="general">一般</option><option value="lending">放款（強制審核）</option><option value="finance">金融（強制審核）</option></select></div>
       <div class="f" style="margin:0"><label for="np">方案</label><select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></div></div>
-    ${field('na', '管理員帳號', '<input id="na" value="owner" autocapitalize="none" autocorrect="off">', '客戶登入後可以自己改帳號和密碼。')}
+    ${field('na', '管理員帳號', '<input id="na" placeholder="例如：acme-admin" autocapitalize="none" autocorrect="off">', '客戶用這個帳號登入。帳號在整個系統內不可重複，客戶登入後可以自己改。')}
     <button class="btn block" id="create" style="margin-top:24px">建立工作區</button><div id="made" style="margin-top:16px"></div></div>`);
+  let naTouched = false; $('#na').addEventListener('input', () => { naTouched = true; });
+  $('#ns').addEventListener('input', () => { if (!naTouched) { const v = $('#ns').value.trim().toLowerCase(); $('#na').value = v ? v.slice(0, 24) + '-admin' : ''; } });
   $('#create').onclick = (e) => act(e.currentTarget, async () => {
     const r = await api('POST', '/tenants', { slug: $('#ns').value.trim().toLowerCase(), name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim() });
     T = [];
-    $('#made').innerHTML = secret(`已建立 <b>${esc(r.slug)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>管理員：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>`) +
+    $('#made').innerHTML = secret(`已建立 <b>${esc(r.slug)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>帳號：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>`) +
       '<p class="t-sub" style="margin-top:10px">客戶登入後，首頁的「開通進度」會帶他完成 LINE、AI、Threads 設定。Meta App 仍在開發模式時，記得先把客戶的 Threads 帳號加為測試人員。</p>';
     $('#ns').value = $('#nn').value = '';
   });

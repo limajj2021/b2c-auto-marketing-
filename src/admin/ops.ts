@@ -180,7 +180,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
   if (path === '/tenants' && req.method === 'POST') {
     const b: any = await req.json().catch(() => ({}));
     const slug = String(b.slug ?? '').trim().toLowerCase(), name = String(b.name ?? '').trim();
-    const admin = String(b.admin_username ?? 'owner').trim(), industry = String(b.industry ?? 'general');
+    const admin = String(b.admin_username || `${slug.slice(0, 24)}-admin`).trim(), industry = String(b.industry ?? 'general');
     if (!/^[a-z0-9-]{2,40}$/.test(slug) || slug.startsWith('_')) return err(400, '工作區代號需為 2–40 字英文小寫、數字或連字號');
     if (!name || name.length > 100) return err(400, '請輸入品牌名稱');
     if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(admin)) return err(400, '管理員帳號需為 3–32 字英數');
@@ -188,13 +188,14 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
     const timezone = String(b.timezone ?? 'Asia/Taipei').trim();
     if (!isValidTimezone(timezone)) return err(400, '時區不正確，請使用例如 Asia/Taipei 的格式');
     if (await env.DB.prepare('SELECT 1 FROM brands WHERE slug=? OR id=?').bind(slug, slug).first()) return err(409, '這個工作區代號已被使用');
+    if (await env.DB.prepare('SELECT 1 FROM admin_users WHERE lower(authentication_id)=lower(?)').bind(admin).first()) return err(409, '這個管理員帳號已被使用（帳號在整個系統內不可重複），請換一個');
     const id = slug, now = iso(), pw = randomPassword();
     await env.DB.prepare(`INSERT INTO brands(id,slug,name,industry,description,timezone,created_at,status,plan) VALUES(?,?,?,?,'',?,?,'active',?)`)
       .bind(id, slug, name, industry, timezone, now, String(b.plan ?? 'standard')).run();
     await env.DB.prepare(`INSERT INTO brand_settings(brand_id,updated_at,auto_post_enabled,line_auto_reply_enabled) VALUES(?,?,0,1)`).bind(id, now).run();
     await env.DB.prepare(`INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,'admin',?,?)`).bind(id, admin, await hashPassword(pw)).run();
     await log(env, op.username, 'tenant_create', slug);
-    return json({ slug, admin_username: admin, password: pw, login_url: `${url.origin}/?w=${slug}` }, 201);
+    return json({ slug, admin_username: admin, password: pw, login_url: url.origin }, 201);
   }
 
   const m = path.match(/^\/tenants\/([a-z0-9-]{2,40})$/);

@@ -68,7 +68,7 @@ npm run provision -- --brand acme
 
 共用架構的重點：
 - 所有資料以 `brand_id` 隔離；每個請求先解析出工作區，未解析出工作區時拒絕讀寫（`src/db.ts`）。有 7 項跨工作區隔離測試（`tests/tenancy.test.ts`）。
-- 客戶以「工作區代號」登入（`/?w=代號` 會自動帶入）。LINE Webhook 為 `/line/webhook/<代號>`；Threads 授權回呼只有一個固定網址 `/threads/callback`。
+- **客戶只需帳號與密碼登入**：帳號在整個系統內唯一（不分大小寫，資料庫唯一索引），系統用帳號直接找到所屬工作區。工作區代號只用於內部辨識與 LINE Webhook 網址 `/line/webhook/<代號>`；Threads 授權回呼只有一個固定網址 `/threads/callback`。登入失敗以帳號計次，5 次鎖 15 分鐘；工作區停用的訊息只在密碼正確後才顯示。
 - LINE、Threads 憑證一律來自各工作區自己的設定，不會沿用平台層 secret；Gemini 可用平台金鑰或客戶自有金鑰。
 - 營運總後台 `/ops.html`：所有工作區的健康狀態、本月留資／發文／AI 用量、開通、暫停、重設管理員密碼、下載計費用量 CSV。營運人員看不到顧客留資內容。
 - 排程每 5 分鐘輪替處理工作區（`CRON_BATCH`，預設 25），單一工作區出錯不影響其他工作區。

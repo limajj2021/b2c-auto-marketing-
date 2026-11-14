@@ -64,11 +64,7 @@ export async function handleApi(rawEnv: Env, req: Request): Promise<Response> {
   if (req.method !== 'GET' && req.headers.get('x-requested-with') !== 'admin-ui') return err(403, 'forbidden');
 
   if (url.pathname === '/api/login' && req.method === 'POST') {
-    const b: any = await req.json().catch(() => ({}));
-    const ws = await resolveWorkspace(rawEnv, b.workspace);
-    if (!ws) return err(401, isMulti(rawEnv) && !b.workspace ? '請輸入工作區代號' : '工作區、帳號或密碼錯誤');
-    if (ws.status === 'suspended') return err(403, '此工作區已暫停使用，請聯絡服務商');
-    return login(forBrand(rawEnv, ws.id), b, ws.id);
+    return login(rawEnv, await req.json().catch(() => ({})));
   }
 
   const actor = await authenticate(rawEnv, req);
@@ -96,17 +92,20 @@ export async function handleApi(rawEnv: Env, req: Request): Promise<Response> {
   return err(404, 'not found');
 }
 
-async function login(env: Env, b: any, brandId: string): Promise<Response> {
-  const username = String(b.username ?? '').slice(0, 64);
+/** 登入只需帳號與密碼：帳號全系統唯一（不分大小寫），由帳號決定所屬工作區。 */
+async function login(env: Env, b: any): Promise<Response> {
+  const username = String(b.username ?? '').trim().slice(0, 64).toLowerCase();
   const since = new Date(Date.now() - 15 * 60000).toISOString();
-  const fails = await env.DB.prepare(`SELECT COUNT(*) c FROM audit_logs WHERE brand_id=? AND action='login_fail' AND detail=? AND created_at>?`)
-    .bind(brandId, username, since).first<{ c: number }>();
+  const fails = await env.DB.prepare(`SELECT COUNT(*) c FROM audit_logs WHERE action='login_fail' AND detail=? AND created_at>?`)
+    .bind(username, since).first<{ c: number }>();
   if ((fails?.c ?? 0) >= 5) return err(429, '嘗試次數過多，請 15 分鐘後再試');
-  const u = await env.DB.prepare('SELECT id,password_hash FROM admin_users WHERE brand_id=? AND authentication_id=? AND enabled=1')
-    .bind(brandId, username).first<any>();
+  const u = await env.DB.prepare('SELECT u.id,u.password_hash,u.brand_id,b.status FROM admin_users u JOIN brands b ON b.id=u.brand_id WHERE lower(u.authentication_id)=? AND u.enabled=1')
+    .bind(username).first<any>();
   // 帳號不存在時仍做一次雜湊，降低帳號探測
   const ok = u ? await verifyPassword(String(b.password ?? ''), u.password_hash) : (await hashPassword('x'), false);
-  if (!ok) { await audit(env, brandId, null, 'login_fail', username); return err(401, isMulti(env) ? '工作區、帳號或密碼錯誤' : '帳號或密碼錯誤'); }
+  if (!ok) { await audit(env, u?.brand_id ?? '_platform', null, 'login_fail', username); return err(401, '帳號或密碼錯誤'); }
+  // 密碼正確才告知停用狀態，避免被用來探測帳號
+  if (u.status === 'suspended') return err(403, '此帳號所屬的工作區已暫停使用，請聯絡服務商');
   const tok = await signToken(env.SESSION_SECRET, { uid: u.id, exp: Math.floor(Date.now() / 1000) + SESSION_SEC });
   return json({ ok: true }, 200, { 'set-cookie': `sid=${tok}; Path=/; Max-Age=${SESSION_SEC}; HttpOnly; Secure; SameSite=Strict` });
 }
@@ -124,7 +123,7 @@ add('POST', '/account', 'staff', async ({ env, req, actor, brandId }) => {
   if (username === actor.name && !next) return err(400, '沒有需要變更的內容');
   if (username !== actor.name) {
     if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) return err(400, '帳號需為 3–32 字英數（可含 . _ -）');
-    if (await env.DB.prepare('SELECT 1 FROM admin_users WHERE brand_id=? AND authentication_id=? AND id<>?').bind(brandId, username, actor.id).first()) return err(409, '這個帳號名稱已被使用');
+    if (await env.DB.prepare('SELECT 1 FROM admin_users WHERE lower(authentication_id)=lower(?) AND id<>?').bind(username, actor.id).first()) return err(409, '這個帳號名稱已被使用，請換一個');
   }
   if (next && next.length < 10) return err(400, '新密碼至少 10 字元');
   if (next && next === String(b.current)) return err(400, '新密碼不能和目前密碼相同');

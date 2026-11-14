@@ -182,7 +182,7 @@ export function registerExtra(add: Add, json: J, err: E) {
     if (String(b.password ?? '').length < 10) return err(400, '密碼至少 10 字元');
     const r = await env.DB.prepare('INSERT OR IGNORE INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,?,?,?)')
       .bind(brandId, b.role, b.username, await hashPassword(b.password)).run();
-    if (r.meta.changes !== 1) return err(409, '帳號已存在');
+    if (r.meta.changes !== 1) return err(409, '這個帳號名稱已被使用（帳號在整個系統內不可重複），請換一個');
     await audit(env, brandId, actor.name, 'user_create', `${b.username}:${b.role}`);
     return json({ ok: true });
   });

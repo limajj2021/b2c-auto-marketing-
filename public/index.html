@@ -161,24 +161,16 @@ document.addEventListener('click', async (e) => {
 
 /* ---------- login ---------- */
 function loginView() {
-  const qs = new URLSearchParams(location.search);
-  let saved = ''; try { saved = localStorage.getItem('ws') || ''; } catch { /* 無痕模式 */ }
-  const ws0 = (qs.get('w') || saved).toLowerCase();
-  $('#app').innerHTML = `<div class="login"><div class="mark" id="lg">營</div><h1 class="t-page" id="lt">登入後台</h1><p class="t-sub" style="margin:6px 0 24px">請使用管理員提供的帳號</p>
-  <div id="wsf" class="hide">${field('w', '工作區代號', input('w', ws0, 'autocomplete="organization" autocapitalize="none" autocorrect="off" placeholder="例如：vuca"'), '開通時服務商提供的代號，之後會記住。')}</div>
+  $('#app').innerHTML = `<div class="login"><div class="mark" id="lg">營</div><h1 class="t-page" id="lt">管理後台</h1><p class="t-sub" style="margin:6px 0 24px">請使用管理員提供的帳號</p>
   ${field('u', '帳號', input('u', '', 'autocomplete="username" autocapitalize="none" autocorrect="off"'))}${field('p', '密碼', input('p', '', 'type="password" autocomplete="current-password"'))}
   <button class="btn block" id="go" style="margin-top:24px">登入</button>
   <p class="t-sub" style="margin-top:20px;text-align:center"><a href="/ops.html" style="color:inherit">服務商營運人員請由此登入</a></p></div>`;
-  const showName = () => fetch('/api/public' + ($('#w').value.trim() ? '?w=' + encodeURIComponent($('#w').value.trim().toLowerCase()) : '')).then((r) => r.json()).then((d) => {
-    if (d.multi) $('#wsf').classList.remove('hide');
-    if (d.name) { BRAND = d.name; $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; } else { $('#lg').textContent = '營'; $('#lt').textContent = '登入後台'; }
+  // 單一企業部署時，登入頁顯示該企業名稱；共用架構不知道是誰，維持通用標題
+  fetch('/api/public').then((r) => r.json()).then((d) => {
+    if (d.name) { BRAND = d.name; $('#lg').textContent = d.name[0]; $('#lt').textContent = d.name; }
   }).catch(() => {});
-  showName(); $('#w').onchange = showName;
   const go = (b) => act(b, async () => {
-    const workspace = $('#w').value.trim().toLowerCase() || undefined;
-    await api('POST', '/login', { workspace, username: $('#u').value.trim(), password: $('#p').value });
-    try { if (workspace) localStorage.setItem('ws', workspace); } catch { /* 無痕模式 */ }
-    if (qs.get('w')) history.replaceState(null, '', location.pathname + location.hash);
+    await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value });
     me = null; $('#app').innerHTML = ''; await render();
   });
   $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => { if (e.key === 'Enter') go($('#go')); }; // 不可回傳 false，否則會擋掉輸入
