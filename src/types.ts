@@ -18,6 +18,8 @@ export interface Env {
   CRED_ENC_KEY?: string;
   THREADS_APP_ID?: string;
   THREADS_APP_SECRET?: string;
+  /** Meta App 的狀態：development（預設，需先邀請測試人員）或 live（已通過審查，客戶可直接授權） */
+  THREADS_APP_MODE?: string;
   /** 覆寫向 Meta 要求的權限（逗號分隔）；Meta App 尚未加入某權限時可暫時移除 */
   THREADS_SCOPES?: string;
   /** "1" = 共用架構（多工作區）；未設定 = 單一企業獨立部署 */

@@ -57,6 +57,8 @@ export function registerExtra(add: Add, json: J, err: E) {
         expires_at: accts[0]?.expires_at ?? null,
         accounts: accts.map(publicAccount),
         oauth_available: oauthConfigured(env),
+        requires_invite: env.THREADS_APP_MODE !== 'live',
+        invites: (await env.DB.prepare(`SELECT id,username,status,authorize_started_at,updated_at FROM threads_invites WHERE brand_id=? AND status IN ('requested','invited','accepted') ORDER BY id`).bind(brandId).all()).results,
       },
     });
   });
@@ -123,8 +125,51 @@ export function registerExtra(add: Add, json: J, err: E) {
     return json({ ok: true });
   });
 
+  // ---- Threads 測試邀請：觸發（客戶提出）→ 同意（客戶接受）→ 授權 ----
+  const normUser = (v: unknown) => String(v ?? '').trim().replace(/^https?:\/\/(www\.)?threads\.(net|com)\/@?/i, '').replace(/^@/, '').split(/[/?#]/)[0].toLowerCase();
+
+  add('POST', '/threads/invites', 'admin', async ({ env, req, actor, brandId }) => {
+    const b: any = await req.json().catch(() => ({}));
+    const username = normUser(b.username);
+    if (!/^[a-z0-9._]{1,30}$/.test(username)) return err(400, 'Threads 帳號名稱格式不正確（不含 @，只有英文、數字、底線與句點）');
+    if ((await listAccounts(env)).some((a) => (a.username ?? '').toLowerCase() === username)) return err(409, `@${username} 已經連結了`);
+    const now = iso();
+    const cur = await env.DB.prepare('SELECT id,status FROM threads_invites WHERE brand_id=? AND lower(username)=?').bind(brandId, username).first<{ id: number; status: string }>();
+    if (cur && ['requested', 'invited', 'accepted'].includes(cur.status)) return json({ id: cur.id, status: cur.status, username });
+    if (cur) await env.DB.prepare(`UPDATE threads_invites SET status='requested',requested_by=?,authorize_started_at=NULL,updated_at=? WHERE id=?`).bind(actor.name, now, cur.id).run();
+    else await env.DB.prepare('INSERT INTO threads_invites(brand_id,username,status,requested_by,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind(brandId, username, 'requested', actor.name, now, now).run();
+    await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 申請連結 Threads @${username}：等待服務商在 Meta 送出測試邀請`);
+    const row = await env.DB.prepare('SELECT id,status FROM threads_invites WHERE brand_id=? AND lower(username)=?').bind(brandId, username).first<{ id: number; status: string }>();
+    return json({ id: row!.id, status: row!.status, username }, 201);
+  });
+
+  // 客戶：我已在 Threads 接受邀請（只有服務商送出邀請之後才能按）
+  add('POST', '/threads/invites/(\\d+)/accepted', 'admin', async ({ env, m, actor, brandId }) => {
+    const r = await env.DB.prepare(`UPDATE threads_invites SET status='accepted',updated_at=? WHERE id=? AND brand_id=? AND status='invited'`).bind(iso(), m[1], brandId).run();
+    if (r.meta.changes !== 1) {
+      const cur = await env.DB.prepare('SELECT status FROM threads_invites WHERE id=? AND brand_id=?').bind(m[1], brandId).first<{ status: string }>();
+      if (cur?.status === 'accepted') return json({ ok: true });
+      return err(409, cur?.status === 'requested' ? '服務商還沒有送出邀請，請稍後再試' : '找不到這筆申請');
+    }
+    await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 表示已接受 Threads 測試邀請，可以進行授權`);
+    return json({ ok: true });
+  });
+
+  add('DELETE', '/threads/invites/(\\d+)', 'admin', async ({ env, m, brandId }) => {
+    await env.DB.prepare(`UPDATE threads_invites SET status='cancelled',updated_at=? WHERE id=? AND brand_id=? AND status IN ('requested','invited','accepted')`).bind(iso(), m[1], brandId).run();
+    return json({ ok: true });
+  });
+
   add('GET', '/integrations/threads/connect', 'admin', async ({ env, actor, url, brandId }) => {
     if (!oauthConfigured(env)) return err(409, '系統尚未設定 Threads App（THREADS_APP_ID / THREADS_APP_SECRET）');
+    // 從邀請流程進來：必須已完成前兩步，並記下開始授權的時間（客戶頁用來提示「上次授權沒有完成」）
+    const inv = url.searchParams.get('invite');
+    if (inv) {
+      const row = await env.DB.prepare('SELECT status FROM threads_invites WHERE id=? AND brand_id=?').bind(inv, brandId).first<{ status: string }>();
+      if (!row) return err(404, '找不到這筆申請');
+      if (env.THREADS_APP_MODE !== 'live' && row.status !== 'accepted' && row.status !== 'connected') return err(409, '請先完成前面的步驟：服務商送出邀請、你在 Threads 接受邀請');
+      await env.DB.prepare('UPDATE threads_invites SET authorize_started_at=? WHERE id=? AND brand_id=?').bind(iso(), inv, brandId).run();
+    }
     // 用來判斷授權是否有回到系統：只有「開始」沒有後續結果，代表卡在 Threads／Meta 頁面
     await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 開始連結 Threads（等待 Threads 頁面回傳）`, { callback: `${url.origin}/threads/callback` });
     return json({ url: await buildAuthorizeUrl(env, url.origin, actor.id) });

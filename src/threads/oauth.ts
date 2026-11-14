@@ -76,6 +76,7 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
     const expiresAt = new Date(now + (long.expires_in ?? 5184000) * 1000).toISOString();
     await upsertAccount(env, brand.id, { userId: String(me.id), username: me.username ?? null, token: long.access_token, expiresAt });
     await env.DB.prepare(`UPDATE brand_settings SET threads_status='ok' WHERE brand_id=?`).bind(brand.id).run();
+    await env.DB.prepare(`UPDATE threads_invites SET status='connected',updated_at=? WHERE brand_id=? AND lower(username)=lower(?) AND status<>'connected'`).bind(new Date(now).toISOString(), brand.id, String(me.username ?? '')).run();
     await audit(env, brand.id, null, 'threads_connected', me.username ?? '');
     await logEvent(env, brand.id, 'info', 'threads_oauth', `已連結 @${me.username ?? me.id}`);
     return redirect('/?threads=connected');

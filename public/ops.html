@@ -130,12 +130,13 @@ function loginView() {
 
 /* ---------- 工作區 ---------- */
 async function tenantsPage() {
-  const [d, lg] = await Promise.all([api('GET', '/tenants?month=' + month), api('GET', '/logs?level=warn').catch(() => null)]);
+  const [d, lg, iv] = await Promise.all([api('GET', '/tenants?month=' + month), api('GET', '/logs?level=warn').catch(() => null), api('GET', '/invites').catch(() => ({ rows: [] }))]);
+  const todo = iv.rows.filter((r) => r.status === 'requested').length;
   T = d.tenants;
   const sum = (k) => T.reduce((a, x) => a + (x[k] || 0), 0), need = T.filter((x) => x.health === 'attention').length;
   bar('工作區', `${esc(me.username)}（${me.role === 'admin' ? '營運管理者' : '維護人員'}）· ${T.length} 個工作區`);
   const k = (v, l, cls = '') => `<div><b class="${cls || (v ? '' : 'z')}">${v}</b><span>${l}</span></div>`;
-  view(`${lg && lg.last24h.error ? `<button class="banner" id="errs" style="width:100%;border:0;text-align:left;cursor:pointer;color:inherit"><span class="dot bad"></span><span class="main"><b>近 24 小時有 ${lg.last24h.error} 個錯誤</b><div class="t-sub">點這裡查看系統紀錄</div></span>${chev}</button>` : ''}
+  view(`${iv.rows.length ? `<button class="banner" id="invs" style="width:100%;border:0;text-align:left;cursor:pointer;color:inherit"><span class="dot ${todo ? 'gold' : ''}"></span><span class="main"><b>${todo ? `${todo} 個 Threads 測試邀請待送出` : `${iv.rows.length} 個邀請等待客戶接受`}</b><div class="t-sub">${todo ? '客戶已申請連結，需要到 Meta 後台加為測試人員' : '已送出邀請，等客戶在 Threads 接受'}</div></span>${chev}</button>` : ''}${lg && lg.last24h.error ? `<button class="banner" id="errs" style="width:100%;border:0;text-align:left;cursor:pointer;color:inherit"><span class="dot bad"></span><span class="main"><b>近 24 小時有 ${lg.last24h.error} 個錯誤</b><div class="t-sub">點這裡查看系統紀錄</div></span>${chev}</button>` : ''}
     <section>${sec('本月成效', '')}
       <div class="toolbar" style="margin-bottom:10px"><input type="month" id="mo" value="${month}" aria-label="月份"><button class="btn sec" id="csv">下載計費用量 CSV</button></div>
       <div class="kpi">${k(need, '需處理', need ? 'bad' : '')}${k(sum('views'), '曝光')}${k(sum('uniques'), 'LINE 點擊（人）')}${k(sum('friends'), '新好友')}${k(sum('handoffs'), '轉真人')}${k(sum('published'), '發文')}${k(sum('generations'), 'AI 生成')}${k(sum('leads'), '留資')}${k(T.reduce((a, x) => a + x.threads_accounts, 0), 'Threads 帳號')}</div></section>
@@ -147,6 +148,7 @@ async function tenantsPage() {
     }).join('')}</div>` : empty('還沒有工作區', '到「開通」建立第一個客戶工作區。')}</section>
     <p class="t-sub">營運人員只看得到計數與狀態，看不到顧客的留資內容。</p>`);
   $('#mo').onchange = (e) => { month = e.target.value; render(); };
+  $('#invs')?.addEventListener('click', () => invitesSheet(iv.rows));
   $('#errs')?.addEventListener('click', () => { L.level = 'error'; location.hash = '#/logs'; });
   $('#csv').onclick = (e) => act(e.currentTarget, async () => {
     const u = await api('GET', '/usage?month=' + month);
@@ -155,6 +157,18 @@ async function tenantsPage() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `usage-${u.month}.csv`; a.click();
   });
   $$('[data-ws]').forEach((b) => b.onclick = () => tenantSheet(T.find((x) => x.slug === b.dataset.ws)));
+}
+
+/** Threads 測試邀請：客戶申請 → 你在 Meta 送出邀請 → 回來標記。Meta 沒有 API 可以代送，所以這一步要人工。 */
+function invitesSheet(rows) {
+  const card = (r) => `<div class="list" style="margin-bottom:10px"><div class="row static" style="align-items:flex-start"><span class="dot ${r.status === 'requested' ? 'gold' : ''}" style="margin-top:7px"></span><span class="main">
+      <span class="ttl" style="display:block">@${esc(r.username)} <span class="mut" style="font-weight:400">· ${esc(r.name)}</span></span>
+      <span class="sub" style="display:block">${r.status === 'requested' ? '待你在 Meta 送出邀請' : '已送出，等客戶接受'} · ${ago(r.updated_at)}</span>
+      <span class="actions" style="margin-top:8px">${r.status === 'requested' ? `<button class="btn sm" data-i="${r.id}" data-s="invited">已送出邀請</button><button class="btn sm sec" data-i="${r.id}" data-s="accepted">對方已是測試人員</button>` : `<button class="btn sm sec" data-i="${r.id}" data-s="accepted">對方已接受</button>`}<button class="btn sm dng" data-i="${r.id}" data-s="cancelled">取消</button></span></span></div></div>`;
+  sheet('Threads 測試邀請', `<div class="note" style="margin-bottom:12px"><b>怎麼送出邀請</b><br>Meta 開發者後台 → 你的 App → 應用程式角色 → 角色 → 新增人員 → 選「Threads 測試人員」→ 輸入下方的帳號名稱。送出後回來按「已送出邀請」，客戶端就會通知他到 Threads 接受。</div>${rows.map(card).join('')}`,
+    (el, close) => el.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => act(b, async () => {
+      await api('PATCH', '/invites/' + b.dataset.i, { status: b.dataset.s }); close(); toast(b.dataset.s === 'cancelled' ? '已取消' : '已更新，客戶會看到下一步', 'ok'); render();
+    })));
 }
 
 function tenantSheet(x) {

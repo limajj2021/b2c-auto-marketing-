@@ -567,6 +567,7 @@ async function leadsPage() {
    設定（分組清單 + 子頁）
    ====================================================================== */
 async function settingsPage(r) {
+  if (r.sub === 'threads' && r.arg === 'new') return threadsConnectPage();
   if (r.sub === 'threads' && r.arg) return threadsAccountPage(+r.arg);
   const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage, logs: logsPage }[r.sub];
   if (sub) return sub();
@@ -591,20 +592,57 @@ async function settingsPage(r) {
   }, '已下載');
 }
 async function logout() { await api('POST', '/logout').catch(() => {}); me = null; $('#app').innerHTML = ''; render(); }
+const INVITE_STATE = { requested: '等待服務商送出邀請', invited: '請到 Threads 接受邀請', accepted: '可以授權了' };
 async function threadsPage() {
-  const ig = await api('GET', '/integrations'); const t = ig.threads, accts = t.accounts || []; ACCTS = accts;
+  const ig = await api('GET', '/integrations'); const t = ig.threads, accts = t.accounts || [], inv = t.invites || []; ACCTS = accts;
+  // 開發模式需要先邀請測試人員，所以新增帳號走三步流程；正式上線後直接授權
+  const addTo = t.requires_invite ? 'new' : '';
   bar({ title: 'Threads 帳號', back: 'settings', right: accts.length && t.oauth_available ? '<button class="btn sm" id="tadd" style="margin-right:4px">新增帳號</button>' : '' });
-  setView(accts.length ? `<div class="list">${accts.map((a) => row({ act: 'acct', id: a.id, dot: a.status === 'ok' ? (a.auto_post_enabled ? 'ok' : '') : 'bad', title: '@' + esc(a.username || a.id),
+  const pending = inv.length ? `<section>${sec('連結中')}<div class="list">${inv.map((i) => row({ act: 'inv', id: i.id, dot: i.status === 'accepted' ? 'ok' : 'gold', title: '@' + esc(i.username), sub: INVITE_STATE[i.status] })).join('')}</div></section>` : '';
+  setView(`${pending}${accts.length ? `<section>${inv.length ? sec('已連結') : ''}<div class="list">${accts.map((a) => row({ act: 'acct', id: a.id, dot: a.status === 'ok' ? (a.auto_post_enabled ? 'ok' : '') : 'bad', title: '@' + esc(a.username || a.id),
       sub: a.status !== 'ok' ? '授權已失效，請重新連結' : `${esc(a.persona ? a.persona.slice(0, 24) : '未設定人設')}${a.auto_post_enabled ? '' : ' · 自動發文已暫停'}` })).join('')}</div>
-    <p class="t-sub">每個帳號可以設定自己的人設、語氣與發文時段；沒設定的項目沿用「發文設定」的預設值。多個帳號共用預設時段時，系統會自動錯開 20 分鐘。</p>
-    <p class="t-sub">要新增帳號：先在 Threads App 登入那個帳號，再按右上角「新增帳號」。</p>
-    <div class="actions"><button class="btn sec" id="tt">測試所有帳號</button></div>`
+    <p class="t-sub" style="margin-top:12px">每個帳號可以設定自己的人設、語氣與發文時段；沒設定的項目沿用「發文設定」的預設值。多個帳號共用預設時段時，系統會自動錯開 20 分鐘。</p>
+    <div class="actions" style="margin-top:12px"><button class="btn sec" id="tt">測試所有帳號</button></div></section>`
     : `<p class="mut">連結後即可自動發文。可以連結多個帳號，各自設定人設，經營帳號矩陣。</p>${t.oauth_available ? '' : '<div class="note warn" style="margin-top:12px">系統尚未設定 Threads App，請聯絡服務商。</div>'}
-      <button class="btn block" id="tc" style="margin-top:16px" ${t.oauth_available ? '' : 'disabled'}>連結 Threads 帳號</button><button class="link" data-go="help">遇到問題？查看說明</button>`);
-  const connect = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
-  $('#tc')?.addEventListener('click', connect); $('#tadd')?.addEventListener('click', connect);
+      <button class="btn block" id="tc" style="margin-top:16px" ${t.oauth_available ? '' : 'disabled'}>連結 Threads 帳號</button><button class="link" data-go="help">遇到問題？查看說明</button>`}`);
+  const start = (e) => addTo ? go('settings/threads/new') : act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
+  $('#tc')?.addEventListener('click', start); $('#tadd')?.addEventListener('click', start);
+  $$('[data-act=inv]').forEach((b) => b.onclick = () => go('settings/threads/new'));
   $$('[data-act=acct]').forEach((b) => b.onclick = () => go('settings/threads/' + b.dataset.id));
   $('#tt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+}
+/** 連結 Threads：觸發 → 同意 → 授權。每一步都標示現在輪到誰、要做什麼。 */
+async function threadsConnectPage() {
+  const ig = await api('GET', '/integrations'); const t = ig.threads, inv = t.invites || [];
+  bar({ title: '連結 Threads 帳號', back: 'settings/threads' });
+  const step = (n, state, title, sub, extra = '') => `<div class="row static" style="align-items:flex-start;border-top:${n === 1 ? 0 : 1}px solid var(--line)"><span class="dot ${state === 'done' ? 'ok' : state === 'now' ? 'gold' : ''}" style="margin-top:7px"></span><span class="main"><span class="ttl" style="display:block;${state === 'wait' ? 'color:var(--text3)' : ''}">${state === 'done' ? '✓ ' : ''}${n}. ${title}</span>${sub ? `<span class="sub" style="display:block;${state === 'wait' ? 'color:var(--text3)' : ''}">${sub}</span>` : ''}${extra}</span></div>`;
+  const card = (i) => {
+    const s = i.status, u = esc(i.username);
+    const started = i.authorize_started_at && (Date.now() - new Date(i.authorize_started_at).getTime() > 90000) && (Date.now() - new Date(i.authorize_started_at).getTime() < 6 * 3600000);
+    const s1 = step(1, 'done', '通知服務商', '已通知。服務商會在 Meta 把這個帳號加為測試人員，通常 1 個工作天內完成。');
+    const s2 = s === 'requested' ? step(2, 'wait', '在 Threads 同意邀請', '服務商送出邀請後，這裡會通知你。')
+      : s === 'invited' ? step(2, 'now', '在 Threads 同意邀請', `用 <b>@${u}</b> 登入 Threads，到「設定 → 帳號 → 網站權限 → 邀請」，找到邀請按「接受」。`,
+          `<div class="actions" style="margin-top:10px"><a class="btn sec sm" href="https://www.threads.com/" target="_blank" rel="noopener" style="text-decoration:none">開啟 Threads ↗</a><button class="btn sm" data-acc="${i.id}">我已接受邀請</button></div>`)
+      : step(2, 'done', '在 Threads 同意邀請', '已接受。');
+    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `請先確認這個瀏覽器登入的 Threads 是 <b>@${u}</b>，再按下面的按鈕，在 Threads 頁面按「允許」。`,
+          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button></div>`)
+      : step(3, 'wait', '授權連結', '完成上一步後就能授權。');
+    return `<section>${sec('@' + u, `<button class="link" data-cancel="${i.id}">取消</button>`)}<div class="list">${s1}${s2}${s3}</div></section>`;
+  };
+  setView(`<div data-form>
+    ${t.requires_invite ? `<p class="t-sub">系統目前在測試階段，每個 Threads 帳號第一次連結都要先經過三步。之後換新憑證或重新連結同一個帳號，不需要再做一次。</p>` : ''}
+    ${inv.map(card).join('')}
+    <section>${sec(inv.length ? '再新增一個帳號' : '第一步：輸入要連結的 Threads 帳號')}
+      <div class="list" style="padding:4px 16px 16px">${field('nu', 'Threads 帳號名稱', input('nu', '', 'placeholder="例如：vuca.canada（不含 @）" autocapitalize="none" autocorrect="off"'), '個人檔案頁面上，名稱下方的帳號。')}
+        <button class="btn block" id="nreq" style="margin-top:16px">${t.requires_invite ? '通知服務商' : '下一步'}</button></div></section></div>`, 'form');
+  $('#nreq').onclick = async (e) => {
+    const v = $('#nu').value.trim().replace(/^@/, ''); $('#nu').value = v;
+    if (!check([[$('#nu'), !/^[A-Za-z0-9._]{1,30}$/.test(v), '帳號名稱只有英文、數字、底線與句點，不含 @']])) return;
+    if (await act(e.currentTarget, () => api('POST', '/threads/invites', { username: v }), t.requires_invite ? '已通知服務商' : '')) { dirty = false; render(); }
+  };
+  $$('[data-acc]').forEach((b) => b.onclick = () => act(b, async () => { await api('POST', `/threads/invites/${b.dataset.acc}/accepted`); render(); }));
+  $$('[data-cancel]').forEach((b) => b.onclick = async () => { if (!(await confirmSheet('取消這個帳號的連結申請？', '取消申請'))) return; await act(b, () => api('DELETE', '/threads/invites/' + b.dataset.cancel)); render(); });
+  $$('[data-auth]').forEach((b) => b.onclick = () => act(b, async () => { location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.auth)).url; }));
 }
 async function threadsAccountPage(id) {
   const [ig, st] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings')]); TZ = st.brand.timezone;
@@ -813,11 +851,11 @@ async function accountPage() {
    說明中心
    ====================================================================== */
 const HELP = [
-  ['start', '第一次使用，照這 4 步', `<ol><li><b>設定 → LINE 官方帳號：</b>填入官方帳號 ID（@ 開頭），貼文的加好友連結會用它。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads」並同意授權。</li><li><b>首頁：</b>打開「自動發文」。</li></ol><p>想在報表看到「新好友數」，可再到「設定 → LINE 官方帳號」連接 LINE 數據（選用，只讀取統計，不會接管你的自動回應）。</p><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
+  ['start', '第一次使用，照這 4 步', `<ol><li><b>設定 → LINE 官方帳號：</b>填入官方帳號 ID（@ 開頭），貼文的加好友連結會用它。</li><li><b>設定 → AI（Gemini）：</b>貼上 API key。</li><li><b>設定 → Threads：</b>按「連結 Threads 帳號」，照畫面三步完成：通知服務商 → 在 Threads 接受邀請 → 授權。</li><li><b>首頁：</b>打開「自動發文」。</li></ol><p>想在報表看到「新好友數」，可再到「設定 → LINE 官方帳號」連接 LINE 數據（選用，只讀取統計，不會接管你的自動回應）。</p><p>首頁的「開通進度」會顯示下一步。全部完成後它會自動消失。</p>`],
   ['line-delegate', '請服務商代設定 LINE（最省事）', `<ol><li>打開 <b>LINE 官方帳號後台</b>（manager.line.biz）→ 右上角「設定」→「權限管理」。</li><li>按「新增成員」，權限選 <b>管理員</b>，產生邀請連結。</li><li>把邀請連結傳給服務商窗口。</li></ol><p>服務商會完成啟用 Messaging API、串接與回應設定，你不需要提供任何密碼。完成後可在同一頁移除對方，已完成的串接不受影響。</p>`],
   ['line', '連接 LINE 數據（選用）', `<p>只填官方帳號 ID 就能導流與統計點擊。連接 LINE 數據後，報表會多出每日「新好友數」。系統只讀取統計，<b>不會回覆訊息</b>，你在 LINE 後台設定的自動回應、歡迎訊息、圖文選單都照常運作。</p><ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 整頁全選複製，貼到「設定 → LINE 官方帳號」的貼上框，系統會自動找出 <b>Channel ID</b> 與 <b>Channel secret</b>（也可以分別手動填）。</li><li>按「驗證並儲存」。系統會自動取得憑證並在到期前更新。</li></ol><p>有開通「LINE 自動接待」加購的話，系統才會接手回覆；這時請到 Official Account Manager → 回應設定，關閉「自動回應訊息」與「加入好友的歡迎訊息」，避免重複回覆。</p><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
   ['gemini', '如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b> 並複製。</li><li>貼到「設定 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p>AI 只用來寫 Threads 貼文，不讀取顧客資料。每日生成次數有上限，用完自動停止，不會多收費。</p>`],
-  ['threads', '如何連結 Threads（可多個帳號）', `<ol><li>先在 Threads App 登入要發文的帳號。</li><li>到「設定 → Threads 帳號」按<b>連結</b>（已有帳號時按右上角「新增帳號」），並按同意。</li><li>完成後自動回到後台，帳號會出現在清單裡。要再加一個帳號，就在 Threads App 切換帳號後重複一次。</li><li>點進每個帳號可以設定<b>人設</b>、語氣、主題與發文時段；沒填的沿用預設。</li></ol><p>授權約 60 天到期，系統會自動續期。若出現「授權失效」，在 Threads App 登入該帳號後按「重新連結」。</p><div class="note warn">出現「無法使用此應用程式」代表帳號還沒被加為測試人員，請聯絡服務商。</div>`],
+  ['threads', '如何連結 Threads（可多個帳號）', `<p>每個 Threads 帳號第一次連結要三步：</p><ol><li><b>通知服務商</b>：到「設定 → Threads 帳號」按連結，輸入帳號名稱。服務商會在 Meta 把它加為測試人員。</li><li><b>同意邀請</b>：服務商送出後，用該帳號登入 Threads，到「設定 → 帳號 → 網站權限 → 邀請」按接受，回到後台按「我已接受邀請」。</li><li><b>授權</b>：確認瀏覽器登入的是同一個 Threads 帳號，按「授權並連結」，在 Threads 頁面按允許。</li></ol><p>完成後帳號會出現在清單，可以各自設定人設與發文時段。已連結的帳號之後重新連結不需要再做前兩步。</p><div class="note warn">授權時如果看到「尚未接受測試邀請」，代表第二步還沒完成，或瀏覽器登入的是別的 Threads 帳號。</div>`],
   ['thread', '串文、改寫分發與【待補數據】', `<ul><li><b>串文：</b>AI 依「爭議化、數據化、具體化」一次寫一整串，第一則是鉤子、最後一則是 CTA（自動附上 LINE 連結）。審核時可以逐則修改、新增或移除。</li><li><b>則數：</b>在「貼文 → 發文設定 → 內容策略」調整，設 1 則就是單篇貼文。</li><li><b>【待補數據】：</b>AI 只能引用你在「可引用數據」填的數字；需要數據但沒有時會留下【待補數據】，補上真實數字前無法核准，避免散布不實數據。</li><li><b>改寫分發：</b>打開一串貼文按「改寫分發」，AI 會用其他帳號的人設重寫，並錯開 45 分鐘發布。</li><li><b>發到一半中斷：</b>系統會記住發到第幾則，按「接續發布」只會補發剩下的，不會重複。</li></ul>`],
   ['modes', '三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接發布。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，核准才發。</li><li><b>C 指定主題：</b>依「本週主題」生成，可選擇是否審核。</li></ul><div class="note bad">金融、放款等受監管產業一律強制人工審核。</div><p>內容檢查會擋下「保證核貸」「免審」等字眼，被擋的草稿需修改後才能核准。</p>`],
   ['leads', '顧客留資怎麼運作（加購項目）', `<p>留資是加購功能，開通後才會出現「留資」分頁。未開通時，系統不會蒐集顧客填寫的任何資料，顧客想諮詢會被引導「聯絡專人」，首頁改顯示新好友數與轉真人次數。</p><ol><li>顧客在 LINE 點「立即詢問」→ 看隱私告知 → 輸入「同意」。</li><li>回答服務類型與表單問題 → 確認送出。</li><li>你在「留資」看到新紀錄（未處理）。</li><li>聯絡後標記為「已處理」。</li></ol><p>顧客可輸入「查詢我的資料」「刪除我的資料」。超過保存期限（預設 180 天）自動刪除。</p>`],

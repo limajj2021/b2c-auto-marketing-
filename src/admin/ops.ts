@@ -1,7 +1,7 @@
 // 營運總後台 API：跨工作區的健康狀態、用量計量、開通與暫停。
 // 原則：營運人員只看「計數與狀態」，不讀顧客留資內容等個資。
 import type { Env } from '../types';
-import { SOURCES } from '../log';
+import { SOURCES, logEvent } from '../log';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso } from '../util/time';
 
@@ -61,7 +61,8 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
   }
 
   // 維護人員（support）只能查看狀態與協助重設客戶密碼；其餘變更限管理者（admin）
-  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/reset-admin$/.test(path);
+  // 處理 Threads 測試邀請屬於日常工作，維護人員也可以做
+  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/reset-admin$/.test(path) && !/^\/invites\/\d+$/.test(path);
   if (writes && op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
 
   if (path === '/operators' && req.method === 'GET') {
@@ -152,6 +153,24 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
        FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.slug`,
     ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me).all()).results;
     return json({ month: ms.slice(0, 7), rows });
+  }
+
+  // Threads 測試邀請：客戶提出申請後，由營運人員在 Meta 後台送出邀請，再回來標記
+  if (path === '/invites' && req.method === 'GET') {
+    const rows = (await env.DB.prepare(`SELECT i.id,i.username,i.status,i.created_at,i.updated_at,b.name,b.slug FROM threads_invites i JOIN brands b ON b.id=i.brand_id
+      WHERE i.status IN ('requested','invited') ORDER BY (i.status='requested') DESC, i.id`).all()).results;
+    return json({ rows, app_mode: env.THREADS_APP_MODE === 'live' ? 'live' : 'development' });
+  }
+  const im = path.match(/^\/invites\/(\d+)$/);
+  if (im && req.method === 'PATCH') {
+    const b: any = await req.json().catch(() => ({}));
+    if (!['invited', 'accepted', 'cancelled'].includes(b.status)) return err(400, '狀態不正確');
+    const r = await env.DB.prepare(`UPDATE threads_invites SET status=?,updated_at=? WHERE id=? AND status IN ('requested','invited')`).bind(b.status, iso(), im[1]).run();
+    if (r.meta.changes !== 1) return err(409, '這筆申請已經處理過了');
+    const row = await env.DB.prepare('SELECT brand_id,username FROM threads_invites WHERE id=?').bind(im[1]).first<{ brand_id: string; username: string }>();
+    await log(env, op.username, 'threads_invite', `${im[1]}:${b.status}`);
+    if (row) await logEvent(env, row.brand_id, 'info', 'threads_oauth', b.status === 'invited' ? `服務商已在 Meta 送出 @${row.username} 的測試邀請，等待對方接受` : b.status === 'accepted' ? `@${row.username} 已確認是測試人員，可以直接授權` : `@${row.username} 的連結申請已取消`);
+    return json({ ok: true });
   }
 
   // 系統紀錄：全部工作區，可依工作區、等級、來源、關鍵字篩選（紀錄本身不含顧客訊息與憑證）
