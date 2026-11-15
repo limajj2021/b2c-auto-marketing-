@@ -1,10 +1,11 @@
 // 品牌資料包：給客戶自己的 AI 用的指令，以及解析 AI 整理好的結果
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // 像瀏覽器一樣執行腳本（它會把 BrandKit 掛在 window 上）
 const win: any = {};
-new Function('window', readFileSync(new URL('../public/brandkit.js', import.meta.url), 'utf8'))(win);
+new Function('window', readFileSync(join(process.cwd(), 'public/brandkit.js'), 'utf8'))(win);
 const BrandKit: any = win.BrandKit;
 
 const AI_OUTPUT = `好的，以下是整理好的品牌資料包：
