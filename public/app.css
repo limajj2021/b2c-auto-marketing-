@@ -177,6 +177,9 @@ details.acc .body{padding:0 16px 16px;color:var(--text2);line-height:1.75}.body 
   .page.wide{max-width:none}
 }
 nav.tabs .brand{display:none}
+nav.tabs button.brand{border:0;background:none;width:100%;color:inherit;font:inherit;font-weight:600;cursor:pointer;text-align:left;border-radius:var(--r)}
+nav.tabs button.brand svg{flex:none;width:16px;height:16px;margin-left:auto;stroke:var(--text3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+@media (hover:hover){nav.tabs button.brand:hover{background:var(--bg2)}}
 /* 滾輪時間選擇器（日期／時／分），中間一列為選取值 */
 .sched{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border-radius:var(--r-lg);background:var(--bg2);margin-bottom:14px}
 .sched .when{font-size:15px;font-weight:600}.sched>.btn.sec{background:var(--bg1)}.sched .t-sub{width:100%;margin:-2px 0 0}

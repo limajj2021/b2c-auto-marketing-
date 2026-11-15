@@ -222,26 +222,59 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
         if (!(await env.DB.prepare('SELECT 1 FROM brands WHERE slug=? OR id=?').bind(c, c).first())) slug = c;
       }
     }
-    const admin = String(b.admin_username || (b.slug ? `${slug.slice(0, 24)}-admin` : '')).trim();
-    if (!admin) return err(400, '請輸入管理員帳號');
+    // 共用既有客戶帳號：新品牌出現在這位客戶的「切換品牌」清單，不另外建立帳號
+    const shareWith = String(b.share_with ?? '').trim();
+    const shareUser = shareWith ? await env.DB.prepare('SELECT id,authentication_id FROM admin_users WHERE lower(authentication_id)=lower(?) AND enabled=1').bind(shareWith).first<{ id: number; authentication_id: string }>() : null;
+    if (shareWith && !shareUser) return err(404, '找不到這個客戶帳號，請確認帳號名稱');
+    const admin = shareUser ? '' : String(b.admin_username || (b.slug ? `${slug.slice(0, 24)}-admin` : '')).trim();
+    if (!shareUser && !admin) return err(400, '請輸入管理員帳號');
     if (!/^[a-z0-9-]{2,40}$/.test(slug) || slug.startsWith('_')) return err(400, '內部編號需為 2–40 字英文小寫、數字或連字號');
     if (!name || name.length > 100) return err(400, '請輸入品牌名稱');
-    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(admin)) return err(400, '管理員帳號需為 3–32 字英數');
+    if (!shareUser && !/^[a-zA-Z0-9_.-]{3,32}$/.test(admin)) return err(400, '管理員帳號需為 3–32 字英數');
     if (!['general', 'lending', 'finance', 'loan'].includes(industry)) return err(400, '產業類別不合法');
     const timezone = String(b.timezone ?? 'Asia/Taipei').trim();
     if (!isValidTimezone(timezone)) return err(400, '時區不正確，請使用例如 Asia/Taipei 的格式');
     if (await env.DB.prepare('SELECT 1 FROM brands WHERE slug=? OR id=?').bind(slug, slug).first()) return err(409, '這個內部編號已被使用');
-    if (await env.DB.prepare('SELECT 1 FROM admin_users WHERE lower(authentication_id)=lower(?)').bind(admin).first()) return err(409, '這個管理員帳號已被使用（帳號在整個系統內不可重複），請換一個');
+    if (!shareUser && await env.DB.prepare('SELECT 1 FROM admin_users WHERE lower(authentication_id)=lower(?)').bind(admin).first()) return err(409, '這個管理員帳號已被使用（帳號在整個系統內不可重複），請換一個');
     const id = slug, now = iso(), pw = randomPassword();
     await env.DB.prepare(`INSERT INTO brands(id,slug,name,industry,description,timezone,created_at,status,plan) VALUES(?,?,?,?,'',?,?,'active',?)`)
       .bind(id, slug, name, industry, timezone, now, String(b.plan ?? 'standard')).run();
     await env.DB.prepare(`INSERT INTO brand_settings(brand_id,updated_at,auto_post_enabled,line_auto_reply_enabled) VALUES(?,?,0,1)`).bind(id, now).run();
-    await env.DB.prepare(`INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,'admin',?,?)`).bind(id, admin, await hashPassword(pw)).run();
-    await log(env, op.username, 'tenant_create', slug);
+    if (shareUser) await env.DB.prepare(`INSERT INTO user_brands(user_id,brand_id,role,created_at) VALUES(?,?,'admin',?)`).bind(shareUser.id, id, now).run();
+    else await env.DB.prepare(`INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,'admin',?,?)`).bind(id, admin, await hashPassword(pw)).run();
+    await log(env, op.username, 'tenant_create', shareUser ? `${slug}+share:${shareUser.authentication_id}` : slug);
     // 開通時已知客戶的 Threads 帳號：一併建立連結申請（已在 Meta 送出邀請時狀態直接是 invited）
     const hint = String(b.threads_usernames ?? '').split(/[\s,，、]+/).map(normUsername).filter((x): x is string => !!x);
     for (const n of hint) await requestInvite(forBrand(env, id), id, n, b.invites_sent ? 'invited' : 'requested', `營運人員 ${op.username}`);
-    return json({ slug, name, admin_username: admin, password: pw, login_url: url.origin, invites: hint.length }, 201);
+    return json(shareUser ? { slug, name, shared_with: shareUser.authentication_id, login_url: url.origin, invites: hint.length } : { slug, name, admin_username: admin, password: pw, login_url: url.origin, invites: hint.length }, 201);
+  }
+
+  // 哪些登入帳號可以進入這個品牌（主要帳號＋共用帳號），以及新增／移除共用
+  const am = path.match(/^\/tenants\/([a-z0-9-]{2,40})\/access(?:\/(\d+))?$/);
+  if (am) {
+    const t = await env.DB.prepare('SELECT id FROM brands WHERE slug=?').bind(am[1]).first<{ id: string }>();
+    if (!t) return err(404, '找不到這個品牌');
+    if (req.method === 'GET') {
+      return json((await env.DB.prepare(
+        `SELECT id,authentication_id AS username,role,enabled,1 AS owner FROM admin_users WHERE brand_id=?
+         UNION ALL SELECT u.id,u.authentication_id,ub.role,u.enabled,0 FROM user_brands ub JOIN admin_users u ON u.id=ub.user_id WHERE ub.brand_id=? ORDER BY owner DESC, id`).bind(t.id, t.id).all()).results);
+    }
+    if (req.method === 'POST' && !am[2]) {
+      const b: any = await req.json().catch(() => ({}));
+      const role = b.role === 'staff' ? 'staff' : 'admin';
+      const u = await env.DB.prepare('SELECT id,brand_id,authentication_id FROM admin_users WHERE lower(authentication_id)=lower(?) AND enabled=1').bind(String(b.username ?? '').trim()).first<{ id: number; brand_id: string; authentication_id: string }>();
+      if (!u) return err(404, '找不到這個登入帳號');
+      if (u.brand_id === t.id) return err(409, '這個帳號本來就屬於這個品牌');
+      await env.DB.prepare('INSERT INTO user_brands(user_id,brand_id,role,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,brand_id) DO UPDATE SET role=excluded.role').bind(u.id, t.id, role, iso()).run();
+      await log(env, op.username, 'brand_access_add', `${am[1]}:${u.authentication_id}:${role}`);
+      return json({ ok: true });
+    }
+    if (req.method === 'DELETE' && am[2]) {
+      await env.DB.prepare('DELETE FROM user_brands WHERE user_id=? AND brand_id=?').bind(am[2], t.id).run();
+      await env.DB.prepare('UPDATE admin_users SET last_brand_id=NULL WHERE id=? AND last_brand_id=?').bind(am[2], t.id).run();
+      await log(env, op.username, 'brand_access_remove', `${am[1]}:${am[2]}`);
+      return json({ ok: true });
+    }
   }
 
   const m = path.match(/^\/tenants\/([a-z0-9-]{2,40})$/);

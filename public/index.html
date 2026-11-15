@@ -132,7 +132,8 @@ async function render() {
   if (!$('#view')) {
     $('#app').innerHTML = `<header class="bar" id="bar"></header><main id="view"></main><nav class="tabs" aria-label="主選單"><div class="in" id="tabs"></div></nav>`;
   }
-  $('#tabs').innerHTML = `<div class="brand"><span class="mark" style="width:28px;height:28px;margin:0;font-size:14px" id="bm">${esc(BRAND[0])}</span><span class="clip">${esc(BRAND)}</span></div>` +
+  if (me.brand_name) BRAND = me.brand_name;
+  $('#tabs').innerHTML = `<${me.brands > 1 ? 'button data-act="brand-sw" aria-label="切換品牌"' : 'div'} class="brand"><span class="mark" style="width:28px;height:28px;margin:0;font-size:14px" id="bm">${esc(BRAND[0])}</span><span class="clip">${esc(BRAND)}</span>${me.brands > 1 ? svg('down') : ''}</${me.brands > 1 ? 'button' : 'div'}>` +
     tabs.map((t) => `<button class="tab" data-tab="${t[0]}" ${t[0] === r.tab ? 'aria-current="page"' : ''}>${svg(t[2])}<span>${t[1]}</span><span class="badge hide" data-badge="${t[0]}"></span></button>`).join('');
   $('#view').innerHTML = skeleton();
   const my = ++renderSeq;
@@ -158,6 +159,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'back') return go(t.dataset.to);
   if (a === 'help') return go('help');
   if (a === 'retry') return render();
+  if (a === 'brand-sw') return openBrandSwitch();
 });
 
 /* ---------- login ---------- */
@@ -217,7 +219,7 @@ async function homePage() {
   const pct = d.gen_limit ? d.gen_today / d.gen_limit : 0;
   if (pct >= 1) todo.push({ dot: 'warn', t: '今日 AI 生成額度已用完', s: '明天自動恢復；既有草稿不受影響', to: 'posts' });
   else if (pct >= 0.8) todo.push({ dot: 'warn', t: `今日 AI 額度即將用完（${d.gen_today}/${d.gen_limit}）`, s: '', to: 'posts' });
-  bar({ title: BRAND, dot: d.healthy ? 'ok' : 'bad', sub: d.healthy ? '' : '需要處理' });
+  bar({ title: BRAND, dot: d.healthy ? 'ok' : 'bad', sub: d.healthy ? '' : '需要處理', right: me.brands > 1 ? `<button class="btn sm sec" data-act="brand-sw" style="margin-right:4px">切換品牌</button>` : '' });
   const m = (n, l, bad) => `<div><b class="${n === 0 || n === null ? 'z' : bad ? 'bad' : ''}">${n ?? '—'}</b><span>${l}</span></div>`;
   setView(`
     ${ACCTS.length > 1 ? acctStrip() : ''}
@@ -252,6 +254,24 @@ async function loadAccounts() {
   if (S.acct === -1) { try { S.acct = +localStorage.getItem('acct:' + me.name) || 0; } catch { S.acct = 0; } }
   if (S.acct && !ACCTS.some((a) => a.id === S.acct)) S.acct = 0; // 該帳號已被移除，回到全部
   return ACCTS;
+}
+/** 切換品牌（同一位客戶有多個品牌時）：每個品牌的資料完全獨立，切換等於換一個工作區 */
+async function openBrandSwitch() {
+  if (!(await leaveOk())) return;
+  let d; try { d = await api('GET', '/brands'); } catch (e) { return toast(e.message, 'bad'); }
+  sheet('切換品牌', `<div class="list acct-list" id="bl">${d.brands.map((b) => row({ act: 'bpick', id: b.id, go: false, dot: b.suspended ? 'bad' : b.id === d.current ? 'ok' : '',
+      title: esc(b.name), sub: b.suspended ? '已暫停使用，請聯絡服務商' : b.role === 'staff' ? '客服權限' : b.drafts ? `${b.drafts} 則草稿待審核` : '沒有待處理', end: b.id === d.current ? '目前' : '' })).join('')}</div>
+    <p class="t-sub" style="margin-top:12px">切換後看到的是那個品牌自己的貼文、帳號、報表與設定，不會混在一起。</p>`, (el, close) => {
+    $$('[data-act=bpick]', el).forEach((x) => x.onclick = () => {
+      const b = d.brands.find((y) => y.id === x.dataset.id); if (!b || b.id === d.current || b.suspended) { if (b?.suspended) toast('這個品牌已暫停使用', 'bad'); return; }
+      act(x, async () => {
+        const r = await api('POST', '/brand/switch', { brand_id: b.id });
+        close(); dirty = false; me = null; S.acct = -1; S.postSeg = 'draft'; S.cache = {}; ACCTS = []; BRAND = r.name;
+        toast(`已切換到「${r.name}」`, 'ok');
+        if (location.hash === '#/' || !location.hash) render(); else location.hash = '#/';
+      });
+    });
+  });
 }
 /** 目前操作的 Threads 帳號：0 = 全部帳號。偏好存在這個瀏覽器，下次登入還在。 */
 const curAcct = () => (S.acct > 0 && ACCTS.some((a) => a.id === S.acct) ? S.acct : 0);
@@ -645,7 +665,7 @@ async function settingsPage(r) {
   const [ig, st, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/dashboard')]);
   TZ = st.brand.timezone; bar({ title: '設定' });
   const stat = (ok, warn) => `<span class="pill ${ok ? 'ok' : warn ? 'warn' : ''}">${ok ? '已連線' : warn || '未設定'}</span>`;
-  setView(`<section>${sec('連線')}<div class="list">
+  setView(`${me.brands > 1 ? `<div class="list" style="margin-bottom:20px">${row({ act: 'brand-sw', title: esc(BRAND), sub: `你有 ${me.brands} 個品牌，點這裡切換`, end: '切換' })}</div>` : ''}<section>${sec('連線')}<div class="list">
       ${row({ act: 'threads', title: 'Threads 帳號', sub: ig.threads.accounts?.length ? ig.threads.accounts.map((a) => '@' + esc(a.username || '')).join('、') : '自動發文需要', end: stat(ig.threads.configured, d.threads_status === 'token_invalid' ? '授權失效' : '') })}
       ${row({ act: 'line', title: 'LINE 官方帳號', sub: st.settings.line_id ? esc(st.settings.line_id) + (ig.line.configured ? ' · 已連接數據' : '') : '填入官方帳號 ID，貼文才有加好友連結', end: `<span class="pill ${st.settings.line_add_url ? 'ok' : 'warn'}">${st.settings.line_add_url ? '已設定' : '未設定'}</span>` })}
       ${row({ act: 'gemini', title: 'AI（Gemini）', sub: `今日已生成 ${d.gen_today}/${d.gen_limit} 次`, end: stat(ig.gemini.configured) })}</div></section>
@@ -915,9 +935,9 @@ async function brandPage() {
 }
 async function usersPage() {
   const users = await api('GET', '/users'); bar({ title: '帳號與權限', back: 'settings', right: `<button class="btn sm" data-act="nu" style="margin-right:8px">新增</button>` });
-  setView(`<div class="list">${users.map((u) => row({ go: false, dot: u.enabled ? 'ok' : '', title: esc(u.username) + (u.username === me.name ? ' <span class="mut">（你）</span>' : ''), sub: u.role === 'admin' ? '管理員：可修改全部設定' : '客服：只能查看與處理留資', end: u.username === me.name ? '<button class="btn sm sec" data-go="settings/password">編輯</button>' : `<button class="btn sm sec" data-rp="${u.id}">重設密碼</button>${sw('u' + u.id, u.enabled, '啟用 ' + u.username)}` })).join('')}</div>
+  setView(`<div class="list">${users.map((u) => row({ go: false, dot: u.enabled ? 'ok' : '', title: esc(u.username) + (u.username === me.name ? ' <span class="mut">（你）</span>' : ''), sub: (u.shared ? '共用帳號（同一位客戶的其他品牌）・' : '') + (u.role === 'admin' ? '管理員：可修改全部設定' : '客服：只能查看與處理留資'), end: u.username === me.name ? '<button class="btn sm sec" data-go="settings/password">編輯</button>' : u.shared ? '' : `<button class="btn sm sec" data-rp="${u.id}">重設密碼</button>${sw('u' + u.id, u.enabled, '啟用 ' + u.username)}` })).join('')}</div>
     <div id="newpw"></div>
-    <p class="t-sub">停用帳號後，對方立即無法登入。離職或不再需要的帳號請停用。</p>`);
+    <p class="t-sub">停用帳號後，對方立即無法登入。離職或不再需要的帳號請停用。標示「共用帳號」的是同一位客戶在其他品牌的登入帳號，由服務商管理。</p>`);
   $$('[data-rp]').forEach((b) => b.onclick = () => act(b, async () => {
     const u = users.find((x) => x.id == b.dataset.rp);
     if (!(await confirmSheet(`重設「${u.username}」的密碼？對方原本的密碼會立即失效。`, '重設密碼'))) return;

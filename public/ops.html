@@ -187,9 +187,19 @@ function tenantSheet(x) {
     <div class="list" style="margin-top:16px;padding:4px 16px 14px"><div class="f"><label for="tiu">替客戶新增 Threads 帳號</label><input id="tiu" placeholder="例如：acme.shop，多個用逗號分隔" autocapitalize="none" autocorrect="off"></div>
       <label class="row static" style="padding:0;min-height:0;margin-top:8px;gap:10px;align-items:center"><input type="checkbox" id="tis" style="width:18px;height:18px;min-height:0"><span class="t-sub">我已在 Meta 後台送出測試邀請</span></label>
       <button class="btn sm sec" id="tia" style="margin-top:10px">建立連結申請</button></div>
+    <div class="list" style="margin-top:16px;padding:12px 16px 14px"><div class="t-label">可以進入這個品牌的登入帳號</div><div id="tacc" class="t-sub" style="margin:6px 0">載入中…</div>
+      <div class="two" style="margin-top:8px"><input id="tau" placeholder="加入帳號，例如：afu-admin" autocapitalize="none" autocorrect="off" aria-label="加入帳號"><select id="tar" aria-label="權限"><option value="admin">管理員</option><option value="staff">客服</option></select></div>
+      <button class="btn sm sec" id="taa" style="margin-top:10px">加入這個帳號</button><p class="t-sub" style="margin-top:8px">同一位客戶有多個品牌時，讓他用同一組帳密切換。加入後，對方的「切換品牌」清單立即出現這個品牌。</p></div>
     <div class="actions" style="margin-top:16px"><button class="btn sec" id="tlog">查看系統紀錄</button><button class="btn sec" id="trp">重設管理員密碼</button></div>
     ${admin ? `<button class="btn ${x.status === 'active' ? 'dng' : 'sec'} block" id="tst" style="margin-top:8px">${x.status === 'active' ? '暫停這個工作區' : '恢復這個工作區'}</button>` : '<p class="t-sub" style="margin-top:12px">開通、暫停與留資加購需由營運管理者處理。</p>'}
     <div id="tout" style="margin-top:14px"></div>`, (el, close) => {
+    const drawAcc = async () => {
+      const rows = await api('GET', `/tenants/${x.slug}/access`).catch(() => []);
+      $('#tacc', el).innerHTML = rows.map((a) => `<div style="display:flex;align-items:center;gap:8px;min-height:36px"><b style="color:var(--text)">${esc(a.username)}</b><span class="pill ${a.owner ? 'ok' : ''}">${a.owner ? '主要帳號' : '共用'}</span><span>${a.role === 'staff' ? '客服' : '管理員'}</span>${a.owner ? '' : `<button class="btn sm dng" data-rm="${a.id}" style="margin-left:auto">移除</button>`}</div>`).join('') || '沒有帳號';
+      $$('[data-rm]', el).forEach((b) => b.onclick = () => act(b, async () => { await api('DELETE', `/tenants/${x.slug}/access/${b.dataset.rm}`); toast('已移除，對方立即失去這個品牌的權限', 'ok'); drawAcc(); }));
+    };
+    drawAcc();
+    $('#taa', el).onclick = (e) => act(e.currentTarget, async () => { await api('POST', `/tenants/${x.slug}/access`, { username: $('#tau', el).value.trim(), role: $('#tar', el).value }); $('#tau', el).value = ''; toast('已加入', 'ok'); drawAcc(); });
     $('#tia', el).onclick = (e) => act(e.currentTarget, async () => {
       const r = await api('POST', '/invites', { slug: x.slug, usernames: $('#tiu', el).value, status: $('#tis', el).checked ? 'invited' : 'requested' });
       $('#tiu', el).value = ''; toast(`已建立 ${r.invites.length} 個申請：${$('#tis', el).checked ? '客戶登入後直接接受邀請' : '請記得到 Meta 送出邀請'}`, 'ok');
@@ -260,14 +270,15 @@ function newPage() {
       <div class="f" style="margin:0"><label for="np">方案</label><select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></div></div>
     ${field('nt', '客戶的 Threads 帳號（選填）', '<input id="nt" placeholder="例如：acme.shop，多個用逗號分隔" autocapitalize="none" autocorrect="off">', '先填的話，客戶第一次登入就直接看到「接受邀請」，不用再申請、不用等你。')}
     <label class="row static" style="padding:0;min-height:0;margin-top:10px;gap:10px;align-items:center"><input type="checkbox" id="nsent" style="width:18px;height:18px;min-height:0"><span class="t-sub">我已在 Meta 後台為這些帳號送出測試邀請</span></label>
+    ${field('nsh', '共用既有客戶的登入帳號（選填）', '<input id="nsh" placeholder="例如：afu-admin" autocapitalize="none" autocorrect="off">', '同一位客戶的另一個品牌：填他現有的帳號，新品牌就會出現在他的「切換品牌」清單，不另外建立帳號、不用再發密碼。')}
     ${field('na', '管理員帳號', '<input id="na" placeholder="例如：acme-admin" autocapitalize="none" autocorrect="off">', '客戶用這個帳號登入。帳號在整個系統內不可重複，客戶登入後可以自己改。')}
     <button class="btn block" id="create" style="margin-top:24px">建立工作區</button><div id="made" style="margin-top:16px"></div></div>`);
   $('#create').onclick = (e) => act(e.currentTarget, async () => {
-    const r = await api('POST', '/tenants', { name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim(), threads_usernames: $('#nt').value.trim(), invites_sent: $('#nsent').checked });
+    const r = await api('POST', '/tenants', { name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim(), share_with: $('#nsh').value.trim(), threads_usernames: $('#nt').value.trim(), invites_sent: $('#nsent').checked });
     T = [];
-    $('#made').innerHTML = secret(`已建立 <b>${esc(r.name)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>帳號：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>${r.invites ? `<br>已建立 ${r.invites} 個 Threads 連結申請` : ''}`) +
+    $('#made').innerHTML = (r.shared_with ? (h) => `<div class="secret">${h}</div>` : secret)((r.shared_with ? `已建立 <b>${esc(r.name)}</b>，並開放給 <code>${esc(r.shared_with)}</code><br>這位客戶重新整理或登入後，就能在「切換品牌」看到它。${r.invites ? `<br>已建立 ${r.invites} 個 Threads 連結申請` : ''}` : `已建立 <b>${esc(r.name)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>帳號：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>${r.invites ? `<br>已建立 ${r.invites} 個 Threads 連結申請` : ''}`)) +
       '<p class="t-sub" style="margin-top:10px">客戶登入後，首頁的「開通進度」會帶他完成 LINE、AI、Threads 設定。Meta App 仍在開發模式時，記得先把客戶的 Threads 帳號加為測試人員。</p>';
-    $('#nn').value = $('#na').value = $('#nt').value = ''; $('#nsent').checked = false;
+    $('#nn').value = $('#na').value = $('#nt').value = $('#nsh').value = ''; $('#nsent').checked = false;
   });
 }
 

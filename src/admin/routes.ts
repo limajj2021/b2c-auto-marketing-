@@ -34,8 +34,28 @@ export async function authenticate(env: Env, req: Request, now = Date.now()): Pr
   const v = await verifyToken(env.SESSION_SECRET, tok, Math.floor(now / 1000));
   if (!v || v.p) return null; // 只接受登入 Session（不帶用途標記）
   const u = await env.DB.prepare('SELECT id,authentication_id,role,brand_id FROM admin_users WHERE id=? AND enabled=1').bind(v.uid).first<any>();
-  return u ? { id: u.id, name: u.authentication_id, role: u.role, brandId: u.brand_id } : null;
+  if (!u) return null;
+  // 目前使用的品牌：Session 記著的品牌必須仍在這個帳號的存取清單內（被收回就立即退回主要品牌）
+  if (v.b && v.b !== u.brand_id) {
+    const m = await env.DB.prepare('SELECT role FROM user_brands WHERE user_id=? AND brand_id=?').bind(u.id, v.b).first<{ role: 'admin' | 'staff' }>();
+    if (m) return { id: u.id, name: u.authentication_id, role: m.role, brandId: v.b };
+  }
+  return { id: u.id, name: u.authentication_id, role: u.role, brandId: u.brand_id };
 }
+
+export interface BrandAccess { id: string; name: string; status: string; role: 'admin' | 'staff'; primary: boolean }
+/** 這個帳號可以進入的所有品牌：主要品牌在最前面 */
+export async function accessibleBrands(env: Env, userId: number): Promise<BrandAccess[]> {
+  const rows = (await env.DB.prepare(
+    `SELECT b.id,b.name,COALESCE(b.status,'active') status,u.role,1 AS pr FROM admin_users u JOIN brands b ON b.id=u.brand_id WHERE u.id=?
+     UNION ALL
+     SELECT b.id,b.name,COALESCE(b.status,'active'),ub.role,0 FROM user_brands ub JOIN brands b ON b.id=ub.brand_id WHERE ub.user_id=?
+     ORDER BY pr DESC, name`,
+  ).bind(userId, userId).all<any>()).results;
+  return rows.map((r) => ({ id: r.id, name: r.name, status: r.status, role: r.role, primary: !!r.pr }));
+}
+// 品牌被暫停時，仍可查看品牌清單與切換到別的品牌
+const SUSPENDED_OK = new Set(['/api/me', '/api/brands', '/api/brand/switch', '/api/logout']);
 
 type Handler = (c: { env: Env; req: Request; actor: Actor; m: RegExpMatchArray; url: URL; brandId: string }) => Promise<Response>;
 const routes: { method: string; re: RegExp; role: 'admin' | 'staff'; h: Handler }[] = [];
@@ -74,7 +94,7 @@ export async function handleApi(rawEnv: Env, req: Request): Promise<Response> {
   // 之後的每個操作都只作用在登入者所屬的工作區
   const env = await withCreds(forBrand(rawEnv, actor.brandId));
   const brand = await getBrand(env);
-  if (brand.status === 'suspended') return err(403, '此工作區已暫停使用，請聯絡服務商');
+  if (brand.status === 'suspended' && !SUSPENDED_OK.has(url.pathname)) return err(403, '此品牌已暫停使用，請聯絡服務商');
   if (url.pathname === '/api/logout') {
     return json({ ok: true }, 200, { 'set-cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict' });
   }
@@ -101,19 +121,46 @@ async function login(env: Env, b: any): Promise<Response> {
   const fails = await env.DB.prepare(`SELECT COUNT(*) c FROM audit_logs WHERE action='login_fail' AND detail=? AND created_at>?`)
     .bind(username, since).first<{ c: number }>();
   if ((fails?.c ?? 0) >= 5) return err(429, '嘗試次數過多，請 15 分鐘後再試');
-  const u = await env.DB.prepare('SELECT u.id,u.password_hash,u.brand_id,b.status FROM admin_users u JOIN brands b ON b.id=u.brand_id WHERE lower(u.authentication_id)=? AND u.enabled=1')
+  const u = await env.DB.prepare('SELECT u.id,u.password_hash,u.brand_id,u.last_brand_id FROM admin_users u WHERE lower(u.authentication_id)=? AND u.enabled=1')
     .bind(username).first<any>();
   // 帳號不存在時仍做一次雜湊，降低帳號探測
   const ok = u ? await verifyPassword(String(b.password ?? ''), u.password_hash) : (await hashPassword('x'), false);
   if (!ok) { await audit(env, u?.brand_id ?? '_platform', null, 'login_fail', username); return err(401, '帳號或密碼錯誤'); }
-  // 密碼正確才告知停用狀態，避免被用來探測帳號
-  if (u.status === 'suspended') return err(403, '此帳號所屬的工作區已暫停使用，請聯絡服務商');
-  const tok = await signToken(env.SESSION_SECRET, { uid: u.id, exp: Math.floor(Date.now() / 1000) + SESSION_SEC });
+  // 密碼正確才告知停用狀態，避免被用來探測帳號。進入上次使用的品牌；若已暫停，改進第一個可用的品牌
+  const list = await accessibleBrands(env, u.id);
+  const order = [...list].sort((a, c) => Number(c.id === u.last_brand_id) - Number(a.id === u.last_brand_id));
+  const pick = order.find((x) => x.status !== 'suspended');
+  if (!pick) return err(403, '此帳號所屬的品牌都已暫停使用，請聯絡服務商');
+  const tok = await signToken(env.SESSION_SECRET, { uid: u.id, b: pick.primary ? undefined : pick.id, exp: Math.floor(Date.now() / 1000) + SESSION_SEC });
   return json({ ok: true }, 200, { 'set-cookie': `sid=${tok}; Path=/; Max-Age=${SESSION_SEC}; HttpOnly; Secure; SameSite=Strict` });
 }
 
 // ---------- 通用 ----------
-add('GET', '/me', 'staff', async ({ env, actor, brandId }) => json({ ...actor, leads_enabled: !!(await getSettings(env, brandId)).leads_enabled }));
+add('GET', '/me', 'staff', async ({ env, actor, brandId }) => {
+  const list = await accessibleBrands(env, actor.id);
+  return json({ ...actor, leads_enabled: !!(await getSettings(env, brandId)).leads_enabled, brand_name: list.find((x) => x.id === brandId)?.name ?? null, brands: list.length });
+});
+
+// ---- 多品牌：同一位客戶可以有多個品牌，在品牌之間切換 ----
+add('GET', '/brands', 'staff', async ({ env, actor, brandId }) => {
+  const list = await accessibleBrands(env, actor.id);
+  const admin = list.filter((x) => x.role === 'admin').map((x) => x.id);
+  const drafts = new Map<string, number>();
+  if (admin.length) for (const r of (await env.DB.prepare(`SELECT brand_id,COUNT(*) c FROM posts WHERE status='draft' AND brand_id IN (${admin.map(() => '?').join(',')}) GROUP BY brand_id`).bind(...admin).all<{ brand_id: string; c: number }>()).results) drafts.set(r.brand_id, r.c);
+  return json({ current: brandId, brands: list.map((x) => ({ id: x.id, name: x.name, role: x.role, suspended: x.status === 'suspended', drafts: x.role === 'admin' ? (drafts.get(x.id) ?? 0) : null })) });
+});
+
+add('POST', '/brand/switch', 'staff', async ({ env, req, actor }) => {
+  const b: any = await req.json().catch(() => ({}));
+  const list = await accessibleBrands(env, actor.id);
+  const target = list.find((x) => x.id === String(b.brand_id ?? ''));
+  if (!target) return err(403, '你沒有這個品牌的權限');
+  if (target.status === 'suspended') return err(403, '這個品牌已暫停使用，請聯絡服務商');
+  await env.DB.prepare('UPDATE admin_users SET last_brand_id=? WHERE id=?').bind(target.id, actor.id).run();
+  await audit(env, target.id, actor.name, 'brand_switch', actor.brandId);
+  const tok = await signToken(env.SESSION_SECRET, { uid: actor.id, b: target.primary ? undefined : target.id, exp: Math.floor(Date.now() / 1000) + SESSION_SEC });
+  return json({ ok: true, name: target.name }, 200, { 'set-cookie': `sid=${tok}; Path=/; Max-Age=${SESSION_SEC}; HttpOnly; Secure; SameSite=Strict` });
+});
 
 // 帳號與密碼：改自己的帳號名稱及／或密碼，需輸入目前密碼
 add('POST', '/account', 'staff', async ({ env, req, actor, brandId }) => {

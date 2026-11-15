@@ -211,7 +211,10 @@ export function registerExtra(add: Add, json: J, err: E) {
 
   // ---- 帳號管理 ----
   add('GET', '/users', 'admin', async ({ env, brandId }) =>
-    json((await env.DB.prepare('SELECT id,authentication_id AS username,role,enabled FROM admin_users WHERE brand_id=? ORDER BY id').bind(brandId).all()).results));
+    json((await env.DB.prepare(
+      `SELECT id,authentication_id AS username,role,enabled,0 AS shared FROM admin_users WHERE brand_id=?
+       UNION ALL SELECT u.id,u.authentication_id,ub.role,u.enabled,1 FROM user_brands ub JOIN admin_users u ON u.id=ub.user_id WHERE ub.brand_id=?
+       ORDER BY shared, id`).bind(brandId, brandId).all()).results));
 
   add('POST', '/users', 'admin', async ({ env, req, actor, brandId }) => {
     const b: any = await req.json().catch(() => ({}));
