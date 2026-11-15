@@ -11,6 +11,7 @@
 <body>
 <div id="toasts" aria-live="polite" role="status"></div>
 <div id="app"></div>
+<script src="/brandkit.js"></script>
 <script>
 'use strict';
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -186,7 +187,7 @@ async function getSetup() {
   const [ig, st] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings')]);
   TZ = st.brand.timezone; BRAND = st.brand.name;
   const s = st.settings, steps = [
-    { id: 'brand', t: '填寫品牌資料', d: '品牌介紹與服務內容，AI 會依此撰寫貼文', ok: !!(st.brand.description && s.services && !s.services.startsWith('（')), to: 'settings/brand', help: 'start' },
+    { id: 'brand', t: '填寫品牌資料', d: '品牌介紹與服務內容，AI 會依此撰寫貼文（可以請你的 AI 幫忙整理）', ok: !!(st.brand.description && s.services && !s.services.startsWith('（')), to: 'settings/brand', help: 'start' },
     { id: 'line', t: '填入 LINE 官方帳號 ID', d: '貼文結尾的加好友連結會用它', ok: !!s.line_add_url, to: 'settings/line', help: 'line' },
     { id: 'gemini', t: '連接 AI（Gemini）', d: '貼上 API key', ok: ig.gemini.configured, to: 'settings/gemini', help: 'gemini' },
     { id: 'threads', t: '連結 Threads 帳號', d: '授權後即可自動發文', ok: ig.threads.configured, to: 'settings/threads', help: 'threads' },
@@ -598,6 +599,7 @@ async function leadsPage() {
    ====================================================================== */
 async function settingsPage(r) {
   if (r.sub === 'threads' && r.arg === 'new') return threadsConnectPage();
+  if (r.sub === 'brand' && r.arg === 'ai') return brandAiPage();
   if (r.sub === 'threads' && r.arg) return threadsAccountPage(+r.arg);
   const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage, logs: logsPage }[r.sub];
   if (sub) return sub();
@@ -819,10 +821,53 @@ async function geminiPage() {
     if (await act(e.currentTarget, () => api('POST', '/integrations/gemini', { api_key: $('#gk').value }), 'AI 已連線')) { dirty = false; render(); } };
   $('#gt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'gemini' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
 }
+/** 用客戶自己的 AI 整理品牌資料：複製三段指令 → 與 AI 討論 → 把結果貼回來 → 預覽 → 套用 */
+async function brandAiPage() {
+  const { brand: b, settings: s } = await api('GET', '/settings'); bar({ title: '用 AI 整理品牌資料', back: 'settings/brand' });
+  const current = { name: b.name, description: b.description, services: s.services, audience: s.audience, tone: s.content_tone, topics: s.content_topics, banned: s.banned_words, style: s.style_preset, facts: s.fact_bank, cta: s.cta_text };
+  const ps = BrandKit.prompts({ current, regulated: s.regulated });
+  setView(`<div data-form>
+    <p class="t-sub">用你平常用的 AI（ChatGPT、Claude、Gemini 都可以），照順序貼上下面三段指令。<b>如果你之前就跟這個 AI 聊過你的品牌，它會先從對話紀錄整理，只問你還缺的。</b>聊完後把結果貼回這裡，系統自動分到各個欄位。</p>
+    ${ps.map((p, i) => `<section>${sec(p.title)}<div class="list" style="padding:12px 16px 16px"><p class="t-sub">${esc(p.purpose)}</p>
+      <div class="actions" style="margin-top:10px"><button class="btn" data-cp="${i}">複製指令</button><button class="btn sec" data-sh="${i}">查看內容</button></div>
+      <pre class="hide" id="pv${i}" style="white-space:pre-wrap;word-break:break-word;margin:12px 0 0;padding:12px;border-radius:var(--r);background:var(--bg2);font:inherit;font-size:13px;line-height:1.6;max-height:260px;overflow:auto">${esc(p.text)}</pre></div></section>`).join('')}
+    <p class="t-sub">還沒有 AI 帳號？<a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT</a>、<a href="https://claude.ai" target="_blank" rel="noopener">Claude</a>、<a href="https://gemini.google.com" target="_blank" rel="noopener">Gemini</a> 都有免費版。你和 AI 的對話只在你和它之間，我們看不到；貼回來的只有品牌資料。請不要在對話裡放客戶個資或密碼。</p>
+    <section style="margin-top:28px">${sec('④ 把 AI 整理好的結果貼回來')}<div class="list" style="padding:12px 16px 16px">
+      ${area('bpaste', '', 'placeholder="貼上 AI 輸出的「品牌資料包」。有多講幾句話也沒關係，系統會自己找出資料。" style="min-height:140px"')}
+      <button class="btn block" id="bparse" style="margin-top:12px">解析並預覽</button></div></section>
+    <div id="bprev"></div></div>`, 'form');
+  $$('[data-cp]').forEach((x) => x.onclick = async () => { try { await navigator.clipboard.writeText(ps[+x.dataset.cp].text); toast('已複製，貼到你的 AI', 'ok'); } catch { $('#pv' + x.dataset.cp).classList.remove('hide'); toast('無法自動複製，請長按下面的文字複製', 'bad'); } });
+  $$('[data-sh]').forEach((x) => x.onclick = () => $('#pv' + x.dataset.sh).classList.toggle('hide'));
+  $('#bparse').onclick = () => {
+    const r = BrandKit.parse($('#bpaste').value), items = BrandKit.plan(current, r), box = $('#bprev');
+    if (!items.length) { box.innerHTML = `<div class="note warn" style="margin-top:16px">${$('#bpaste').value.trim() ? '找不到品牌資料。請確認貼的是第 ③ 步 AI 輸出的「品牌資料包」，標題要有 [品牌名稱]、[品牌介紹] 這類方括號。' : '請先貼上 AI 整理好的結果。'}</div>`; return; }
+    const show = (it, v) => it.type === 'list' ? (v.length ? v.join('、') : '（空）') : (v || '（空）');
+    box.innerHTML = `<section style="margin-top:28px">${sec('預覽：勾選要套用的欄位')}
+      <div class="list">${items.map((it) => `<label class="row" style="align-items:flex-start;cursor:pointer"><input type="checkbox" data-ap="${it.key}" ${it.changed ? 'checked' : ''} style="width:20px;height:20px;min-height:0;margin-top:2px;flex:none">
+        <span class="main"><span class="ttl" style="display:block">${esc(it.label)} <span class="pill ${it.kind === '沒有變化' ? '' : 'ok'}">${it.kind}</span></span>
+        <span class="sub clamp2" style="display:block;white-space:pre-wrap">${esc(show(it, it.final))}</span>
+        ${it.old && it.changed && it.mode === '取代' ? `<span class="sub clamp2" style="display:block;color:var(--text3)">原本：${esc(show(it, it.old))}</span>` : ''}</span></label>`).join('')}</div>
+      ${r.skipped.length || r.truncated.length ? `<div class="note" style="margin-top:12px">${r.skipped.map((x) => `${esc(x.label)}：${esc(x.reason)}`).join('<br>')}${r.truncated.length ? `${r.skipped.length ? '<br>' : ''}過長已截短：${r.truncated.map(esc).join('、')}` : ''}</div>` : ''}
+      <p class="t-sub" style="margin-top:12px">文字欄位會取代原本的內容；「內容主題」「禁用詞」「可引用數據」是<b>合併</b>，不會刪掉你原有的。標示「待確認」的數據不會採用。</p>
+      <button class="btn block" id="bapply" style="margin-top:16px">套用並儲存</button></section>`;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('#bapply').onclick = (e) => {
+      const chosen = items.filter((it) => $(`[data-ap="${it.key}"]`).checked);
+      if (!chosen.length) return toast('請至少勾選一個欄位', 'bad');
+      act(e.currentTarget, async () => {
+        await api('PUT', '/settings', BrandKit.toPayload(chosen));
+        const nm = chosen.find((c) => c.key === 'name'); if (nm) BRAND = nm.final;
+        toast(`已更新 ${chosen.length} 個欄位`, 'ok'); dirty = false; go('settings/brand');
+      });
+    };
+  };
+}
 async function brandPage() {
   const { brand: b, settings: s } = await api('GET', '/settings'); bar({ title: '品牌資訊', back: 'settings' });
-  setView(`<div data-form>${field('bn', '品牌名稱', input('bn', b.name))}${field('bd', '品牌介紹', area('bd', b.description), '供 AI 撰寫貼文，只放公開資訊。')}${field('bs', '產品與服務', area('bs', s.services))}${field('ba', '目標受眾', input('ba', s.audience))}${field('tz', '時區', input('tz', b.timezone), '例如 Asia/Taipei。發布時間與「今日」都依此計算。')}
+  setView(`<div class="list" style="margin-bottom:20px">${row({ act: 'bai', title: '用你的 AI 幫你整理', sub: '複製指令給 ChatGPT、Claude 或 Gemini，聊完再貼回來，自動填好' })}</div>
+    <div data-form>${field('bn', '品牌名稱', input('bn', b.name))}${field('bd', '品牌介紹', area('bd', b.description), '供 AI 撰寫貼文，只放公開資訊。')}${field('bs', '產品與服務', area('bs', s.services))}${field('ba', '目標受眾', input('ba', s.audience))}${field('tz', '時區', input('tz', b.timezone), '例如 Asia/Taipei。發布時間與「今日」都依此計算。')}
     <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存</button></div></div></div>`, 'form');
+  $('[data-act=bai]').onclick = () => go('settings/brand/ai');
   $('#save').onclick = async (e) => {
     if (!check([[$('#bn'), !$('#bn').value.trim(), '品牌名稱不可為空'], [$('#tz'), !(() => { try { new Intl.DateTimeFormat('en', { timeZone: $('#tz').value.trim() }); return true; } catch { return false; } })(), '時區格式不對，例如 Asia/Taipei']])) return;
     if (await act(e.currentTarget, () => api('PUT', '/settings', { name: $('#bn').value.trim(), description: $('#bd').value, services: $('#bs').value, audience: $('#ba').value, timezone: $('#tz').value.trim() }), '已儲存')) { dirty = false; BRAND = $('#bn').value.trim(); TZ = $('#tz').value.trim(); }
@@ -892,6 +937,7 @@ const HELP = [
   ['line-delegate', '請服務商代設定 LINE（最省事）', `<ol><li>打開 <b>LINE 官方帳號後台</b>（manager.line.biz）→ 右上角「設定」→「權限管理」。</li><li>按「新增成員」，權限選 <b>管理員</b>，產生邀請連結。</li><li>把邀請連結傳給服務商窗口。</li></ol><p>服務商會完成啟用 Messaging API、串接與回應設定，你不需要提供任何密碼。完成後可在同一頁移除對方，已完成的串接不受影響。</p>`],
   ['line', '連接 LINE 數據（選用）', `<p>只填官方帳號 ID 就能導流與統計點擊。連接 LINE 數據後，報表會多出每日「新好友數」。系統只讀取統計，<b>不會回覆訊息</b>，你在 LINE 後台設定的自動回應、歡迎訊息、圖文選單都照常運作。</p><ol><li>到 <b>LINE Official Account Manager</b> → 設定 → <b>Messaging API</b> → 啟用。</li><li>到 <b>LINE Developers Console</b> → 你的 channel。</li><li><b>Basic settings</b> 整頁全選複製，貼到「設定 → LINE 官方帳號」的貼上框，系統會自動找出 <b>Channel ID</b> 與 <b>Channel secret</b>（也可以分別手動填）。</li><li>按「驗證並儲存」。系統會自動取得憑證並在到期前更新。</li></ol><p>有開通「LINE 自動接待」加購的話，系統才會接手回覆；這時請到 Official Account Manager → 回應設定，關閉「自動回應訊息」與「加入好友的歡迎訊息」，避免重複回覆。</p><div class="note warn">憑證只貼在這個後台，不要貼到聊天或社群。</div>`],
   ['gemini', '如何取得 Gemini（AI）key', `<ol><li>開啟 <b>Google AI Studio</b> 的 API keys 頁面並登入。</li><li>按 <b>Create API key</b> 並複製。</li><li>貼到「設定 → AI（Gemini）」，按「驗證並儲存」。</li></ol><p>AI 只用來寫 Threads 貼文，不讀取顧客資料。每日生成次數有上限，用完自動停止，不會多收費。</p>`],
+  ['brand-ai', '用你自己的 AI 整理品牌資料', `<ol><li>到「設定 → 品牌資訊 → 用你的 AI 幫你整理」。</li><li>依序複製三段指令，貼到你平常用的 AI（ChatGPT、Claude、Gemini）。第一段會讓 AI 先從你們過去的對話整理已知資訊；第二段它會一題一題問你缺的；第三段輸出固定格式的「品牌資料包」。</li><li>把第三段的結果整份複製，貼回本頁，按「解析並預覽」。</li><li>勾選要套用的欄位，按「套用並儲存」。</li></ol><div class="note warn">請只放公開的品牌資訊。AI 若不確定數字，會標「待確認」，系統不會採用這些數據。</div>`],
   ['threads', '如何連結 Threads（可多個帳號）', `<p>每個 Threads 帳號第一次連結要三步：</p><ol><li><b>通知服務商</b>：到「設定 → Threads 帳號」按連結，輸入帳號名稱。服務商會在 Meta 把它加為測試人員。</li><li><b>同意邀請</b>：服務商送出後，用該帳號登入 Threads，到「設定 → 帳號 → 網站權限 → 邀請」按接受，回到後台按「我已接受邀請」。</li><li><b>授權</b>：確認瀏覽器登入的是同一個 Threads 帳號，按「授權並連結」，在 Threads 頁面按允許。</li></ol><p>完成後帳號會出現在清單，可以各自設定人設與發文時段。已連結的帳號之後重新連結不需要再做前兩步。</p><div class="note warn">授權時如果看到「尚未接受測試邀請」，代表第二步還沒完成，或瀏覽器登入的是別的 Threads 帳號。</div>`],
   ['thread', '串文、改寫分發與【待補數據】', `<ul><li><b>串文：</b>AI 依「爭議化、數據化、具體化」一次寫一整串，第一則是鉤子、最後一則是 CTA（自動附上 LINE 連結）。審核時可以逐則修改、新增或移除。</li><li><b>則數：</b>在「貼文 → 發文設定 → 內容策略」調整，設 1 則就是單篇貼文。</li><li><b>【待補數據】：</b>AI 只能引用你在「可引用數據」填的數字；需要數據但沒有時會留下【待補數據】，補上真實數字前無法核准，避免散布不實數據。</li><li><b>改寫分發：</b>打開一串貼文按「改寫分發」，AI 會用其他帳號的人設重寫，並錯開 45 分鐘發布。</li><li><b>發到一半中斷：</b>系統會記住發到第幾則，按「接續發布」只會補發剩下的，不會重複。</li></ul>`],
   ['modes', '三種發文模式差在哪', `<ul><li><b>A 全自動：</b>內容檢查通過就直接發布。</li><li><b>B 審核後發布（建議）：</b>先產生草稿，核准才發。</li><li><b>C 指定主題：</b>依「本週主題」生成，可選擇是否審核。</li></ul><div class="note bad">金融、放款等受監管產業一律強制人工審核。</div><p>內容檢查會擋下「保證核貸」「免審」等字眼，被擋的草稿需修改後才能核准。</p>`],
