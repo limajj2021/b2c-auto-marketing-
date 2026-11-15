@@ -82,6 +82,7 @@ const confirmSheet = (msg, okText) => new Promise((res) => {
     new MutationObserver(() => { if (!document.body.contains(el)) fin(false); }).observe(document.body, { childList: true });
   });
 });
+const copyText = async (t, label = '已複製') => { try { await navigator.clipboard.writeText(t); toast(label, 'ok'); } catch { toast('無法自動複製，請長按文字手動複製', 'bad'); } };
 const secret = (html) => `<div class="secret">${html}<div class="t-sub" style="margin-top:6px">密碼只顯示這一次，請以安全方式交給對方，並請對方登入後立即變更。</div></div>`;
 
 /* ---------- state & router ---------- */
@@ -162,13 +163,13 @@ async function tenantsPage() {
 /** Threads 測試邀請：客戶申請 → 你在 Meta 送出邀請 → 回來標記。Meta 沒有 API 可以代送，所以這一步要人工。 */
 function invitesSheet(rows) {
   const card = (r) => `<div class="list" style="margin-bottom:10px"><div class="row static" style="align-items:flex-start"><span class="dot ${r.status === 'requested' ? 'gold' : ''}" style="margin-top:7px"></span><span class="main">
-      <span class="ttl" style="display:block">@${esc(r.username)} <span class="mut" style="font-weight:400">· ${esc(r.name)}</span></span>
+      <span class="ttl" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">@${esc(r.username)} <button class="btn sm sec" data-cp="${esc(r.username)}" style="min-height:30px">複製帳號</button> <span class="mut" style="font-weight:400">· ${esc(r.name)}</span></span>
       <span class="sub" style="display:block">${r.status === 'requested' ? '待你在 Meta 送出邀請' : '已送出，等客戶接受'} · ${ago(r.updated_at)}</span>
       <span class="actions" style="margin-top:8px">${r.status === 'requested' ? `<button class="btn sm" data-i="${r.id}" data-s="invited">已送出邀請</button><button class="btn sm sec" data-i="${r.id}" data-s="accepted">對方已是測試人員</button>` : `<button class="btn sm sec" data-i="${r.id}" data-s="accepted">對方已接受</button>`}<button class="btn sm dng" data-i="${r.id}" data-s="cancelled">取消</button></span></span></div></div>`;
-  sheet('Threads 測試邀請', `<div class="note" style="margin-bottom:12px"><b>怎麼送出邀請</b><br>Meta 開發者後台 → 你的 App → 應用程式角色 → 角色 → 新增人員 → 選「Threads 測試人員」→ 輸入下方的帳號名稱。送出後回來按「已送出邀請」，客戶端就會通知他到 Threads 接受。</div>${rows.map(card).join('')}`,
-    (el, close) => el.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => act(b, async () => {
+  sheet('Threads 測試邀請', `<div class="note" style="margin-bottom:12px"><b>怎麼送出邀請</b><br><a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener">開啟 Meta 開發者後台 ↗</a>（手機打不開時，用瀏覽器選單的「電腦版網站」，不要從 Facebook／Threads App 內開）<br>Meta 開發者後台 → 你的 App → 應用程式角色 → 角色 → 新增人員 → 選「Threads 測試人員」→ 輸入下方的帳號名稱。送出後回來按「已送出邀請」，客戶端就會通知他到 Threads 接受。</div>${rows.map(card).join('')}`,
+    (el, close) => { el.querySelectorAll('[data-cp]').forEach((b) => b.onclick = () => copyText(b.dataset.cp, `已複製 ${b.dataset.cp}`)); el.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => act(b, async () => {
       await api('PATCH', '/invites/' + b.dataset.i, { status: b.dataset.s }); close(); toast(b.dataset.s === 'cancelled' ? '已取消' : '已更新，客戶會看到下一步', 'ok'); render();
-    })));
+    })); });
 }
 
 function tenantSheet(x) {
@@ -287,6 +288,11 @@ async function mePage() {
   bar('帳號');
   const admin = me.role === 'admin', ops = admin ? await api('GET', '/operators') : [];
   view(`<section>${sec('我的帳號')}<div class="list"><div class="row static"><span class="main"><span class="ttl" style="display:block">${esc(me.username)}</span><span class="sub" style="display:block">${admin ? '營運管理者：全部權限' : '維護人員：查看狀態、協助客戶重設密碼'}</span></span></div></div></section>
+    <section>${sec('Meta App 設定速查')}<div class="list">${[
+      ['重新導向回呼網址', '/threads/callback'], ['解除安裝回呼網址', '/threads/deauthorize'], ['刪除回呼網址', '/threads/delete'],
+      ['隱私政策網址', '/privacy'], ['服務條款網址', '/terms'], ['資料刪除說明網址', '/data-deletion'], ['應用程式網域', ''],
+    ].map(([l, pth], i) => { const v = pth ? location.origin + pth : location.host; return `<div class="row static"><span class="main"><span class="ttl" style="display:block">${l}</span><span class="sub" style="display:block;word-break:break-all">${esc(v)}</span></span><button class="btn sm sec" data-mc="${esc(v)}">複製</button></div>`; }).join('')}</div>
+      <p class="t-sub" style="margin-top:8px">要貼進 Meta 開發者後台的網址，點「複製」再貼上就好，不用在手機上手打。</p></section>
     <section>${sec('變更密碼')}${field('pc', '目前密碼', '<input id="pc" type="password" autocomplete="current-password">')}${field('pn', '新密碼', '<input id="pn" type="password" autocomplete="new-password">', '至少 12 個字元。')}
       <button class="btn sec block" id="pchg" style="margin-top:16px">變更密碼</button></section>
     ${admin ? `<section>${sec('營運人員')}<div class="list">${ops.map((o) => `<div class="row static"><span class="dot ${o.enabled ? 'ok' : ''}"></span><span class="main"><span class="ttl" style="display:block">${esc(o.username)}${o.username === me.username ? ' <span class="mut">（你）</span>' : ''}</span><span class="sub" style="display:block">${o.role === 'admin' ? '營運管理者' : '維護人員'}${o.enabled ? '' : ' · 已停用'}</span></span>
@@ -294,6 +300,7 @@ async function mePage() {
       <div class="two" style="margin-top:12px"><div class="f" style="margin:0"><label for="ou">新增人員帳號</label><input id="ou" autocapitalize="none" autocorrect="off"></div>
         <div class="f" style="margin:0"><label for="or">角色</label><select id="or"><option value="support">維護人員</option><option value="admin">營運管理者</option></select></div></div>
       <button class="btn block" id="oadd" style="margin-top:12px">新增人員</button><div id="omade" style="margin-top:12px"></div></section>` : ''}`);
+  $$('[data-mc]').forEach((b) => b.onclick = () => copyText(b.dataset.mc));
   $('#pchg').onclick = (e) => act(e.currentTarget, async () => {
     if ($('#pn').value.length < 12) throw new Error('新密碼至少 12 個字元');
     await api('POST', '/password', { current: $('#pc').value, next: $('#pn').value }); $('#pc').value = $('#pn').value = '';
