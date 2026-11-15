@@ -22,8 +22,8 @@ export function oauthConfigured(env: Env): boolean {
  * 授權連結。state 另外記著：發起授權的品牌（多品牌客戶可能不在主要品牌）與預期的 Threads 帳號。
  * Threads 的授權頁一律使用「這個瀏覽器／Threads App 目前登入的帳號」，系統無法指定，所以回來時要核對，不符就不連結。
  */
-export async function buildAuthorizeUrl(env: Env, origin: string, adminId: number, now = Date.now(), opts: { brandId?: string; expect?: string } = {}): Promise<string> {
-  const state = await signToken(stateSecret(env), { uid: adminId, p: 'threads_oauth', b: opts.brandId, x: opts.expect?.toLowerCase(), exp: Math.floor(now / 1000) + STATE_TTL });
+export async function buildAuthorizeUrl(env: Env, origin: string, adminId: number, now = Date.now(), opts: { brandId?: string; expect?: string; magic?: boolean } = {}): Promise<string> {
+  const state = await signToken(stateSecret(env), { uid: adminId, p: 'threads_oauth', b: opts.brandId, x: opts.expect?.toLowerCase(), m: opts.magic ? 1 : undefined, exp: Math.floor(now / 1000) + STATE_TTL });
   const q = new URLSearchParams({
     client_id: env.THREADS_APP_ID!, redirect_uri: `${origin}/threads/callback`,
     scope: env.THREADS_SCOPES?.trim() || SCOPES, response_type: 'code', state,
@@ -41,16 +41,21 @@ async function jget(url: string, init?: RequestInit, f: typeof fetch = fetch) {
 /** Meta 授權完成後的跳轉：換短效 → 長效 token、查帳號、加密存入。 */
 export async function handleCallback(env: Env, req: Request, now = Date.now()): Promise<Response> {
   const url = new URL(req.url);
-  const fail = (reason: string) => redirect(`/?threads=error&reason=${encodeURIComponent(reason)}`);
+  let magic = false; // 從「授權連結」進來的（對方不一定登入過後台）：結果顯示在公開的結果頁
+  const fail = (reason: string) => redirect(magic ? `/connect-done.html?err=${encodeURIComponent(reason)}` : `/?threads=error&reason=${encodeURIComponent(reason)}`);
   const code = (url.searchParams.get('code') ?? '').replace(/#_$/, '');
   const state = url.searchParams.get('state') ?? '';
   const st = await verifyToken(stateSecret(env), state, Math.floor(now / 1000));
-  const owner = st && st.p === 'threads_oauth'
-    ? await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>() : null;
+  magic = !!(st && st.p === 'threads_oauth' && st.m === 1 && st.b);
+  const owner = magic ? { brand_id: st!.b! }
+    : st && st.p === 'threads_oauth' ? await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>() : null;
   // 每一步的結果寫入操作紀錄（不含任何憑證），授權卡住時可判斷停在哪一步
   // 發起授權時所在的品牌：必須仍是這個帳號的主要品牌或共用品牌，否則視為逾時
   let brandId: string | null = owner?.brand_id ?? null;
-  if (owner && st?.b && st.b !== owner.brand_id) {
+  if (magic) {
+    const bb = await env.DB.prepare(`SELECT COALESCE(status,'active') status FROM brands WHERE id=?`).bind(st!.b).first<{ status: string }>();
+    brandId = bb && bb.status !== 'suspended' ? st!.b! : null;
+  } else if (owner && st?.b && st.b !== owner.brand_id) {
     const shared = await env.DB.prepare('SELECT 1 FROM user_brands WHERE user_id=? AND brand_id=?').bind(st.uid, st.b).first();
     brandId = shared ? st.b : null;
   }
@@ -95,7 +100,7 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
     await env.DB.prepare(`UPDATE threads_invites SET status='connected',updated_at=? WHERE brand_id=? AND lower(username)=lower(?) AND status<>'connected'`).bind(new Date(now).toISOString(), brand.id, String(me.username ?? '')).run();
     await audit(env, brand.id, null, 'threads_connected', me.username ?? '');
     await logEvent(env, brand.id, 'info', 'threads_oauth', `已連結 @${me.username ?? me.id}`);
-    return redirect('/?threads=connected');
+    return redirect(magic ? `/connect-done.html?ok=1&u=${encodeURIComponent(me.username ?? '')}&b=${encodeURIComponent(brand.name)}` : '/?threads=connected');
   } catch (e) {
     const STAGE: Record<string, string> = { exchange_code: '以授權碼換取憑證', long_lived_token: '換成長效憑證', read_profile: '讀取帳號資料' };
     await logEvent(env, bid, 'error', 'threads_oauth', `授權失敗：${STAGE[stage] ?? stage}時 Meta 回傳錯誤`, { stage, meta_error: (e as Error).message });

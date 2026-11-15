@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>連結 Threads</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="login">
+  <div class="mark" id="mk">T</div>
+  <h1 class="t-page" id="ttl">處理中…</h1>
+  <p class="t-sub" id="msg" style="margin:8px 0 0"></p>
+</div>
+<script>
+'use strict';
+// 授權連結的結果頁：不需要登入。所有文字都用 textContent，避免網址參數被當成 HTML。
+const q = new URLSearchParams(location.search), $ = (id) => document.getElementById(id);
+if (q.get('ok')) {
+  $('mk').textContent = '✓'; $('ttl').textContent = '已完成連結';
+  $('msg').textContent = `${q.get('u') ? '@' + q.get('u') + ' ' : ''}已經連結到${q.get('b') ? '「' + q.get('b') + '」' : '品牌'}。你可以關閉這個頁面了。`;
+} else {
+  $('mk').textContent = '!'; $('ttl').textContent = '還沒有完成';
+  $('msg').textContent = (q.get('err') || '授權沒有完成') + ' 請再點一次剛剛收到的連結。';
+}
+</script>
+</body>
+</html>

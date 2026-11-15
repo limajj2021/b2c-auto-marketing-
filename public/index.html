@@ -255,6 +255,12 @@ async function loadAccounts() {
   if (S.acct && !ACCTS.some((a) => a.id === S.acct)) S.acct = 0; // 該帳號已被移除，回到全部
   return ACCTS;
 }
+/** 把連結傳出去：手機用系統分享選單（直接選 LINE 或訊息），不支援時複製 */
+async function shareOrCopy(url, text) {
+  try { if (navigator.share) { await navigator.share({ title: 'Threads 授權', text, url }); return 'share'; } } catch (e) { if (e && e.name === 'AbortError') return 'cancel'; }
+  try { await navigator.clipboard.writeText(url); toast('連結已複製，貼到 LINE 或訊息傳給對方', 'ok'); return 'copy'; } catch { /* 繼續 */ }
+  sheet('授權連結', `<p class="t-sub" style="margin-bottom:8px">長按下面的連結複製，傳給對方：</p><textarea readonly style="min-height:96px">${esc(url)}</textarea>`); return 'none';
+}
 /** 切換品牌（同一位客戶有多個品牌時）：每個品牌的資料完全獨立，切換等於換一個工作區 */
 async function openBrandSwitch() {
   if (!(await leaveOk())) return;
@@ -718,8 +724,8 @@ async function threadsConnectPage() {
           <div class="note" style="margin-top:10px">接受後按下面的按鈕，會直接帶你去授權。授權頁會使用這個瀏覽器／Threads App 目前登入的帳號，請先確認是 <b>@${u}</b>；不是的話授權會被系統擋下。</div>
           <div class="actions" style="margin-top:10px"><button class="btn" data-acc="${i.id}" data-go-auth="1">我已接受，前往授權</button></div>`)
       : step(2, 'done', '在 Threads 同意邀請', '已接受。');
-    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `授權頁使用的是「這個瀏覽器或 Threads App 目前登入的帳號」，系統沒辦法替你指定。<b>按之前請確認登入的是 @${u}</b>：手機有裝 Threads App 的話，連結會用 App 目前的帳號開啟，請先在 App 切換到 @${u}；或按「複製授權連結」，貼到 Safari 的無痕分頁，用 @${u} 登入後授權。`,
-          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button><button class="btn sec" data-authcopy="${i.id}">複製授權連結</button></div>`)
+    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `按下面的按鈕，在 Threads 頁面按「Continue」就完成。<details style="margin-top:6px"><summary style="cursor:pointer">授權頁顯示的不是 @${u}？</summary>授權頁用的是這個瀏覽器目前登入的 Threads 帳號。如果手機登入了好幾個帳號，請按「取消」，改按「傳給對方授權」，或用無痕分頁開啟後再用 @${u} 登入。</details>`,
+          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button><button class="btn sec" data-authcopy="${i.id}" data-un="${u}">傳給對方授權</button></div>`)
       : step(3, 'wait', '授權連結', '完成上一步後就能授權。');
     return `<section>${sec('@' + u, `<button class="link" data-cancel="${i.id}">取消</button>`)}<div class="list">${s1}${s2}${s3}</div></section>`;
   };
@@ -729,7 +735,16 @@ async function threadsConnectPage() {
     ${inv.map(card).join('')}
     <section>${sec(inv.length ? '再新增一個帳號' : '第一步：輸入要連結的 Threads 帳號')}
       <div class="list" style="padding:4px 16px 16px">${field('nu', 'Threads 帳號名稱', input('nu', '', 'placeholder="例如：vuca.canada（不含 @）" autocapitalize="none" autocorrect="off"'), '個人檔案頁面上，名稱下方的帳號。')}
-        <button class="btn block" id="nreq" style="margin-top:16px">${t.requires_invite ? '通知服務商' : '下一步'}</button></div></section></div>`, 'form');
+        <button class="btn block" id="nreq" style="margin-top:16px">${t.requires_invite ? '通知服務商' : '下一步'}</button></div></section>
+    <section style="margin-top:28px">${sec('帳號不是你本人的？傳連結給對方')}<div class="list" style="padding:12px 16px 16px">
+      <p class="t-sub">產生一條授權連結，傳給 Threads 帳號的擁有者。<b>他不用登入這個後台</b>，點開、按一下「繼續授權」、在 Threads 按「Continue」就完成。${t.requires_invite ? '（對方的帳號仍需先被加為測試人員並接受邀請。）' : ''}</p>
+      ${field('cu', 'Threads 帳號名稱（選填）', input('cu', '', 'placeholder="填了系統會核對對方授權的是這個帳號" autocapitalize="none" autocorrect="off"'))}
+      <button class="btn sec block" id="clink" style="margin-top:12px">產生並分享連結</button></div></section></div>`, 'form');
+  $('#clink').onclick = (e) => act(e.currentTarget, async () => {
+    const un = $('#cu').value.trim().replace(/^@/, '');
+    const r = await api('POST', '/threads/connect-link', un ? { username: un } : {});
+    await shareOrCopy(r.url, `請點開這個連結授權你的 Threads 帳號${un ? ' @' + un : ''}（${r.days} 天內有效）`);
+  });
   $('#nreq').onclick = async (e) => {
     const v = $('#nu').value.trim().replace(/^@/, ''); $('#nu').value = v;
     if (!check([[$('#nu'), !/^[A-Za-z0-9._]{1,30}$/.test(v), '帳號名稱只有英文、數字、底線與句點，不含 @']])) return;
@@ -742,8 +757,8 @@ async function threadsConnectPage() {
   }));
   $$('[data-cancel]').forEach((b) => b.onclick = async () => { if (!(await confirmSheet('取消這個帳號的連結申請？', '取消申請'))) return; await act(b, () => api('DELETE', '/threads/invites/' + b.dataset.cancel)); render(); });
   $$('[data-authcopy]').forEach((b) => b.onclick = () => act(b, async () => {
-    const url = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.authcopy)).url;
-    try { await navigator.clipboard.writeText(url); toast('已複製。請貼到無痕分頁開啟（10 分鐘內有效）', 'ok'); } catch { toast('無法自動複製', 'bad'); }
+    const r = await api('POST', '/threads/connect-link', { username: b.dataset.un });
+    await shareOrCopy(r.url, `請點開這個連結授權 Threads 帳號 @${b.dataset.un}（${r.days} 天內有效）`);
   }));
   $$('[data-auth]').forEach((b) => b.onclick = () => act(b, async () => { location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.auth)).url; }));
 }

@@ -4,6 +4,7 @@ import type { Env } from '../types';
 import { forBrand } from '../db';
 import { SOURCES, logEvent } from '../log';
 import { normUsername, requestInvite } from '../threads/invites';
+import { LINK_DAYS, makeConnectLink } from '../threads/connectlink';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
 import { isValidTimezone, iso } from '../util/time';
 
@@ -64,7 +65,7 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
 
   // 維護人員（support）只能查看狀態與協助重設客戶密碼；其餘變更限管理者（admin）
   // 處理 Threads 測試邀請屬於日常工作，維護人員也可以做
-  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/reset-admin$/.test(path) && !/^\/invites(\/\d+)?$/.test(path);
+  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/(reset-admin|connect-link)$/.test(path) && !/^\/invites(\/\d+)?$/.test(path);
   if (writes && op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
 
   if (path === '/operators' && req.method === 'GET') {
@@ -247,6 +248,18 @@ export async function handleOps(env: Env, req: Request): Promise<Response> {
     const hint = String(b.threads_usernames ?? '').split(/[\s,，、]+/).map(normUsername).filter((x): x is string => !!x);
     for (const n of hint) await requestInvite(forBrand(env, id), id, n, b.invites_sent ? 'invited' : 'requested', `營運人員 ${op.username}`);
     return json(shareUser ? { slug, name, shared_with: shareUser.authentication_id, login_url: url.origin, invites: hint.length } : { slug, name, admin_username: admin, password: pw, login_url: url.origin, invites: hint.length }, 201);
+  }
+
+  // 產生 Threads 授權連結（傳給客戶的帳號擁有者）
+  const cl = path.match(/^\/tenants\/([a-z0-9-]{2,40})\/connect-link$/);
+  if (cl && req.method === 'POST') {
+    const t = await env.DB.prepare('SELECT id FROM brands WHERE slug=?').bind(cl[1]).first<{ id: string }>();
+    if (!t) return err(404, '找不到這個品牌');
+    const b: any = await req.json().catch(() => ({}));
+    const name = b.username ? normUsername(b.username) : undefined;
+    if (b.username && !name) return err(400, 'Threads 帳號名稱格式不正確（不含 @）');
+    await logEvent(env, t.id, 'info', 'threads_oauth', `營運人員 ${op.username} 產生了 Threads 授權連結${name ? `（要連結 @${name}）` : ''}`);
+    return json({ url: await makeConnectLink(env, url.origin, t.id, name ?? undefined), days: LINK_DAYS });
   }
 
   // 哪些登入帳號可以進入這個品牌（主要帳號＋共用帳號），以及新增／移除共用

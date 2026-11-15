@@ -191,6 +191,9 @@ function tenantSheet(x) {
     <div class="list" style="margin-top:16px;padding:12px 16px 14px"><div class="t-label">可以進入這個品牌的登入帳號</div><div id="tacc" class="t-sub" style="margin:6px 0">載入中…</div>
       <div class="two" style="margin-top:8px"><input id="tau" placeholder="加入帳號，例如：afu-admin" autocapitalize="none" autocorrect="off" aria-label="加入帳號"><select id="tar" aria-label="權限"><option value="admin">管理員</option><option value="staff">客服</option></select></div>
       <button class="btn sm sec" id="taa" style="margin-top:10px">加入這個帳號</button><p class="t-sub" style="margin-top:8px">同一位客戶有多個品牌時，讓他用同一組帳密切換。加入後，對方的「切換品牌」清單立即出現這個品牌。</p></div>
+    <div class="list" style="margin-top:16px;padding:12px 16px 14px"><div class="t-label">Threads 授權連結</div><p class="t-sub" style="margin:4px 0 8px">傳給客戶的帳號擁有者，他不用登入後台，點開按「繼續授權」就完成。7 天內有效。</p>
+      <input id="tcu" placeholder="Threads 帳號名稱（選填，填了會核對）" autocapitalize="none" autocorrect="off" aria-label="Threads 帳號名稱">
+      <button class="btn sm sec" id="tcl" style="margin-top:10px">產生並分享連結</button></div>
     <div class="actions" style="margin-top:16px"><button class="btn sec" id="tlog">查看系統紀錄</button><button class="btn sec" id="trp">重設管理員密碼</button></div>
     ${admin ? `<button class="btn ${x.status === 'active' ? 'dng' : 'sec'} block" id="tst" style="margin-top:8px">${x.status === 'active' ? '暫停這個工作區' : '恢復這個工作區'}</button>` : '<p class="t-sub" style="margin-top:12px">開通、暫停與留資加購需由營運管理者處理。</p>'}
     <div id="tout" style="margin-top:14px"></div>`, (el, close) => {
@@ -201,6 +204,13 @@ function tenantSheet(x) {
     };
     drawAcc();
     $('#taa', el).onclick = (e) => act(e.currentTarget, async () => { await api('POST', `/tenants/${x.slug}/access`, { username: $('#tau', el).value.trim(), role: $('#tar', el).value }); $('#tau', el).value = ''; toast('已加入', 'ok'); drawAcc(); });
+    $('#tcl', el).onclick = (e) => act(e.currentTarget, async () => {
+      const un = $('#tcu', el).value.trim().replace(/^@/, '');
+      const r = await api('POST', `/tenants/${x.slug}/connect-link`, un ? { username: un } : {});
+      const text = `請點開這個連結授權${un ? ' @' + un : '你的 Threads 帳號'}（${r.days} 天內有效）`;
+      try { if (navigator.share) { await navigator.share({ title: 'Threads 授權', text, url: r.url }); return; } } catch (er) { if (er && er.name === 'AbortError') return; }
+      await copyText(r.url, '連結已複製，貼到 LINE 傳給客戶');
+    });
     $('#tia', el).onclick = (e) => act(e.currentTarget, async () => {
       const r = await api('POST', '/invites', { slug: x.slug, usernames: $('#tiu', el).value, status: $('#tis', el).checked ? 'invited' : 'requested' });
       $('#tiu', el).value = ''; toast(`已建立 ${r.invites.length} 個申請：${$('#tis', el).checked ? '客戶登入後直接接受邀請' : '請記得到 Meta 送出邀請'}`, 'ok');

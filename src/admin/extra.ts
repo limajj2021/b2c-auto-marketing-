@@ -1,6 +1,7 @@
 // 連線設定（LINE / Gemini / Threads）與帳號管理。由 routes.ts 註冊。
 import { LineCredError, issueLineToken } from '../line/token';
 import { normUsername, requestInvite } from '../threads/invites';
+import { LINK_DAYS, makeConnectLink } from '../threads/connectlink';
 import { SOURCES, logEvent } from '../log';
 import { lineAddUrl } from '../line/links';
 import { audit, getBrand, getSettings, isMulti } from '../db';
@@ -134,6 +135,16 @@ export function registerExtra(add: Add, json: J, err: E) {
     const r = await requestInvite(env, brandId, username, 'requested', actor.name);
     if (r === 'connected') return err(409, `@${username} 已經連結了`);
     return json({ id: r.id, status: r.status, username }, 201);
+  });
+
+  // 授權連結：傳給 Threads 帳號的擁有者，不用登入後台就能完成授權（可指定預期的帳號，授權回來時核對）
+  add('POST', '/threads/connect-link', 'admin', async ({ env, req, url, actor, brandId }) => {
+    if (!oauthConfigured(env)) return err(409, '系統尚未設定 Threads App');
+    const b: any = await req.json().catch(() => ({}));
+    const name = b.username ? normUsername(b.username) : undefined;
+    if (b.username && !name) return err(400, 'Threads 帳號名稱格式不正確（不含 @，只有英文、數字、底線與句點）');
+    await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 產生了 Threads 授權連結${name ? `（要連結 @${name}）` : ''}`);
+    return json({ url: await makeConnectLink(env, url.origin, brandId, name ?? undefined), days: LINK_DAYS });
   });
 
   // 客戶：我已在 Threads 接受邀請（只有服務商送出邀請之後才能按）
