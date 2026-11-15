@@ -114,4 +114,61 @@ describe('three-step Threads connection', () => {
     await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'later.one' }, op);
     expect(((await (await call(env, 'GET', '/api/op/invites', undefined, op)).json()) as any).rows.map((r: any) => [r.username, r.status])).toEqual([['later.one', 'requested'], ['afu_shop', 'invited']]);
   });
+
+  it('refuses to connect when the browser is logged in as a different Threads account than the one being connected', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    const c = await customer(env);
+    await env.DB.prepare("UPDATE brands SET slug='acme' WHERE id='b1'").run();
+    const made = (await (await call(env, 'POST', '/api/op/invites', { slug: 'acme', usernames: 'vuca.tw', status: 'accepted' }, await operator(env, 'admin'))).json()) as any;
+    const id = (await invites(env, c)).invites[0].id; expect(made.ok).toBe(true);
+    const authUrl = ((await (await call(env, 'GET', `/api/integrations/threads/connect?invite=${id}`, undefined, c)).json()) as any).url;
+    const state = new URL(authUrl).searchParams.get('state')!;
+    // 使用者的 Threads App 登入的是 vuca.canada，所以授權回來的是 vuca.canada
+    const respond = (name: string) => mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '9', username: name }));
+    let m = respond('vuca.canada'); restore = m.restore;
+    const r = await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`));
+    const loc = decodeURIComponent(r.headers.get('location')!);
+    expect(loc).toContain('threads=error'); expect(loc).toContain('你授權的是 @vuca.canada'); expect(loc).toContain('@vuca.tw');
+    expect(await listAccounts(env)).toEqual([]);                                                   // 沒有默默連到錯的帳號
+    expect((await invites(env, c)).invites[0].status).toBe('accepted');                            // 申請還在，可以重試
+    expect(((await env.DB.prepare("SELECT level,message FROM event_logs WHERE source='threads_oauth' ORDER BY id DESC LIMIT 1").first()) as any)).toMatchObject({ level: 'warn' });
+    m.restore();
+    // 換成正確的帳號（大小寫不拘）就能連結
+    m = respond('Vuca.TW'); restore = m.restore;
+    expect((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')).toBe('/?threads=connected');
+    expect((await listAccounts(env)).map((a) => a.username)).toEqual(['Vuca.TW']);
+  });
+
+  it('reconnecting an existing account also expects that same account', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    const c = await customer(env);
+    await env.DB.prepare("INSERT INTO threads_accounts(brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES('b1','7','vuca.tw','x','token_invalid','x','x')").run();
+    const url = ((await (await call(env, 'GET', '/api/integrations/threads/connect?account=1', undefined, c)).json()) as any).url;
+    const state = new URL(url).searchParams.get('state')!;
+    const m = mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '8', username: 'vuca.canada' })); restore = m.restore;
+    expect(decodeURIComponent((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')!)).toContain('你授權的是 @vuca.canada');
+    expect((await listAccounts(env)).map((a) => a.username)).toEqual(['vuca.tw']);                  // 原本的帳號不變
+    expect((await call(env, 'GET', '/api/integrations/threads/connect?account=999', undefined, c)).status).toBe(404);
+  });
+
+  it('a multi-brand customer authorizing from brand B gets the account in brand B, not their primary brand', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    await env.DB.prepare("INSERT INTO brands(id,slug,name,industry,description,timezone,created_at) VALUES('b2','beta','乙','general','','Asia/Taipei','x')").run();
+    await env.DB.prepare("INSERT INTO brand_settings(brand_id,updated_at) VALUES('b2','x')").run();
+    await env.DB.prepare("INSERT INTO user_brands(user_id,brand_id,role,created_at) VALUES(1,'b2','admin','x')").run();
+    const c1 = await customer(env);
+    const c2 = ck(await call(env, 'POST', '/api/brand/switch', { brand_id: 'b2' }, c1));
+    const url = ((await (await call(env, 'GET', '/api/integrations/threads/connect', undefined, c2)).json()) as any).url;
+    const state = new URL(url).searchParams.get('state')!;
+    const m = mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '5', username: 'brand.b' })); restore = m.restore;
+    await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`));
+    expect((await env.DB.prepare('SELECT brand_id FROM threads_accounts').all()).results).toEqual([{ brand_id: 'b2' }]);
+    // 權限被收回後，同一個授權連結不能再把帳號放進那個品牌
+    await env.DB.prepare('DELETE FROM user_brands').run(); await env.DB.prepare('DELETE FROM threads_accounts').run();
+    expect((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')).toContain('threads=error');
+    expect(((await env.DB.prepare('SELECT COUNT(*) c FROM threads_accounts').first()) as any).c).toBe(0);
+  });
 });

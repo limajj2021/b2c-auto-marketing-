@@ -715,11 +715,11 @@ async function threadsConnectPage() {
     const s2 = s === 'requested' ? step(2, 'wait', '在 Threads 同意邀請', '服務商送出邀請後，這裡會通知你。')
       : s === 'invited' ? step(2, 'now', '在 Threads 同意邀請', `用 <b>@${u}</b> 登入 Threads，到「設定 → 帳號 → 網站權限 → 邀請」，找到邀請按「接受」。`,
           `<div class="actions" style="margin-top:10px"><a class="btn sec sm" href="https://www.threads.com/" target="_blank" rel="noopener" style="text-decoration:none">開啟 Threads ↗</a></div>
-          <div class="note" style="margin-top:10px">接受後按下面的按鈕，會直接帶你去授權。請先確認這個瀏覽器登入的 Threads 是 <b>@${u}</b>。</div>
+          <div class="note" style="margin-top:10px">接受後按下面的按鈕，會直接帶你去授權。授權頁會使用這個瀏覽器／Threads App 目前登入的帳號，請先確認是 <b>@${u}</b>；不是的話授權會被系統擋下。</div>
           <div class="actions" style="margin-top:10px"><button class="btn" data-acc="${i.id}" data-go-auth="1">我已接受，前往授權</button></div>`)
       : step(2, 'done', '在 Threads 同意邀請', '已接受。');
-    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `請先確認這個瀏覽器登入的 Threads 是 <b>@${u}</b>，再按下面的按鈕，在 Threads 頁面按「允許」。`,
-          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button></div>`)
+    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `授權頁使用的是「這個瀏覽器或 Threads App 目前登入的帳號」，系統沒辦法替你指定。<b>按之前請確認登入的是 @${u}</b>：手機有裝 Threads App 的話，連結會用 App 目前的帳號開啟，請先在 App 切換到 @${u}；或按「複製授權連結」，貼到 Safari 的無痕分頁，用 @${u} 登入後授權。`,
+          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button><button class="btn sec" data-authcopy="${i.id}">複製授權連結</button></div>`)
       : step(3, 'wait', '授權連結', '完成上一步後就能授權。');
     return `<section>${sec('@' + u, `<button class="link" data-cancel="${i.id}">取消</button>`)}<div class="list">${s1}${s2}${s3}</div></section>`;
   };
@@ -741,6 +741,10 @@ async function threadsConnectPage() {
     location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.acc)).url;
   }));
   $$('[data-cancel]').forEach((b) => b.onclick = async () => { if (!(await confirmSheet('取消這個帳號的連結申請？', '取消申請'))) return; await act(b, () => api('DELETE', '/threads/invites/' + b.dataset.cancel)); render(); });
+  $$('[data-authcopy]').forEach((b) => b.onclick = () => act(b, async () => {
+    const url = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.authcopy)).url;
+    try { await navigator.clipboard.writeText(url); toast('已複製。請貼到無痕分頁開啟（10 分鐘內有效）', 'ok'); } catch { toast('無法自動複製', 'bad'); }
+  }));
   $$('[data-auth]').forEach((b) => b.onclick = () => act(b, async () => { location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.auth)).url; }));
 }
 async function threadsAccountPage(id) {
@@ -765,7 +769,7 @@ async function threadsAccountPage(id) {
     if (await act(e.currentTarget, () => api('PATCH', '/accounts/' + a.id, { persona: $('#persona').value.trim(), tone: $('#atone').value.trim(), topics: list($('#atopics').value), posts_per_day: n ? +n : null, publishing_times: t.length ? t : null, cta_text: $('#acta').value.trim(), auto_post_enabled: $('#aon').checked }), '已儲存')) dirty = false;
   };
   $('#at').onclick = (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads', account_id: a.id }); toast(r.message, r.ok ? 'ok' : 'bad'); });
-  $('#ar').onclick = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
+  $('#ar').onclick = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect?account=' + a.id)).url; });
   $('#aoff').onclick = (e) => act(e.currentTarget, async () => { if (!(await confirmSheet(`中斷 @${a.username} 的連結？尚未發出的排程會改回草稿。`, '中斷連結'))) return; await api('DELETE', '/accounts/' + a.id); dirty = false; toast('已中斷連結', 'ok'); go('settings/threads'); });
 }
 // LINE 官方帳號管理後台的直達連結（需先登入 LINE；若登入後回到首頁，畫面上也寫了要點哪裡）

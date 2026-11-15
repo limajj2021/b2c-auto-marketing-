@@ -18,8 +18,12 @@ export function oauthConfigured(env: Env): boolean {
   return !!(env.THREADS_APP_ID && env.THREADS_APP_SECRET);
 }
 
-export async function buildAuthorizeUrl(env: Env, origin: string, adminId: number, now = Date.now()): Promise<string> {
-  const state = await signToken(stateSecret(env), { uid: adminId, p: 'threads_oauth', exp: Math.floor(now / 1000) + STATE_TTL });
+/**
+ * 授權連結。state 另外記著：發起授權的品牌（多品牌客戶可能不在主要品牌）與預期的 Threads 帳號。
+ * Threads 的授權頁一律使用「這個瀏覽器／Threads App 目前登入的帳號」，系統無法指定，所以回來時要核對，不符就不連結。
+ */
+export async function buildAuthorizeUrl(env: Env, origin: string, adminId: number, now = Date.now(), opts: { brandId?: string; expect?: string } = {}): Promise<string> {
+  const state = await signToken(stateSecret(env), { uid: adminId, p: 'threads_oauth', b: opts.brandId, x: opts.expect?.toLowerCase(), exp: Math.floor(now / 1000) + STATE_TTL });
   const q = new URLSearchParams({
     client_id: env.THREADS_APP_ID!, redirect_uri: `${origin}/threads/callback`,
     scope: env.THREADS_SCOPES?.trim() || SCOPES, response_type: 'code', state,
@@ -44,19 +48,25 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
   const owner = st && st.p === 'threads_oauth'
     ? await env.DB.prepare('SELECT brand_id FROM admin_users WHERE id=? AND enabled=1').bind(st.uid).first<{ brand_id: string }>() : null;
   // 每一步的結果寫入操作紀錄（不含任何憑證），授權卡住時可判斷停在哪一步
-  const bid = owner?.brand_id ?? null;
+  // 發起授權時所在的品牌：必須仍是這個帳號的主要品牌或共用品牌，否則視為逾時
+  let brandId: string | null = owner?.brand_id ?? null;
+  if (owner && st?.b && st.b !== owner.brand_id) {
+    const shared = await env.DB.prepare('SELECT 1 FROM user_brands WHERE user_id=? AND brand_id=?').bind(st.uid, st.b).first();
+    brandId = shared ? st.b : null;
+  }
+  const bid = brandId;
   if (url.searchParams.get('error')) {
     await logEvent(env, bid, 'warn', 'threads_oauth', '使用者在 Threads 取消或拒絕授權', {
       error: url.searchParams.get('error'), reason: url.searchParams.get('error_reason'), description: url.searchParams.get('error_description'),
     });
     return fail('已取消授權');
   }
-  if (!code || !owner) {
+  if (!code || !owner || !brandId) {
     await logEvent(env, bid, 'warn', 'threads_oauth', code ? '授權回到系統，但驗證碼無效或已逾時（超過 10 分鐘，或從別的瀏覽器開啟）' : '授權回到系統，但沒有帶授權碼');
     return fail('授權已逾時，請重新操作');
   }
   // 授權結果歸屬於發起連結的管理員所在的工作區（固定一個回呼網址即可服務所有工作區）
-  env = forBrand(env, owner.brand_id);
+  env = forBrand(env, brandId);
   if (!oauthConfigured(env)) return fail('系統尚未設定 Threads App');
   let stage = 'exchange_code';
   try {
@@ -72,6 +82,12 @@ export async function handleCallback(env: Env, req: Request, now = Date.now()): 
     const long = await jget(`${OAUTH}/access_token?grant_type=th_exchange_token&client_secret=${encodeURIComponent(env.THREADS_APP_SECRET!)}&access_token=${encodeURIComponent(short.access_token)}`);
     stage = 'read_profile';
     const me = await jget(`${OAUTH}/v1.0/me?fields=id,username&access_token=${encodeURIComponent(long.access_token)}`);
+    // 預期的帳號與實際授權的不同（瀏覽器或 Threads App 登入了別的帳號）：不連結，說明怎麼處理
+    const got = String(me.username ?? '').toLowerCase();
+    if (st?.x && got !== st.x) {
+      await logEvent(env, brandId, 'warn', 'threads_oauth', `授權的帳號不是預期的：要連結 @${st.x}，實際授權的是 @${got}（瀏覽器或 Threads App 目前登入的是別的帳號），已略過`);
+      return fail(`你授權的是 @${me.username}，但這次要連結的是 @${st.x}。請先切換到 @${st.x}（Threads App 切換帳號，或複製授權連結到無痕分頁登入），再試一次。`);
+    }
     const brand = await getBrand(env);
     const expiresAt = new Date(now + (long.expires_in ?? 5184000) * 1000).toISOString();
     await upsertAccount(env, brand.id, { userId: String(me.id), username: me.username ?? null, token: long.access_token, expiresAt });

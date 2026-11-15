@@ -157,15 +157,20 @@ export function registerExtra(add: Add, json: J, err: E) {
     if (!oauthConfigured(env)) return err(409, '系統尚未設定 Threads App（THREADS_APP_ID / THREADS_APP_SECRET）');
     // 從邀請流程進來：必須已完成前兩步，並記下開始授權的時間（客戶頁用來提示「上次授權沒有完成」）
     const inv = url.searchParams.get('invite');
+    let expect: string | undefined;
     if (inv) {
-      const row = await env.DB.prepare('SELECT status FROM threads_invites WHERE id=? AND brand_id=?').bind(inv, brandId).first<{ status: string }>();
+      const row = await env.DB.prepare('SELECT status,username FROM threads_invites WHERE id=? AND brand_id=?').bind(inv, brandId).first<{ status: string; username: string }>();
       if (!row) return err(404, '找不到這筆申請');
       if (env.THREADS_APP_MODE !== 'live' && row.status !== 'accepted' && row.status !== 'connected') return err(409, '請先完成前面的步驟：服務商送出邀請、你在 Threads 接受邀請');
+      expect = row.username;
       await env.DB.prepare('UPDATE threads_invites SET authorize_started_at=? WHERE id=? AND brand_id=?').bind(iso(), inv, brandId).run();
     }
     // 用來判斷授權是否有回到系統：只有「開始」沒有後續結果，代表卡在 Threads／Meta 頁面
     await logEvent(env, brandId, 'info', 'threads_oauth', `${actor.name} 開始連結 Threads（等待 Threads 頁面回傳）`, { callback: `${url.origin}/threads/callback` });
-    return json({ url: await buildAuthorizeUrl(env, url.origin, actor.id) });
+    // 重新連結既有帳號：預期授權的就是那個帳號
+    const acc = Number(url.searchParams.get('account')) || 0;
+    if (acc) { const a = await getAccount(env, acc); if (!a) return err(404, '找不到這個帳號'); if (a.username) expect = a.username; }
+    return json({ url: await buildAuthorizeUrl(env, url.origin, actor.id, Date.now(), { brandId, expect }) });
   });
 
   add('DELETE', '/integrations/threads', 'admin', async ({ env, actor, brandId }) => {
