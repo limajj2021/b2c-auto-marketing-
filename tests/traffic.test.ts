@@ -80,4 +80,26 @@ describe('traffic attribution (estimated)', () => {
     expect(f.totals).toMatchObject({ clicks: 60, unique_clicks: 50, friends: 10, friends_source: 'daily' });
     expect(f.traffic.posts[0]).toMatchObject({ hook: '爆文鉤子', uniques: 50, ctr: 0.05, est_friends: 10 });
   });
+
+  it('report scoped to one Threads account: only that account’s posts, clicks from its own links, friends estimated, no brand-level handoffs', async () => {
+    const env: any = await makeEnv();
+    env.LINE_CHANNEL_ACCESS_TOKEN = 'T';
+    await env.DB.prepare('UPDATE brand_settings SET leads_enabled=0').run();
+    await env.DB.prepare("INSERT INTO threads_accounts(brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES('b1','1','main','x','ok','x','x'),('b1','2','alt','x','ok','x','x')").run();
+    await env.DB.prepare(`INSERT INTO posts(brand_id,account_id,content,status,published_at,updated_at,created_at) VALUES('b1',1,'A 帳號貼文','published','2026-11-05T02:00:00Z','x','x'),('b1',2,'B 帳號貼文','published','2026-11-05T03:00:00Z','x','x')`).run();
+    await env.DB.prepare(`INSERT INTO post_metrics(post_id,brand_id,views,likes,replies,reposts,quotes,shares,fetched_at) VALUES(1,'b1',1000,10,0,0,0,0,'x'),(2,'b1',400,4,0,0,0,0,'x')`).run();
+    await env.DB.prepare(`INSERT INTO post_links(code,brand_id,post_id,target_url,clicks,uniques,created_at) VALUES('aaaa1111','b1',1,?,30,30,'x'),('bbbb2222','b1',2,?,10,10,'x')`).bind(LINE, LINE).run();
+    await env.DB.prepare(`INSERT INTO link_daily(brand_id,post_id,day,clicks,uniques) VALUES('b1',1,'2026-11-05',30,30),('b1',2,'2026-11-05',10,10)`).run();
+    for (const [n, c] of [['link_click', 40], ['link_unique', 40], ['friend_add', 8], ['handoff', 3]]) await env.DB.prepare(`INSERT INTO metrics_daily(brand_id,day,name,count) VALUES('b1','2026-11-05',?,?)`).bind(n, c).run();
+    const ck = await cookie(env);
+    const all: any = await (await api(env, 'GET', '/api/funnel?from=2026-11-01&to=2026-12-01', ck)).json();
+    expect(all.totals).toMatchObject({ posts: 2, views: 1400, clicks: 40, friends: 8, handoffs: 3 }); expect(all.scoped).toBeNull();
+    const a: any = await (await api(env, 'GET', '/api/funnel?from=2026-11-01&to=2026-12-01&account_id=1', ck)).json();
+    expect(a.scoped).toMatchObject({ account_id: 1, username: 'main' });
+    expect(a.totals).toMatchObject({ posts: 1, views: 1000, likes: 10, clicks: 30, unique_clicks: 30, friends: 6, friends_source: 'estimated', handoffs: null, leads: null }); // 8 × 30/40
+    const b: any = await (await api(env, 'GET', '/api/funnel?from=2026-11-01&to=2026-12-01&account_id=2', ck)).json();
+    expect(b.totals).toMatchObject({ posts: 1, views: 400, clicks: 10, friends: 2 });
+    expect(a.totals.friends + b.totals.friends).toBe(all.totals.friends);              // 各帳號推估加總 = 全部
+    expect(a.traffic.posts.map((p: any) => p.hook)).toEqual(['A 帳號貼文']);
+  });
 });

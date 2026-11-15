@@ -23,7 +23,7 @@ const IC = {
   lead: '<path d="M8.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6 6 0 0 1 12 0M16 4.2a3.5 3.5 0 0 1 0 6.6M18 14.3A6 6 0 0 1 21.5 20"/>',
   gear: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
   user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
-  chev: '<path d="m9 6 6 6-6 6"/>', back: '<path d="m15 6-6 6 6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', plus: '<path d="M12 5v14M5 12h14"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="m15 6-6 6 6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/>',
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/>',
   inbox: '<path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"/>',
@@ -33,7 +33,7 @@ const chev = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="
 
 /* ---------- state ---------- */
 let me = null, TZ = 'Asia/Taipei', BRAND = '管理後台', dirty = false, suppress = false, curHash = location.hash;
-const S = { postSeg: 'draft', leadStatus: '', leadFrom: '', helpOpen: 'start', cache: {} };
+const S = { postSeg: 'draft', leadStatus: '', leadFrom: '', helpOpen: 'start', cache: {}, acct: -1 };
 document.addEventListener('input', (e) => { if (e.target.closest?.('[data-form]')) dirty = true; });
 
 /* ---------- helpers ---------- */
@@ -172,7 +172,7 @@ function loginView() {
   }).catch(() => {});
   const go = (b) => act(b, async () => {
     await api('POST', '/login', { username: $('#u').value.trim(), password: $('#p').value });
-    me = null; $('#app').innerHTML = ''; await render();
+    me = null; S.acct = -1; $('#app').innerHTML = ''; await render();
   });
   $('#go').onclick = (e) => go(e.currentTarget); $('#p').onkeydown = (e) => { if (e.key === 'Enter') go($('#go')); }; // 不可回傳 false，否則會擋掉輸入
 }
@@ -197,12 +197,18 @@ async function getSetup() {
 }
 
 async function homePage() {
-  const [d, setup, posts, audit, fn] = await Promise.all([api('GET', '/dashboard'), getSetup(), api('GET', '/posts'), api('GET', '/audit'), api('GET', '/funnel').catch(() => null)]);
+  await loadAccounts();
+  const ac = curAcct();
+  const [d, setup, allPosts, audit, fn] = await Promise.all([api('GET', '/dashboard'), getSetup(), api('GET', '/posts'), api('GET', '/audit'), api('GET', '/funnel' + (ac ? '?account_id=' + ac : '')).catch(() => null)]);
+  const posts = ac ? allPosts.filter((p) => p.account_id === ac) : allPosts;
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date()), dayOf = (t) => (t ? new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(t)) : '');
+  if (ac) { d.posted_today = posts.filter((p) => p.status === 'published' && dayOf(p.published_at) === todayStr).length; d.pending_drafts = posts.filter((p) => p.status === 'draft').length; }
   const qs = new URLSearchParams(location.search);
   if (qs.get('threads')) { qs.get('threads') === 'connected' ? toast('Threads 已連結成功', 'ok') : toast('Threads 連結失敗：' + (qs.get('reason') || '請重試'), 'bad'); history.replaceState(null, '', '/'); }
   const failed = posts.filter((p) => p.status === 'failed' || p.status === 'gen_failed').length, unknown = posts.filter((p) => p.status === 'unknown').length;
   const next = posts.filter((p) => p.status === 'scheduled' && p.scheduled_at && new Date(p.scheduled_at) > new Date()).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))[0];
   const todo = [];
+  if (ac && acctOf(ac)?.status !== 'ok') todo.push({ dot: 'bad', t: `@${esc(acctOf(ac)?.username || '')} 授權已失效`, s: '自動發文已暫停，請重新連結', to: 'settings/threads/' + ac });
   if (d.threads_status === 'token_invalid') todo.push({ dot: 'bad', t: 'Threads 授權已失效', s: '自動發文已暫停，請重新連結', to: 'settings/threads' });
   if (failed) todo.push({ dot: 'bad', t: `${failed} 則貼文處理失敗`, s: '查看原因並重試', to: 'posts', seg: 'hist' });
   if (unknown) todo.push({ dot: 'warn', t: `${unknown} 則貼文狀態待核對`, s: '系統正在向 Threads 確認，通常幾分鐘內自動完成', to: 'posts', seg: 'queue' });
@@ -214,11 +220,12 @@ async function homePage() {
   bar({ title: BRAND, dot: d.healthy ? 'ok' : 'bad', sub: d.healthy ? '' : '需要處理' });
   const m = (n, l, bad) => `<div><b class="${n === 0 || n === null ? 'z' : bad ? 'bad' : ''}">${n ?? '—'}</b><span>${l}</span></div>`;
   setView(`
+    ${ACCTS.length > 1 ? acctStrip() : ''}
     ${setup.done < setup.steps.length ? (() => { const nx = setup.steps.find((x) => !x.ok); return `<div class="banner"><div class="main"><div class="t-label">開通進度 ${setup.done}/${setup.steps.length}</div><div class="t-sub">下一步：${esc(nx.t)}</div></div><button class="btn sm" data-go="setup">繼續設定</button></div>`; })() : ''}
     <section>${sec('今日')}
-      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.clicks_today, 'LINE 點擊') + m(d.line_data ? d.friends_yesterday : null, '昨日新好友')}</div>
+      <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${ac ? '' : d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.clicks_today, 'LINE 點擊') + m(d.line_data ? d.friends_yesterday : null, '昨日新好友')}</div>
       <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停'}</p></section>
-    ${fn ? funnelBlock(fn, '導流成效・近 30 天', true) : ''}
+    ${fn ? funnelBlock(fn, ac ? `導流成效・${esc('@' + (acctOf(ac)?.username || ''))}・近 30 天` : '導流成效・近 30 天', true) : ''}
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
     <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="report">成效報告</button>'}</section>
     <section>${sec('自動化')}<div class="list">
@@ -235,15 +242,45 @@ async function homePage() {
     try { await api('POST', '/pause', { [key]: on }); toast(on ? `已開啟${label}` : `已暫停${label}`, 'ok'); } catch (err) { toast(err.message, 'bad'); }
     render();
   };
+  bindAcctStrip();
   $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2')?.addEventListener('change', flip('line_auto_reply_enabled', 'LINE 自動接待'));
 }
 
 let ACCTS = [];
-async function loadAccounts() { try { ACCTS = (await api('GET', '/integrations')).threads.accounts || []; } catch { ACCTS = []; } return ACCTS; }
+async function loadAccounts() {
+  try { ACCTS = (await api('GET', '/integrations')).threads.accounts || []; } catch { ACCTS = []; }
+  if (S.acct === -1) { try { S.acct = +localStorage.getItem('acct:' + me.name) || 0; } catch { S.acct = 0; } }
+  if (S.acct && !ACCTS.some((a) => a.id === S.acct)) S.acct = 0; // 該帳號已被移除，回到全部
+  return ACCTS;
+}
+/** 目前操作的 Threads 帳號：0 = 全部帳號。偏好存在這個瀏覽器，下次登入還在。 */
+const curAcct = () => (S.acct > 0 && ACCTS.some((a) => a.id === S.acct) ? S.acct : 0);
+function setAcct(id) { S.acct = id; try { localStorage.setItem('acct:' + me.name, String(id)); } catch { /* 無痕模式 */ } }
+const acctOf = (id) => ACCTS.find((a) => a.id === id);
+/** 頁面最上方的切換列（只有 2 個以上帳號才出現） */
+function acctStrip() {
+  if (ACCTS.length < 2) return '';
+  const a = acctOf(curAcct());
+  return `<button class="acct-sw" data-sw aria-haspopup="dialog" aria-label="切換帳號，目前：${a ? '@' + esc(a.username || a.id) : '全部帳號'}"><span class="av ${a ? '' : 'all'}">${a ? esc((a.username || '?')[0].toUpperCase()) : '全'}</span>
+    <span class="tx"><b>${a ? '@' + esc(a.username || a.id) : '全部帳號'}</b><span>${a ? (a.status === 'ok' ? '只顯示這個帳號' : '授權已失效') : `共 ${ACCTS.length} 個帳號`}</span></span>${svg('down')}</button>`;
+}
+function bindAcctStrip() { $('[data-sw]')?.addEventListener('click', openAcctSwitch); }
+function openAcctSwitch() {
+  const cur = curAcct(), items = [{ id: 0, name: '全部帳號', sub: `共 ${ACCTS.length} 個帳號，合併顯示` }, ...ACCTS.map((a) => ({ id: a.id, name: '@' + (a.username || a.id), sub: a.status !== 'ok' ? '授權已失效，請重新連結' : (a.persona ? a.persona.slice(0, 22) : '未設定人設'), bad: a.status !== 'ok' }))];
+  sheet('切換帳號', `${ACCTS.length > 6 ? '<div class="f" style="margin:0 0 10px"><input id="asq" placeholder="搜尋帳號" autocomplete="off" autocapitalize="none" aria-label="搜尋帳號"></div>' : ''}<div class="list acct-list" id="asl"></div>`, (el, close) => {
+    const draw = () => {
+      const q = ($('#asq', el)?.value || '').trim().toLowerCase().replace(/^@/, '');
+      const rows = items.filter((x) => x.id === 0 ? !q : (x.name + ' ' + x.sub).toLowerCase().includes(q));
+      $('#asl', el).innerHTML = rows.map((x) => row({ act: 'pick', id: String(x.id), go: false, dot: x.bad ? 'bad' : x.id === cur ? 'ok' : '', title: esc(x.name), sub: esc(x.sub), end: x.id === cur ? '目前' : '' })).join('') || '<p class="t-sub" style="padding:14px 16px">沒有符合的帳號</p>';
+      $$('[data-act=pick]', el).forEach((b) => b.onclick = () => { setAcct(+b.dataset.id); close(); render(); });
+    };
+    $('#asq', el)?.addEventListener('input', draw); draw();
+  });
+}
 const acctName = (id) => { const a = ACCTS.find((x) => x.id === id); return a ? '@' + (a.username || a.id) : ''; };
 async function openGenerate() {
   await loadAccounts();
-  const pick = ACCTS.length > 1 ? field('ga', '發文帳號', `<select id="ga">${ACCTS.map((a) => `<option value="${a.id}">@${esc(a.username || a.id)}${a.persona ? '　' + esc(a.persona.slice(0, 16)) : ''}</option>`).join('')}</select>`, 'AI 會用這個帳號的人設來寫。') : '';
+  const pick = ACCTS.length > 1 ? field('ga', '發文帳號', `<select id="ga">${ACCTS.map((a) => `<option value="${a.id}" ${a.id === curAcct() ? 'selected' : ''}>@${esc(a.username || a.id)}${a.persona ? '　' + esc(a.persona.slice(0, 16)) : ''}</option>`).join('')}</select>`, 'AI 會用這個帳號的人設來寫。') : '';
   sheet('AI 生成串文', `${pick}${field('gt', '指定主題（可留空）', input('gt', '', 'placeholder="例如：活動贊助、剪輯小知識"'), '會依「爭議化、數據化、具體化」寫成一整串：第一則是鉤子，最後一則是 CTA。生成後先成為草稿，核准才發布。')}
     <div class="actions" style="margin-top:20px"><button class="btn" id="gg">生成草稿</button></div>`, (el, close) => {
     $('#gg', el).onclick = (e) => act(e.currentTarget, async () => {
@@ -264,8 +301,8 @@ function funnelBlock(f, title, compact) {
     { k: '曝光', v: noIns ? null : t.views },
     { k: '互動', v: noIns ? null : eng, r: '互動率', base: noIns ? null : t.views },
     { k: t.unique_clicks > 0 ? '點擊人數' : '點擊 LINE', v: f.tracking ? uc : null, r: '點擊率', base: noIns ? null : t.views, extra: t.unique_clicks > 0 && t.clicks !== uc ? `共 ${nf(t.clicks)} 次點擊` : '' },
-    { k: '新好友', v: t.friends_source === 'none' ? null : t.friends, r: '加好友率', base: f.tracking ? uc : null },
-    ...(f.leads_enabled ? [{ k: '轉真人', v: t.handoffs, r: '轉真人率', base: t.friends_source === 'none' ? null : t.friends }] : []),
+    { k: f.scoped ? '新好友（推估）' : '新好友', v: t.friends_source === 'none' ? null : t.friends, r: '加好友率', base: f.tracking ? uc : null },
+    ...(f.leads_enabled && !f.scoped ? [{ k: '轉真人', v: t.handoffs, r: '轉真人率', base: t.friends_source === 'none' ? null : t.friends }] : []),
   ];
   const max = Math.max(1, ...stages.map((x) => x.v || 0)), w = (v) => (v ? Math.max(3, (Math.log10(v + 1) / Math.log10(max + 1)) * 100) : 0);
   let html = '';
@@ -277,7 +314,7 @@ function funnelBlock(f, title, compact) {
   const notes = [
     noIns ? (f.insights === 'no_permission' ? '曝光與互動需要 Threads「成效數據」權限，請聯絡服務商開通後重新連結帳號。' : '曝光與互動會在貼文發布後幾小時內開始出現。') : '',
     !f.tracking ? 'LINE 連結點擊追蹤尚未啟用。' : '',
-    t.friends_source === 'none' ? '新好友數要先在「設定 → LINE 官方帳號」連接 LINE 數據（選用）。' : t.friends_source === 'daily' ? '新好友數來自 LINE 每日統計，隔天更新。' : '',
+    t.friends_source === 'none' ? '新好友數要先在「設定 → LINE 官方帳號」連接 LINE 數據（選用）。' : t.friends_source === 'estimated' ? '單一帳號的新好友是推估：LINE 不會告訴我們好友從哪個帳號來，系統依當天各貼文的點擊人數比例分配。' : t.friends_source === 'daily' ? '新好友數來自 LINE 每日統計，隔天更新。' : '',
   ].filter(Boolean);
   return `<section>${sec(title, compact ? '<button class="link" data-go="report">完整報告</button>' : '')}
     <div class="funnel">${html}</div>${notes.length ? `<p class="fhint">${notes.join('<br>')}</p>` : ''}</section>`;
@@ -301,15 +338,18 @@ function trafficBlock(f) {
 let RMONTH = new Date().toISOString().slice(0, 7);
 async function reportPage() {
   const [y, m] = RMONTH.split('-').map(Number), from = `${RMONTH}-01`, to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
-  const f = await api('GET', `/funnel?from=${from}&to=${to}`);
+  await loadAccounts(); const ac = curAcct();
+  const f = await api('GET', `/funnel?from=${from}&to=${to}${ac ? '&account_id=' + ac : ''}`);
   bar({ title: '成效報告', back: 'home', right: '<button class="icon" id="pr" aria-label="列印或另存 PDF"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6h-2M7 14h10v7H7z"/></svg></button>' });
-  setView(`<div class="tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 class="t-page">${esc(BRAND)}</h2><p class="t-sub">${RMONTH.replace('-', ' 年 ')} 月・Threads 導流成效</p></div>
+  setView(`<div class="tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 class="t-page">${esc(BRAND)}${ac ? ` <span class="mut" style="font-weight:400">@${esc(acctOf(ac)?.username || '')}</span>` : ''}</h2><p class="t-sub">${RMONTH.replace('-', ' 年 ')} 月・Threads 導流成效</p></div>
       <input type="month" id="rm" value="${RMONTH}" style="width:auto" aria-label="選擇月份"></div>
+    ${ACCTS.length > 1 ? acctStrip() : ''}
     ${funnelBlock(f, '導流漏斗', false)}
     <p class="t-sub">本月發布 ${nf(f.totals.posts)} 串${f.insights === 'ok' && f.totals.posts ? `，平均每串曝光 ${nf(Math.round(f.totals.views / Math.max(1, f.totals.posts_with_metrics)))}` : ''}。</p>
     ${trafficBlock(f)}
     <section>${sec('曝光最高的貼文')}${f.top.length ? `<div class="list">${f.top.map((p, i) => row({ go: false, title: `${i + 1}. ${esc(p.hook || '（空白）')}`, sub: `${fmt(p.published_at)}${p.username ? ' · @' + esc(p.username) : ''} · 曝光 ${nf(p.views)} · 讚 ${nf(p.likes)} · 回覆 ${nf(p.replies)} · 點擊 ${nf(p.uniques || p.clicks)}${p.uniques ? ' 人' : ''}` })).join('')}</div>` : empty('post', '這個月還沒有發布的貼文', '貼文發布後，成效會顯示在這裡。')}</section>
     <p class="t-sub">點擊只計算真人瀏覽器，排除平台的連結預覽；「人數」為同一訪客同一天同一連結只算一次，系統只保存無法還原的代碼 2 天，不記錄任何個人資料。曝光與互動來自 Threads 官方數據，於發布後 14 天內定期更新。</p>`);
+  bindAcctStrip();
   $('#rm').onchange = (e) => { RMONTH = e.target.value || RMONTH; render(); };
   $('#pr').onclick = () => window.print();
 }
@@ -332,19 +372,18 @@ const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publis
 async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
   const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone;
-  const multi = ACCTS.length > 1, posts = S.postAcct ? all.filter((p) => p.account_id === S.postAcct) : all;
+  const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct()) : all;
   const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
   bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
   $('[data-act=gen3]').onclick = openGenerate;
   const seg = S.postSeg, items = G[seg];
   const copy = { draft: ['沒有待審核的草稿', '開啟自動發文或按「AI 生成」後，草稿會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿或開啟自動發文後，排程會顯示在這裡。'], hist: ['還沒有發布紀錄', '貼文發布後會顯示在這裡。'] }[seg];
-  const chip = (v, l) => `<button class="chip" data-acct="${v}" aria-pressed="${(S.postAcct || 0) === v}">${l}</button>`;
-  setView(`${multi ? `<div class="chips tight">${chip(0, '全部帳號')}${ACCTS.map((a) => chip(a.id, '@' + esc(a.username || a.id))).join('')}</div>` : ''}
+  setView(`${multi ? `<div class="tight">${acctStrip()}</div>` : ''}
     <div class="tight"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div>
     ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${esc((p.parts?.[0] || p.content).split('\n')[0] || '（空白）')}</span>`,
       sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.status === 'published' && (p.views !== null && p.views !== undefined || p.clicks) ? ` · 曝光 ${nf(p.views)} · 點擊 ${p.uniques ? nf(p.uniques) + ' 人' : nf(p.clicks || 0)}` : ''}${p.parts?.length > 1 ? ` · 串文 ${p.parts.length} 則` : ''}${multi && p.account_id ? ` · ${esc(acctName(p.account_id))}` : ''}${p.source_post_id ? ' · 改寫' : ''}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '')}`);
   $$('[data-seg]').forEach((b) => b.onclick = () => { S.postSeg = b.dataset.seg; render(); });
-  $$('[data-acct]').forEach((b) => b.onclick = () => { S.postAcct = +b.dataset.acct || 0; render(); });
+  bindAcctStrip();
   $('[data-act=gen2]')?.addEventListener('click', openGenerate);
   $$('[data-act=post]').forEach((b) => b.onclick = () => openPost(all.find((p) => p.id == b.dataset.id)));
 }
@@ -479,7 +518,7 @@ function openDistribute(p, others, closeParent) {
     $('#dg', el).onclick = (e) => act(e.currentTarget, async () => {
       const ids = others.filter((a) => $('#d' + a.id, el).checked).map((a) => a.id); if (!ids.length) throw new Error('請至少選擇一個帳號');
       const r = await api('POST', `/posts/${p.id}/distribute`, { account_ids: ids });
-      close(); closeParent(); S.postSeg = 'draft'; S.postAcct = 0;
+      close(); closeParent(); S.postSeg = 'draft'; setAcct(0);
       toast(r.stopped ? `已建立 ${r.created} 則，之後因額度停止：${r.stopped}` : `已建立 ${r.created} 則改寫草稿，請到「待審核」確認`, r.stopped ? '' : 'ok'); render();
     });
   });
@@ -631,7 +670,7 @@ async function threadsPage() {
   const addTo = t.requires_invite ? 'new' : '';
   bar({ title: 'Threads 帳號', back: 'settings', right: accts.length && t.oauth_available ? '<button class="btn sm" id="tadd" style="margin-right:4px">新增帳號</button>' : '' });
   const pending = inv.length ? `<section>${sec('連結中')}<div class="list">${inv.map((i) => row({ act: 'inv', id: i.id, dot: i.status === 'accepted' ? 'ok' : 'gold', title: '@' + esc(i.username), sub: INVITE_STATE[i.status] })).join('')}</div></section>` : '';
-  setView(`${pending}${accts.length ? `<section>${inv.length ? sec('已連結') : ''}<div class="list">${accts.map((a) => row({ act: 'acct', id: a.id, dot: a.status === 'ok' ? (a.auto_post_enabled ? 'ok' : '') : 'bad', title: '@' + esc(a.username || a.id),
+  setView(`${pending}${accts.length ? `<section>${inv.length ? sec('已連結') : ''}${accts.length > 8 ? '<div class="f" style="margin:0 0 10px"><input id="tsq" placeholder="搜尋帳號" autocomplete="off" autocapitalize="none" aria-label="搜尋帳號"></div>' : ''}<div class="list" id="tsl">${accts.map((a) => row({ act: 'acct', id: a.id, dot: a.status === 'ok' ? (a.auto_post_enabled ? 'ok' : '') : 'bad', title: '@' + esc(a.username || a.id),
       sub: a.status !== 'ok' ? '授權已失效，請重新連結' : `${esc(a.persona ? a.persona.slice(0, 24) : '未設定人設')}${a.auto_post_enabled ? '' : ' · 自動發文已暫停'}` })).join('')}</div>
     <p class="t-sub" style="margin-top:12px">每個帳號可以設定自己的人設、語氣與發文時段；沒設定的項目沿用「發文設定」的預設值。多個帳號共用預設時段時，系統會自動錯開 20 分鐘。</p>
     <div class="actions" style="margin-top:12px"><button class="btn sec" id="tt">測試所有帳號</button></div></section>`
@@ -640,6 +679,7 @@ async function threadsPage() {
   const start = (e) => addTo ? go('settings/threads/new') : act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
   $('#tc')?.addEventListener('click', start); $('#tadd')?.addEventListener('click', start);
   $$('[data-act=inv]').forEach((b) => b.onclick = () => go('settings/threads/new'));
+  $('#tsq')?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase().replace(/^@/, ''); $$('#tsl [data-act=acct]').forEach((r) => { r.classList.toggle('hide', !!q && !r.textContent.toLowerCase().includes(q)); }); });
   $$('[data-act=acct]').forEach((b) => b.onclick = () => go('settings/threads/' + b.dataset.id));
   $('#tt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
 }

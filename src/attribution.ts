@@ -10,6 +10,8 @@ export interface Traffic {
   /** legacy：人數統計上線前的貼文，只有點擊次數（以次數計算點擊率） */
   posts: (PostRow & { ctr: number | null; est_friends: number | null; legacy: boolean })[];
   by_account: Group[]; by_slot: Group[];
+  /** 這批貼文推估帶來的新好友合計（用於只看單一帳號時的「新好友」） */
+  est_total: number | null;
   other_friends: number; attributed_friends: number; unique_since: string | null;
 }
 export interface Group { key: string; posts: number; views: number; uniques: number; ctr: number | null; est_friends: number | null }
@@ -72,6 +74,7 @@ export function buildTraffic(
     posts: ranked.slice(0, 10),
     by_account: group((p) => (p.username ? '@' + p.username : '預設帳號')),
     by_slot: group((p) => slotOf(p.published_at, timezone)),
+    est_total: hasFriends ? round1(rows.reduce((a, p) => a + (est.get(p.id) ?? 0), 0)) : null,
     other_friends: other, attributed_friends: attributed, unique_since: firstDay,
   };
 }
