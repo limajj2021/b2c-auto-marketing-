@@ -261,6 +261,33 @@ async function shareOrCopy(url, text) {
   try { await navigator.clipboard.writeText(url); toast('連結已複製，貼到 LINE 或訊息傳給對方', 'ok'); return 'copy'; } catch { /* 繼續 */ }
   sheet('授權連結', `<p class="t-sub" style="margin-bottom:8px">長按下面的連結複製，傳給對方：</p><textarea readonly style="min-height:96px">${esc(url)}</textarea>`); return 'none';
 }
+/** 在無痕分頁授權：網頁不能自己開無痕分頁，所以給「直達授權」的連結 + 最少步驟，原本的分頁自動偵測連結完成 */
+let privWatch = null;
+async function privateAuth(un) {
+  const r = await api('POST', '/threads/connect-link', un ? { username: un } : {});
+  const url = r.url + '&go=1', who = un ? '@' + esc(un) : '要連結的帳號';
+  const before = new Set((ACCTS || []).map((a) => (a.username || '').toLowerCase()));
+  let copied = false; try { await navigator.clipboard.writeText(url); copied = true; } catch { /* 下面還有手動複製 */ }
+  const closeSh = sheet('在無痕分頁授權', `<p class="t-sub" style="margin-bottom:12px">無痕分頁沒有登入任何 Threads 帳號，可以用 ${who} 登入授權，不會被手機上其他帳號干擾。${copied ? '<b>連結已複製。</b>' : ''}</p>
+    <ol class="t-sub" style="margin:0 0 14px 18px;line-height:1.9"><li>Safari 按右下角「分頁」→ 切到「無痕」→ 按「＋」</li><li>網址列<b>貼上並前往</b></li><li>用 ${who} 登入 Threads，按「Continue」</li><li>回到這個分頁，帳號會自動出現</li></ol>
+    <div class="actions"><button class="btn" id="pvc">${copied ? '再複製一次' : '複製連結'}</button><a class="btn sec" style="text-decoration:none" href="firefox-focus://open-url?url=${encodeURIComponent(url)}">用 Firefox Focus 開</a></div>
+    <p class="t-sub" style="margin-top:12px">用 Chrome 的話：長按 <a href="${esc(url)}" rel="noreferrer">這個連結</a> →「在無痕分頁中開啟」。Firefox Focus 本身就是無痕瀏覽器，有安裝的話一鍵即可。連結 ${r.days} 天內有效。</p>
+    <p class="t-sub" style="margin-top:12px;color:var(--text3)">● 等待授權完成…</p>`);
+  $('#pvc').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('已複製', 'ok'); } catch { toast('無法自動複製，請長按連結', 'bad'); } };
+  // 原分頁每 3 秒檢查一次，偵測到新帳號就自動更新（最多 15 分鐘）
+  clearInterval(privWatch); const t0 = Date.now();
+  const isNew = (a) => { const n = (a.username || '').toLowerCase(); return !before.has(n) && (!un || n === un.toLowerCase()); };
+  const check = async () => {
+    if (Date.now() - t0 > 15 * 60000) return clearInterval(privWatch);
+    if (document.hidden) return;
+    const ig = await fetch('/api/integrations', { headers: { 'x-requested-with': 'admin-ui' } }).then((x) => x.ok ? x.json() : null).catch(() => null);
+    const got = ig && (ig.threads.accounts || []).find(isNew);
+    if (!got) return;
+    clearInterval(privWatch); closeSh(); toast(`@${got.username} 已連結`, 'ok'); go('settings/threads/' + got.id);
+  };
+  privWatch = setInterval(check, 3000);
+  document.addEventListener('visibilitychange', check, { once: true });
+}
 /** 切換品牌（同一位客戶有多個品牌時）：每個品牌的資料完全獨立，切換等於換一個工作區 */
 async function openBrandSwitch() {
   if (!(await leaveOk())) return;
@@ -699,7 +726,7 @@ async function threadsPage() {
   setView(`${pending}${accts.length ? `<section>${inv.length ? sec('已連結') : ''}${accts.length > 8 ? '<div class="f" style="margin:0 0 10px"><input id="tsq" placeholder="搜尋帳號" autocomplete="off" autocapitalize="none" aria-label="搜尋帳號"></div>' : ''}<div class="list" id="tsl">${accts.map((a) => row({ act: 'acct', id: a.id, dot: a.status === 'ok' ? (a.auto_post_enabled ? 'ok' : '') : 'bad', title: '@' + esc(a.username || a.id),
       sub: a.status !== 'ok' ? '授權已失效，請重新連結' : `${esc(a.persona ? a.persona.slice(0, 24) : '未設定人設')}${a.auto_post_enabled ? '' : ' · 自動發文已暫停'}` })).join('')}</div>
     <p class="t-sub" style="margin-top:12px">每個帳號可以設定自己的人設、語氣與發文時段；沒設定的項目沿用「發文設定」的預設值。多個帳號共用預設時段時，系統會自動錯開 20 分鐘。</p>
-    <div class="actions" style="margin-top:12px"><button class="btn sec" id="tt">測試所有帳號</button></div></section>`
+    <div class="actions" style="margin-top:12px"><button class="btn sec" id="tt">測試所有帳號</button>${t.oauth_available && !t.requires_invite ? '<button class="btn sec" id="tpv">用無痕分頁連結其他帳號</button>' : ''}</div></section>`
     : `<p class="mut">連結後即可自動發文。可以連結多個帳號，各自設定人設，經營帳號矩陣。</p>${t.oauth_available ? '' : '<div class="note warn" style="margin-top:12px">系統尚未設定 Threads App，請聯絡服務商。</div>'}
       <button class="btn block" id="tc" style="margin-top:16px" ${t.oauth_available ? '' : 'disabled'}>連結 Threads 帳號</button><button class="link" data-go="help">遇到問題？查看說明</button>`}`);
   const start = (e) => addTo ? go('settings/threads/new') : act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect')).url; });
@@ -708,6 +735,7 @@ async function threadsPage() {
   $('#tsq')?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase().replace(/^@/, ''); $$('#tsl [data-act=acct]').forEach((r) => { r.classList.toggle('hide', !!q && !r.textContent.toLowerCase().includes(q)); }); });
   $$('[data-act=acct]').forEach((b) => b.onclick = () => go('settings/threads/' + b.dataset.id));
   $('#tt')?.addEventListener('click', (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads' }); toast(r.message, r.ok ? 'ok' : 'bad'); }));
+  $('#tpv')?.addEventListener('click', (e) => act(e.currentTarget, () => privateAuth('')));
 }
 /** 連結 Threads：觸發 → 同意 → 授權。每一步都標示現在輪到誰、要做什麼。 */
 async function threadsConnectPage() {
@@ -722,10 +750,10 @@ async function threadsConnectPage() {
       : s === 'invited' ? step(2, 'now', '在 Threads 同意邀請', `用 <b>@${u}</b> 登入 Threads，到「設定 → 帳號 → 網站權限 → 邀請」，找到邀請按「接受」。`,
           `<div class="actions" style="margin-top:10px"><a class="btn sec sm" href="https://www.threads.com/" target="_blank" rel="noopener" style="text-decoration:none">開啟 Threads ↗</a></div>
           <div class="note" style="margin-top:10px">接受後按下面的按鈕，會直接帶你去授權。授權頁會使用這個瀏覽器／Threads App 目前登入的帳號，請先確認是 <b>@${u}</b>；不是的話授權會被系統擋下。</div>
-          <div class="actions" style="margin-top:10px"><button class="btn" data-acc="${i.id}" data-go-auth="1">我已接受，前往授權</button></div>`)
+          <div class="actions" style="margin-top:10px"><button class="btn" data-acc="${i.id}" data-go-auth="1">我已接受，前往授權</button><button class="btn sec" data-accpriv="${i.id}" data-un="${u}">我已接受，用無痕分頁授權</button></div>`)
       : step(2, 'done', '在 Threads 同意邀請', '已接受。');
-    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `按下面的按鈕，在 Threads 頁面按「Continue」就完成。<details style="margin-top:6px"><summary style="cursor:pointer">授權頁顯示的不是 @${u}？</summary>授權頁用的是這個瀏覽器目前登入的 Threads 帳號。如果手機登入了好幾個帳號，請按「取消」，改按「傳給對方授權」，或用無痕分頁開啟後再用 @${u} 登入。</details>`,
-          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button><button class="btn sec" data-authcopy="${i.id}" data-un="${u}">傳給對方授權</button></div>`)
+    const s3 = s === 'accepted' ? step(3, 'now', '授權連結', `按下面的按鈕，在 Threads 頁面按「Continue」就完成。<details style="margin-top:6px"><summary style="cursor:pointer">授權頁顯示的不是 @${u}？</summary>授權頁用的是這個瀏覽器目前登入的 Threads 帳號。手機登入了好幾個帳號時，按「取消」，改按「用無痕分頁授權」。</details>`,
+          `${started ? '<div class="note warn" style="margin-top:10px">上次授權好像沒有完成。最常見的原因：瀏覽器登入的不是這個 Threads 帳號，或還沒接受邀請。確認後再試一次。</div>' : ''}<div class="actions" style="margin-top:10px"><button class="btn" data-auth="${i.id}">授權並連結 @${u}</button><button class="btn sec" data-priv="${u}">用無痕分頁授權</button></div><button class="link" data-authcopy="${i.id}" data-un="${u}">帳號不是你的？傳給對方授權</button>`)
       : step(3, 'wait', '授權連結', '完成上一步後就能授權。');
     return `<section>${sec('@' + u, `<button class="link" data-cancel="${i.id}">取消</button>`)}<div class="list">${s1}${s2}${s3}</div></section>`;
   };
@@ -755,12 +783,14 @@ async function threadsConnectPage() {
     await api('POST', `/threads/invites/${b.dataset.acc}/accepted`);
     location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.acc)).url;
   }));
+  $$('[data-accpriv]').forEach((b) => b.onclick = () => act(b, async () => { await api('POST', `/threads/invites/${b.dataset.accpriv}/accepted`); await privateAuth(b.dataset.un); }));
   $$('[data-cancel]').forEach((b) => b.onclick = async () => { if (!(await confirmSheet('取消這個帳號的連結申請？', '取消申請'))) return; await act(b, () => api('DELETE', '/threads/invites/' + b.dataset.cancel)); render(); });
   $$('[data-authcopy]').forEach((b) => b.onclick = () => act(b, async () => {
     const r = await api('POST', '/threads/connect-link', { username: b.dataset.un });
     await shareOrCopy(r.url, `請點開這個連結授權 Threads 帳號 @${b.dataset.un}（${r.days} 天內有效）`);
   }));
   $$('[data-auth]').forEach((b) => b.onclick = () => act(b, async () => { location.href = (await api('GET', '/integrations/threads/connect?invite=' + b.dataset.auth)).url; }));
+  $$('[data-priv]').forEach((b) => b.onclick = () => act(b, () => privateAuth(b.dataset.priv)));
 }
 async function threadsAccountPage(id) {
   const [ig, st] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings')]); TZ = st.brand.timezone;

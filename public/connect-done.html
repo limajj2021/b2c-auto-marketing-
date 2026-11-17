@@ -19,10 +19,11 @@
 const q = new URLSearchParams(location.search), $ = (id) => document.getElementById(id);
 if (q.get('ok')) {
   $('mk').textContent = '✓'; $('ttl').textContent = '已完成連結';
-  $('msg').textContent = `${q.get('u') ? '@' + q.get('u') + ' ' : ''}已經連結到${q.get('b') ? '「' + q.get('b') + '」' : '品牌'}。你可以關閉這個頁面了。`;
+  $('msg').textContent = `${q.get('u') ? '@' + q.get('u') + ' ' : ''}已經連結到${q.get('b') ? '「' + q.get('b') + '」' : '品牌'}。可以關閉這個分頁，回到後台，帳號會自動出現。`;
 } else {
   $('mk').textContent = '!'; $('ttl').textContent = '還沒有完成';
-  $('msg').textContent = (q.get('err') || '授權沒有完成') + ' 請再點一次剛剛收到的連結。';
+  const e = q.get('err') || '授權沒有完成';
+  $('msg').textContent = e + (/你授權的是/.test(e) ? ' 請在這個分頁打開 threads.com 登出，改用正確的帳號登入後，再貼一次連結。' : ' 請再點一次剛剛收到的連結。');
 }
 </script>
 </body>
