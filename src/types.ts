@@ -1,6 +1,8 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /** 電子書閱讀器：LIFF 所屬 LINE Login channel 的 Channel ID；空白代表不開放 */
+  EBOOK_LIFF_CHANNEL?: string;
   // Secrets（以 wrangler secret 保存，不得出現在前端或日誌）
   SESSION_SECRET: string;
   LINE_CHANNEL_SECRET: string;

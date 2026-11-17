@@ -77,11 +77,12 @@ THREADS_APP_MODE = "${cfg.threadsAppMode ?? 'development'}"
 MULTI_TENANT = "${cfg.multiTenant ? '1' : ''}"
 PUBLIC_BASE_URL = "${cfg.publicBaseUrl ?? ''}"
 CRON_SUBREQUEST_LIMIT = "${cfg.cronSubrequestLimit ?? ''}"
+EBOOK_LIFF_CHANNEL = "${cfg.ebookLiffChannel ?? ''}"
 
 [assets]
 directory = "../public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/line/*", "/threads/*"]
+run_worker_first = ["/api/*", "/line/*", "/threads/*", "/ebook/*"]
 
 [observability]
 enabled = true
