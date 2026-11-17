@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>線上顧問諮詢</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .wrap { max-width: 520px; margin: 0 auto; padding: 24px 16px 120px; }
+  .q { margin-top: 24px; }
+  .q .t-label { margin-bottom: 10px; display: block; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .opts .chip { min-height: 44px; }
+  textarea { width: 100%; min-height: 96px; }
+  .sendbar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); }
+  .sendbar .btn { width: 100%; max-width: 520px; display: block; margin: 0 auto; }
+  .done { text-align: center; padding-top: 80px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><p class="t-sub">載入中…</p></div>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js" charset="utf-8"></script>
+<script>
+'use strict';
+// 顧問諮詢需求確認：不收集個資，只把顧客的選擇整理成一則訊息，送到官方帳號聊天室，由顧問直接回覆。
+// 在 LINE 內（LIFF）直接代顧客送出並關閉頁面；不在 LINE 內時改用「開啟聊天室並帶入文字」的連結。
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let cfg, inLiff = false;
+const picked = { lines: new Set(), stage: '' };
+
+function render() {
+  $('#app').innerHTML = `<h1 class="t-page">${esc(cfg.title)}</h1>
+    <p class="t-sub" style="margin-top:8px">${esc(cfg.intro)}</p>
+    <div class="q"><span class="t-label">1. 你想了解哪個方向？（可複選）</span><div class="opts" id="ql">${cfg.lines.map((l, i) => `<button type="button" class="chip" data-l="${i}" aria-pressed="false">${esc(l)}</button>`).join('')}</div></div>
+    <div class="q"><span class="t-label">2. 目前最想解決的問題？（選填）</span><textarea id="qp" maxlength="300" placeholder="例如：沒時間經營社群、詢問很多但成交少…"></textarea></div>
+    <div class="q"><span class="t-label">3. 希望多快開始？</span><div class="opts" id="qs">${cfg.stages.map((s, i) => `<button type="button" class="chip" data-s="${i}" aria-pressed="false">${esc(s)}</button>`).join('')}</div></div>
+    <div class="sendbar"><button class="btn" id="go">送出，請顧問回覆我</button></div>`;
+  $$('#ql [data-l]').forEach((b) => b.onclick = () => { const v = cfg.lines[+b.dataset.l]; picked.lines.has(v) ? picked.lines.delete(v) : picked.lines.add(v); b.setAttribute('aria-pressed', picked.lines.has(v)); });
+  $$('#qs [data-s]').forEach((b) => b.onclick = () => { picked.stage = cfg.stages[+b.dataset.s]; $$('#qs [data-s]').forEach((x) => x.setAttribute('aria-pressed', x === b)); });
+  $('#go').onclick = send;
+}
+
+function message() {
+  const p = $('#qp').value.trim();
+  return ['【顧問諮詢需求】', `想了解：${[...picked.lines].join('、') || '還不確定'}`, p ? `想解決：${p}` : '', `時程：${picked.stage || '未選'}`].filter(Boolean).join('\n');
+}
+
+async function send() {
+  if (!picked.lines.size) { $('#ql').scrollIntoView({ block: 'center', behavior: 'smooth' }); $('#ql').animate([{ transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'none' }], 240); return; }
+  const text = message(), btn = $('#go'); btn.disabled = true;
+  if (inLiff) {
+    try {
+      await liff.sendMessages([{ type: 'text', text }]);
+      $('#app').innerHTML = '<div class="done"><div class="mark" style="margin:0 auto 16px">✓</div><h1 class="t-page">已送出</h1><p class="t-sub" style="margin-top:8px">顧問會在聊天室回覆你。</p></div>';
+      setTimeout(() => liff.closeWindow(), 1200); return;
+    } catch { /* 沒有送訊息權限時改用下面的連結 */ }
+  }
+  location.href = `https://line.me/R/oaMessage/${encodeURIComponent(cfg.oa)}/?${encodeURIComponent(text)}`;
+}
+
+(async () => {
+  try { cfg = await (await fetch('/liff/consult.json', { cache: 'no-store' })).json(); }
+  catch { $('#app').innerHTML = '<p class="t-sub">載入失敗，請重新開啟。</p>'; return; }
+  if (cfg.liffId && window.liff) {
+    try { await liff.init({ liffId: cfg.liffId }); inLiff = liff.isInClient(); } catch { inLiff = false; }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
