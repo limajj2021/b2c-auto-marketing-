@@ -64,7 +64,9 @@
   function parseList(v) {
     var seen = {}, out = [];
     // 先整行判斷是不是範本提示，再用逗號、頓號等拆開（否則提示文字會被拆碎而認不出來）
-    String(v).split('\n').filter(function (l) { return !isPlaceholder(l); }).join('\n').split(/[\n,，、;；]+/).forEach(function (raw) {
+    // 一行一項時只按行拆（項目本身可能含「、」，例如「手動、半自動與全自動發文」）；只有一行時才用標點拆
+    var lines = String(v).split('\n').filter(function (l) { return l.trim() && !isPlaceholder(l); });
+    (lines.length > 1 ? lines : lines.join('').split(/[,，、;；]+/)).forEach(function (raw) {
       var x = unquote(stripBullet(raw));
       if (!x || EMPTY.test(x) || isPlaceholder(x) || UNSURE.test(x)) return;
       x = x.slice(0, 100);

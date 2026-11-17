@@ -72,6 +72,12 @@ describe('parsing the AI output', () => {
     expect(r.skipped.map((s: any) => s.key)).toEqual(['banned', 'facts']);
   });
 
+  it('keeps one-item-per-line topics whole even when they contain 、 or ，', () => {
+    const r = BrandKit.parse('=== 品牌資料包 ===\n[內容主題]\n手動、半自動與全自動發文的使用情境\n怎麼分辨貼文瀏覽、連結點擊與實際 LINE 詢問\n=== 結束 ===');
+    expect(r.fields.topics).toEqual(['手動、半自動與全自動發文的使用情境', '怎麼分辨貼文瀏覽、連結點擊與實際 LINE 詢問']);
+    expect(BrandKit.parse('=== 品牌資料包 ===\n[內容主題]\n咖啡豆、沖煮、門市\n=== 結束 ===').fields.topics).toEqual(['咖啡豆', '沖煮', '門市']);
+  });
+
   it('ignores the untouched template (placeholders) and unrelated text', () => {
     expect(BrandKit.parse(BrandKit.FORMAT).found).toEqual([]);
     expect(BrandKit.parse('我不知道要貼什麼').found).toEqual([]);
