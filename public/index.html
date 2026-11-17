@@ -272,6 +272,7 @@ async function privateAuth(un) {
     <ol class="t-sub" style="margin:0 0 14px 18px;line-height:1.9"><li>Safari 按右下角「分頁」→ 切到「無痕」→ 按「＋」</li><li>網址列<b>貼上並前往</b></li><li>用 ${who} 登入 Threads，按「Continue」</li><li>回到這個分頁，帳號會自動出現</li></ol>
     <div class="actions"><button class="btn" id="pvc">${copied ? '再複製一次' : '複製連結'}</button><a class="btn sec" style="text-decoration:none" href="firefox-focus://open-url?url=${encodeURIComponent(url)}">用 Firefox Focus 開</a></div>
     <p class="t-sub" style="margin-top:12px">用 Chrome 的話：長按 <a href="${esc(url)}" rel="noreferrer">這個連結</a> →「在無痕分頁中開啟」。Firefox Focus 本身就是無痕瀏覽器，有安裝的話一鍵即可。連結 ${r.days} 天內有效。</p>
+    <details class="note" style="margin-top:12px"><summary style="cursor:pointer">看到「has not accepted the invite」錯誤？</summary>代表 ${who} 還沒接受測試邀請。在<b>同一個無痕分頁</b>（已經用 ${who} 登入）打開 threads.com →「設定」→「帳號」→「網站權限」→「邀請」→ 按「接受」，再把連結貼一次。找不到邀請的話，請服務商確認 Meta 後台已經把 ${who} 加為 Threads 測試人員。</details>
     <p class="t-sub" style="margin-top:12px;color:var(--text3)">● 等待授權完成…</p>`);
   $('#pvc').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('已複製', 'ok'); } catch { toast('無法自動複製，請長按連結', 'bad'); } };
   // 原分頁每 3 秒檢查一次，偵測到新帳號就自動更新（最多 15 分鐘）
