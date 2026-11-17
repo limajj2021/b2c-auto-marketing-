@@ -694,7 +694,7 @@ async function settingsPage(r) {
   if (r.sub === 'threads' && r.arg === 'new') return threadsConnectPage();
   if (r.sub === 'brand' && r.arg === 'ai') return brandAiPage();
   if (r.sub === 'threads' && r.arg) return threadsAccountPage(+r.arg);
-  const sub = { threads: threadsPage, line: lineConnPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage, logs: logsPage }[r.sub];
+  const sub = { threads: threadsPage, line: lineConnPage, linemenu: lineMenuPage, gemini: geminiPage, brand: brandPage, users: usersPage, password: passwordPage, audit: auditPage, logs: logsPage }[r.sub];
   if (sub) return sub();
   const [ig, st, d] = await Promise.all([api('GET', '/integrations'), api('GET', '/settings'), api('GET', '/dashboard')]);
   TZ = st.brand.timezone; bar({ title: '設定' });
@@ -860,7 +860,9 @@ async function lineConnPage() {
         <div class="t-sub" id="lineurl" style="word-break:break-all;margin-top:8px">${st.settings.line_add_url ? `貼文會使用：<code>${esc(st.settings.line_add_url)}</code>（發布時自動換成追蹤短連結，統計點擊次數）` : ''}</div>
         <div class="actions" style="margin-top:14px"><button class="btn" id="lidsave">儲存</button>${st.settings.line_add_url ? `<a class="btn sec" href="${esc(st.settings.line_add_url)}" target="_blank" rel="noopener" style="text-decoration:none">測試加好友 ↗</a>` : ''}</div>
       </div>
-      <p class="t-sub" style="margin-top:8px">只要這一步就能導流與統計點擊。自動回應、歡迎訊息、圖文選單請直接在 LINE 官方帳號後台設定，系統不會干擾。</p></section>
+      <p class="t-sub" style="margin-top:8px">只要這一步就能導流與統計點擊。自動回應、歡迎訊息請直接在 LINE 官方帳號後台設定，系統不會干擾。</p></section>
+
+    <section style="margin-top:28px">${sec('圖文選單')}<div class="list">${row({ act: 'rm', title: '設計並發布圖文選單', sub: l.configured ? '選版型、填按鈕，手機上就能完成' : '需要先完成下方「連接 LINE 數據」' })}</div></section>
 
     <section style="margin-top:28px">${sec('連接 LINE 數據（選用）')}
       ${l.configured ? `<div class="list">${row({ go: false, dot: 'ok', title: esc(l.name || '已連接'), sub: `${l.basic_id ? esc(l.basic_id) + ' · ' : ''}${addon ? '自動接待運作中' : '每天讀取新好友數，不回覆訊息'}` })}</div>
@@ -878,6 +880,7 @@ async function lineConnPage() {
       </div></section>` : ''}
     <button class="link" id="lhelp">完整圖文說明</button></div>`, 'form');
   $('#lhelp').onclick = () => { S.helpOpen = 'line'; go('help'); };
+  $('[data-act=rm]').onclick = () => go('settings/linemenu');
 
   // LINE ID → 加好友連結
   const showUrl = () => { const id = normBasicId($('#lineid').value); $('#lineurl').innerHTML = id ? `貼文會使用：<code>https://line.me/R/ti/p/${esc(id)}</code>（發布時自動換成追蹤短連結，統計點擊次數）` : ''; };
@@ -921,6 +924,81 @@ async function lineConnPage() {
     const r = await api('POST', '/integrations/line/webhook');
     toast(r.webhook_verified ? '自動接待 Webhook 已設定並驗證通過' : 'Webhook 已設定但測試未通過：請到 LINE Developers 的 Messaging API 分頁開啟 Use webhook', r.webhook_verified ? 'ok' : 'bad');
   }));
+}
+/* ---------- LINE 圖文選單：在瀏覽器畫圖，一鍵發布到 LINE ---------- */
+const RM_LAYOUTS = { l6: { h: 1686, c: 3, r: 2, t: '6 格' }, l4: { h: 1686, c: 2, r: 2, t: '4 格' }, l3: { h: 843, c: 3, r: 1, t: '3 格（矮）' }, l2: { h: 843, c: 2, r: 1, t: '2 格（矮）' } };
+const RM_THEMES = { ink: ['#1c1c1e', '#ffffff', '深色'], line: ['#06c755', '#ffffff', 'LINE 綠'], navy: ['#1f3a5f', '#ffffff', '藏青'], sand: ['#f4efe6', '#2b2b2b', '米白'], gold: ['#a8834f', '#ffffff', '金棕'] };
+function rmDraw(cv, st) {
+  const L = RM_LAYOUTS[st.layout], W = 2500, H = L.h; cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'), cw = Math.floor(W / L.c), ch = Math.floor(H / L.r);
+  if (st.img) { const s = Math.max(W / st.img.width, H / st.img.height); g.drawImage(st.img, (W - st.img.width * s) / 2, (H - st.img.height * s) / 2, st.img.width * s, st.img.height * s); return; }
+  g.fillStyle = st.bg; g.fillRect(0, 0, W, H);
+  g.strokeStyle = st.fg; g.globalAlpha = 0.28; g.lineWidth = 4;
+  for (let c = 1; c < L.c; c++) { g.beginPath(); g.moveTo(c * cw, 60); g.lineTo(c * cw, H - 60); g.stroke(); }
+  for (let r = 1; r < L.r; r++) { g.beginPath(); g.moveTo(60, r * ch); g.lineTo(W - 60, r * ch); g.stroke(); }
+  g.globalAlpha = 1; g.fillStyle = st.fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  st.areas.forEach((a, i) => {
+    const x = (i % L.c) * cw + cw / 2, y = Math.floor(i / L.c) * ch + ch / 2, t = a.label || '';
+    const size = Math.min(ch * 0.22, (cw * 0.8) / Math.max(t.length, 1));
+    g.font = `600 ${Math.round(size)}px -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif`;
+    g.fillText(t, x, y);
+  });
+}
+async function rmExport(cv) {
+  for (const q of [0.9, 0.8, 0.65, 0.5]) {
+    const blob = await new Promise((res) => cv.toBlob(res, 'image/jpeg', q));
+    if (blob && blob.size < 1000000) return await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+  }
+  throw new Error('圖片太大，請換一張較簡單的圖片');
+}
+async function lineMenuPage() {
+  const [m, ig] = await Promise.all([api('GET', '/line/richmenu'), api('GET', '/integrations')]);
+  bar({ title: '圖文選單', back: 'settings/line' });
+  if (!m.connected) return setView(`<div class="page">${empty('line', '先連接 LINE', '圖文選單需要先在「LINE 官方帳號」頁完成「連接 LINE 數據」（貼上 Channel ID 與 Channel secret）。', '<button class="btn" data-go="settings/line">前往連接</button>')}</div>`);
+  const th = (ig.threads.accounts || [])[0]?.username;
+  const pool = [['了解服務', 'text', '了解服務'], ['預約諮詢', 'text', '預約諮詢'], ['常見問題', 'text', '常見問題'], th ? ['最新動態', 'url', 'https://www.threads.com/@' + th] : ['最新動態', 'text', '最新動態'], ['優惠活動', 'text', '優惠活動'], ['聯絡我們', 'text', '聯絡我們']];
+  const c = m.config;
+  const st = { layout: c?.layout || 'l6', bg: c?.style?.bg || RM_THEMES.ink[0], fg: c?.style?.fg || RM_THEMES.ink[1], theme: c?.style?.theme || 'ink', chat: c?.chatBarText || '選單', img: null,
+    areas: (c?.areas || []).map((a) => ({ ...a })) };
+  const fit = () => { const n = RM_LAYOUTS[st.layout].c * RM_LAYOUTS[st.layout].r; while (st.areas.length < n) { const p = pool[st.areas.length] || ['按鈕', 'text', '按鈕']; st.areas.push({ label: p[0], type: p[1], value: p[2] }); } };
+  fit();
+  const areaRows = () => st.areas.slice(0, RM_LAYOUTS[st.layout].c * RM_LAYOUTS[st.layout].r).map((a, i) => `<div class="list" style="padding:10px 14px 12px;margin-top:10px" data-i="${i}">
+      <div class="t-label" style="margin-bottom:6px">按鈕 ${i + 1}</div>
+      <input data-k="label" value="${esc(a.label)}" maxlength="20" placeholder="按鈕名稱（圖上顯示的字）" aria-label="按鈕 ${i + 1} 名稱">
+      <div class="two" style="margin-top:8px"><select data-k="type" aria-label="按鈕 ${i + 1} 動作"><option value="text" ${a.type === 'text' ? 'selected' : ''}>傳送文字</option><option value="url" ${a.type === 'url' ? 'selected' : ''}>開啟網址</option></select>
+      <input data-k="value" value="${esc(a.value)}" placeholder="${a.type === 'url' ? 'https://…' : '顧客按下後送出的文字'}" autocapitalize="none" aria-label="按鈕 ${i + 1} 內容"></div></div>`).join('');
+  setView(`<div data-form>
+    ${m.active ? `<div class="note" style="margin-bottom:16px"><b>✓ 圖文選單使用中</b>　所有好友都會看到。修改後按「發布」就會更新。</div>` : m.other_default ? '<div class="note warn" style="margin-bottom:16px">目前有另一個由程式設定的選單，發布後會被這個取代。</div>' : ''}
+    <div style="border-radius:12px;overflow:hidden;border:1px solid var(--line)"><canvas id="rmc" style="width:100%;display:block"></canvas>
+      <div style="background:var(--surface2,#f2f2f2);text-align:center;padding:8px;font-size:13px" id="rmbar">${esc(st.chat)} ▾</div></div>
+    <p class="t-sub" style="margin-top:6px">上方是好友在 LINE 聊天室下方看到的樣子。</p>
+    <section style="margin-top:20px">${sec('版型')}<div class="chips" id="rml" style="flex-wrap:wrap;overflow:visible">${Object.entries(RM_LAYOUTS).map(([k, v]) => `<button class="chip" data-l="${k}" aria-pressed="${st.layout === k}">${v.t}</button>`).join('')}</div></section>
+    <section style="margin-top:20px">${sec('樣式')}<div class="chips" id="rmt" style="flex-wrap:wrap;overflow:visible">${Object.entries(RM_THEMES).map(([k, v]) => `<button class="chip" data-t="${k}" aria-pressed="${!st.img && st.theme === k}"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${v[0]};border:1px solid var(--line);vertical-align:-1px;margin-right:6px"></span>${v[2]}</button>`).join('')}
+      <label class="chip" style="cursor:pointer;display:inline-flex;align-items:center">上傳自己的圖<input type="file" id="rmf" accept="image/*" hidden></label></div>
+      <p class="t-sub" style="margin-top:6px" id="rmimg">${c?.customImage ? '上次使用自己的圖片；要沿用請重新上傳同一張。' : '自己的圖會自動裁成 2500×' + RM_LAYOUTS[st.layout].h + '，按鈕區域照版型平均切分。'}</p></section>
+    <section style="margin-top:20px">${sec('按鈕')}<div id="rma">${areaRows()}</div>
+      <p class="t-sub" style="margin-top:8px">「傳送文字」會讓顧客送出那段文字，可以搭配 LINE 官方帳號後台的「自動回應」關鍵字回覆內容。</p></section>
+    ${field('rmch', '聊天室下方的選單列文字', input('rmch', st.chat, 'maxlength="14"'), '最多 14 個字。')}
+    <div class="savebar"><div class="in">${m.active ? '<button class="btn sec" id="rmdel">移除</button>' : ''}<button class="btn grow" id="rmpub">發布到 LINE</button></div></div></div>`, 'form');
+  const cv = $('#rmc'); const draw = () => rmDraw(cv, st); draw();
+  const bindAreas = () => $$('#rma [data-i]').forEach((box) => { const a = st.areas[+box.dataset.i];
+    $$('[data-k]', box).forEach((el) => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => { a[el.dataset.k] = el.value; if (el.dataset.k === 'type') { $('[data-k=value]', box).placeholder = el.value === 'url' ? 'https://…' : '顧客按下後送出的文字'; } draw(); })); });
+  bindAreas();
+  $$('#rml [data-l]').forEach((b) => b.onclick = () => { st.layout = b.dataset.l; fit(); $$('#rml [data-l]').forEach((x) => x.setAttribute('aria-pressed', x === b)); $('#rma').innerHTML = areaRows(); bindAreas(); if (!st.img) $('#rmimg').textContent = '自己的圖會自動裁成 2500×' + RM_LAYOUTS[st.layout].h + '，按鈕區域照版型平均切分。'; draw(); });
+  $$('#rmt [data-t]').forEach((b) => b.onclick = () => { const t = RM_THEMES[b.dataset.t]; st.theme = b.dataset.t; st.bg = t[0]; st.fg = t[1]; st.img = null; $$('#rmt [data-t]').forEach((x) => x.setAttribute('aria-pressed', x === b)); draw(); });
+  $('#rmf').onchange = (e) => { const f = e.target.files[0]; if (!f) return; const im = new Image(); im.onload = () => { st.img = im; $$('#rmt [data-t]').forEach((x) => x.setAttribute('aria-pressed', 'false')); $('#rmimg').textContent = '使用自己的圖片。按鈕會照版型平均切分，請確認圖上的字落在對應的格子裡。'; draw(); }; im.src = URL.createObjectURL(f); };
+  $('#rmch').addEventListener('input', () => { $('#rmbar').textContent = ($('#rmch').value.trim() || '選單') + ' ▾'; });
+  $('#rmpub').onclick = (e) => {
+    const n = RM_LAYOUTS[st.layout].c * RM_LAYOUTS[st.layout].r, areas = st.areas.slice(0, n).map((a) => ({ ...a, label: a.label.trim(), value: a.value.trim() }));
+    const bad = areas.findIndex((a) => !a.label || !a.value || (a.type === 'url' && !/^(https?:\/\/\S+|tel:[0-9+\-]{3,20})$/i.test(a.value)));
+    if (bad >= 0) { const box = $(`#rma [data-i="${bad}"]`); box.scrollIntoView({ block: 'center', behavior: 'smooth' }); toast(`按鈕 ${bad + 1}：${!areas[bad].label ? '請填名稱' : areas[bad].type === 'url' ? '網址要以 https:// 開頭' : '請填要送出的文字'}`, 'bad'); return; }
+    act(e.currentTarget, async () => {
+      const image = await rmExport(cv);
+      await api('POST', '/line/richmenu', { layout: st.layout, chatBarText: $('#rmch').value.trim() || '選單', areas, style: { bg: st.bg, fg: st.fg, theme: st.theme }, customImage: !!st.img, image });
+      dirty = false; toast('圖文選單已發布，打開 LINE 聊天室就能看到', 'ok'); render();
+    });
+  };
+  $('#rmdel')?.addEventListener('click', async (e) => { if (!(await confirmSheet('移除圖文選單？好友會改看到 LINE 官方帳號後台設定的選單（如果有）。', '移除'))) return; act(e.currentTarget, async () => { await api('DELETE', '/line/richmenu'); render(); }, '已移除'); });
 }
 async function geminiPage() {
   const ig = await api('GET', '/integrations'), d = await api('GET', '/dashboard'); bar({ title: 'AI（Gemini）', back: 'settings' });

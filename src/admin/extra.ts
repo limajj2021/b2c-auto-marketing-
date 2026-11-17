@@ -4,6 +4,7 @@ import { normUsername, requestInvite } from '../threads/invites';
 import { LINK_DAYS, makeConnectLink } from '../threads/connectlink';
 import { SOURCES, logEvent } from '../log';
 import { lineAddUrl } from '../line/links';
+import { MenuError, currentDefault, decodeImage, normalize, publishMenu, removeMenu, type MenuConfig } from '../line/richmenu';
 import { audit, getBrand, getSettings, isMulti } from '../db';
 import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
@@ -114,6 +115,46 @@ export function registerExtra(add: Add, json: J, err: E) {
     await audit(env, brandId, actor.name, 'integration_line_webhook');
     await logEvent(env, brandId, wh.verified ? 'info' : 'warn', 'line_connect', wh.verified ? '自動接待 Webhook 已設定並驗證通過' : '自動接待 Webhook 設定未完成：請到 LINE Developers 開啟 Use webhook');
     return json({ ok: true, webhook_set: wh.set, webhook_verified: wh.verified });
+  });
+
+  // ---- LINE 圖文選單 ----
+  const loadMenu = async (env: Env, brandId: string): Promise<MenuConfig | null> => {
+    const r = await env.DB.prepare('SELECT rich_menu FROM brand_settings WHERE brand_id=?').bind(brandId).first<{ rich_menu: string }>();
+    try { const c = JSON.parse(r?.rich_menu || '{}'); return c && c.layout ? c : null; } catch { return null; }
+  };
+  const saveMenu = (env: Env, brandId: string, c: MenuConfig | null) =>
+    env.DB.prepare('UPDATE brand_settings SET rich_menu=? WHERE brand_id=?').bind(c ? JSON.stringify(c) : '{}', brandId).run();
+
+  add('GET', '/line/richmenu', 'admin', async ({ env, brandId }) => {
+    const cfg = await loadMenu(env, brandId);
+    const live = env.LINE_CHANNEL_ACCESS_TOKEN ? await currentDefault(env) : null;
+    return json({ connected: !!env.LINE_CHANNEL_ACCESS_TOKEN, config: cfg, active: !!(cfg?.id && live === cfg.id), other_default: !!live && live !== cfg?.id });
+  });
+  add('POST', '/line/richmenu', 'admin', async ({ env, req, actor, brandId }) => {
+    if (!env.LINE_CHANNEL_ACCESS_TOKEN) return err(409, '請先在「設定 → LINE 官方帳號」連接 LINE');
+    const b: any = await req.json().catch(() => ({}));
+    try {
+      const cfg = normalize(b), img = decodeImage(b.image);
+      const old = await loadMenu(env, brandId);
+      cfg.id = await publishMenu(env, cfg, img, old?.id); cfg.updated_at = iso();
+      await saveMenu(env, brandId, cfg);
+      await audit(env, brandId, actor.name, 'line_richmenu_publish');
+      await logEvent(env, brandId, 'info', 'line_connect', `${actor.name} 發布了 LINE 圖文選單（${cfg.areas.length} 格）`);
+      return json({ ok: true, id: cfg.id });
+    } catch (e) {
+      if (!(e instanceof MenuError)) throw e;
+      await logEvent(env, brandId, 'warn', 'line_connect', `發布 LINE 圖文選單失敗：${e.message}`);
+      return err(400, e.message);
+    }
+  });
+  add('DELETE', '/line/richmenu', 'admin', async ({ env, actor, brandId }) => {
+    if (!env.LINE_CHANNEL_ACCESS_TOKEN) return err(409, '請先連接 LINE');
+    const cfg = await loadMenu(env, brandId);
+    try { await removeMenu(env, cfg?.id); } catch (e) { if (e instanceof MenuError) return err(400, e.message); throw e; }
+    if (cfg) { delete cfg.id; await saveMenu(env, brandId, cfg); } // 保留設定，下次可直接再發布
+    await audit(env, brandId, actor.name, 'line_richmenu_remove');
+    await logEvent(env, brandId, 'info', 'line_connect', `${actor.name} 移除了 LINE 圖文選單`);
+    return json({ ok: true });
   });
 
   add('POST', '/integrations/gemini', 'admin', async ({ env, req, actor, brandId }) => {
