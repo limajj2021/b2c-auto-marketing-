@@ -1017,12 +1017,12 @@ async function brandAiPage() {
   const current = { name: b.name, description: b.description, services: s.services, audience: s.audience, tone: s.content_tone, topics: s.content_topics, banned: s.banned_words, style: s.style_preset, facts: s.fact_bank, cta: s.cta_text };
   const ps = BrandKit.prompts({ current, regulated: s.regulated });
   setView(`<div data-form>
-    <p class="t-sub">用你平常用的 AI（ChatGPT、Claude、Gemini 都可以），照順序貼上下面三段指令。<b>如果你之前就跟這個 AI 聊過你的品牌，它會先從對話紀錄整理，只問你還缺的。</b>聊完後把結果貼回這裡，系統自動分到各個欄位。</p>
+    <p class="t-sub">用你平常用的 AI（ChatGPT、Claude、Gemini 都可以），貼上下面這段指令就好。<b>如果你之前就跟這個 AI 聊過你的品牌，它會先從對話紀錄整理，只問你還缺的。</b>聊完後把它最後輸出的資料包貼回這裡，系統自動分到各個欄位。</p>
     ${ps.map((p, i) => `<section>${sec(p.title)}<div class="list" style="padding:12px 16px 16px"><p class="t-sub">${esc(p.purpose)}</p>
       <div class="actions" style="margin-top:10px"><button class="btn" data-cp="${i}">複製指令</button><button class="btn sec" data-sh="${i}">查看內容</button></div>
       <pre class="hide" id="pv${i}" style="white-space:pre-wrap;word-break:break-word;margin:12px 0 0;padding:12px;border-radius:var(--r);background:var(--bg2);font:inherit;font-size:13px;line-height:1.6;max-height:260px;overflow:auto">${esc(p.text)}</pre></div></section>`).join('')}
     <p class="t-sub">還沒有 AI 帳號？<a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT</a>、<a href="https://claude.ai" target="_blank" rel="noopener">Claude</a>、<a href="https://gemini.google.com" target="_blank" rel="noopener">Gemini</a> 都有免費版。你和 AI 的對話只在你和它之間，我們看不到；貼回來的只有品牌資料。請不要在對話裡放客戶個資或密碼。</p>
-    <section style="margin-top:28px">${sec('④ 把 AI 整理好的結果貼回來')}<div class="list" style="padding:12px 16px 16px">
+    <section style="margin-top:28px">${sec('把 AI 整理好的結果貼回來')}<div class="list" style="padding:12px 16px 16px">
       ${area('bpaste', '', 'placeholder="貼上 AI 輸出的「品牌資料包」。有多講幾句話也沒關係，系統會自己找出資料。" style="min-height:140px"')}
       <button class="btn block" id="bparse" style="margin-top:12px">解析並預覽</button></div></section>
     <div id="bprev"></div></div>`, 'form');
@@ -1030,7 +1030,7 @@ async function brandAiPage() {
   $$('[data-sh]').forEach((x) => x.onclick = () => $('#pv' + x.dataset.sh).classList.toggle('hide'));
   $('#bparse').onclick = () => {
     const r = BrandKit.parse($('#bpaste').value), items = BrandKit.plan(current, r), box = $('#bprev');
-    if (!items.length) { box.innerHTML = `<div class="note warn" style="margin-top:16px">${$('#bpaste').value.trim() ? '找不到品牌資料。請確認貼的是第 ③ 步 AI 輸出的「品牌資料包」，標題要有 [品牌名稱]、[品牌介紹] 這類方括號。' : '請先貼上 AI 整理好的結果。'}</div>`; return; }
+    if (!items.length) { box.innerHTML = `<div class="note warn" style="margin-top:16px">${$('#bpaste').value.trim() ? '找不到品牌資料。請確認貼的是 AI 最後輸出的「品牌資料包」，標題要有 [品牌名稱]、[品牌介紹] 這類方括號。' : '請先貼上 AI 整理好的結果。'}</div>`; return; }
     const show = (it, v) => it.type === 'list' ? (v.length ? v.join('、') : '（空）') : (v || '（空）');
     box.innerHTML = `<section style="margin-top:28px">${sec('預覽：勾選要套用的欄位')}
       <div class="list">${items.map((it) => `<label class="row" style="align-items:flex-start;cursor:pointer"><input type="checkbox" data-ap="${it.key}" ${it.changed ? 'checked' : ''} style="width:20px;height:20px;min-height:0;margin-top:2px;flex:none">

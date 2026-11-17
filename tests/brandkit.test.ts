@@ -110,19 +110,19 @@ describe('merging with what the customer already has', () => {
 });
 
 describe('the prompts handed to the customer', () => {
-  it('are three, in order, and the output prompt asks for exactly the format the parser understands', () => {
+  it('are one prompt that inventories, interviews, then asks for exactly the format the parser understands', () => {
     const ps = BrandKit.prompts({ current: { name: 'VUCA', topics: ['剪輯'] }, regulated: false });
-    expect(ps.map((p: any) => p.id)).toEqual(['inventory', 'interview', 'output']);
-    expect(ps[2].text).toContain(BrandKit.FORMAT);
-    expect(ps[0].text).toContain('[品牌名稱] VUCA'); expect(ps[0].text).toContain('[禁用詞] （尚未填寫）');
-    // 往返：照格式填好內容後，每個欄位都解析得回來
+    expect(ps).toHaveLength(1);
+    const t = ps[0].text;
+    expect(t.indexOf('階段一')).toBeLessThan(t.indexOf('階段二')); expect(t.indexOf('階段二')).toBeLessThan(t.indexOf('階段三'));
+    expect(t).toContain(BrandKit.FORMAT);
+    expect(t).toContain('[品牌名稱] VUCA'); expect(t).toContain('[禁用詞] （尚未填寫）');
     const filled = BrandKit.FORMAT.split('\n').map((l: string) => (/^（/.test(l) ? '內容' + l.length : l)).join('\n');
     expect(BrandKit.parse(filled).found.length).toBe(10);
   });
   it('tell the AI not to invent numbers or include personal data, and add the compliance note for regulated industries', () => {
-    const [, interview, output] = BrandKit.prompts({ current: {}, regulated: true });
-    for (const t of [interview.text, output.text]) { expect(t).toContain('不要'); expect(t).toContain('待確認'); expect(t).toContain('利率'); }
-    expect(output.text).toContain('個人資料');
-    expect(BrandKit.prompts({ current: {}, regulated: false })[1].text).not.toContain('利率');
+    const [p] = BrandKit.prompts({ current: {}, regulated: true });
+    expect(p.text).toContain('不要幫我編造'); expect(p.text).toContain('待確認'); expect(p.text).toContain('利率'); expect(p.text).toContain('個人資料');
+    expect(BrandKit.prompts({ current: {}, regulated: false })[0].text).not.toContain('利率');
   });
 });
