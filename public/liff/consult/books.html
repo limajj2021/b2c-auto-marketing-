@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>免費電子書｜異構資本 EGO®</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .wrap { max-width: 520px; margin: 0 auto; padding: 28px 16px calc(32px + env(safe-area-inset-bottom)); }
+  .book { display: block; text-decoration: none; color: inherit; background: var(--surface, #fff); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 16px; margin-top: 14px; border-left: 4px solid #d9483b; }
+  .book .no { font-size: 12px; letter-spacing: .12em; color: #d9483b; font-weight: 700; }
+  .book .ttl { display: block; font-size: 17px; font-weight: 700; line-height: 1.45; margin-top: 6px; }
+  .book .sub { display: block; font-size: 14px; color: var(--text2); margin-top: 4px; }
+  .book .go { display: inline-block; margin-top: 12px; font-size: 14px; font-weight: 600; }
+  .cta { margin-top: 28px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="t-sub" style="letter-spacing:.12em;font-size:12px;font-weight:700;color:#d9483b">EGO® 免費電子書</p>
+  <h1 class="t-page" style="margin-top:6px"><span id="hi"></span>三本帶你從 Threads 把客人導進 LINE</h1>
+  <p class="t-sub" style="margin-top:8px">每本 10 分鐘讀完。建議照順序看：先學開頭、再找題材、最後串起整條流程。</p>
+
+  <a class="book" href="https://drive.google.com/file/d/10eOy3QUrqfiBy-UfLQ56uZQ3Z2ikDGfB/view" target="_blank" rel="noopener">
+    <span class="no">NO.1</span>
+    <span class="ttl">12 個讓 Threads 貼文帶客進 LINE 的開頭公式</span>
+    <span class="sub">附填空模板，照填就能發</span>
+    <span class="go">免費閱讀 →</span></a>
+
+  <a class="book" href="https://drive.google.com/file/d/1zqJ2xA1DAVIhozDNlyjtQIDXDdSB5bfr/view" target="_blank" rel="noopener">
+    <span class="no">NO.2</span>
+    <span class="ttl">把客人最常問的 10 個問題，變成 10 篇會帶客的貼文</span>
+    <span class="sub">你的內容素材一直都在</span>
+    <span class="go">免費閱讀 →</span></a>
+
+  <a class="book" href="https://drive.google.com/file/d/1KSQ3_yeWjn2SigpIkEaiJ-UaRIXxiosf/view" target="_blank" rel="noopener">
+    <span class="no">NO.3</span>
+    <span class="ttl">零廣告費：從 Threads 到 LINE 的 5 步驟導流地圖</span>
+    <span class="sub">看懂整條流程，找出卡在哪一步</span>
+    <span class="go">免費閱讀 →</span></a>
+
+  <div class="cta">
+    <p class="t-sub">看完覺得每天自己寫太累？</p>
+    <a class="btn block" href="https://liff.line.me/2012662581-pydaDItZ" style="text-decoration:none;margin-top:10px">交給 Threads 零廣告獲客機器人</a>
+    <p class="t-sub" style="margin-top:8px;font-size:13px">30 秒告訴我們你的狀況，顧問在聊天室回覆你</p>
+  </div>
+</div>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js" charset="utf-8"></script>
+<script>
+'use strict';
+// LIFF 書櫃：在 LINE 裡用讀者的名字打招呼，電子書在 LINE 內建視窗打開，看完關掉就回到書櫃。不在 LINE 裡時是一般網頁，連結照常可用。
+(async () => {
+  if (!window.liff) return;
+  try { await liff.init({ liffId: '2012662581-pydaDItZ' }); } catch { return; }
+  if (!liff.isInClient()) return;
+  try { const p = await liff.getProfile(); if (p && p.displayName) document.getElementById('hi').textContent = `嗨 ${p.displayName}，`; } catch { /* 沒有 profile 權限就不打招呼 */ }
+  document.querySelectorAll('a.book').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); liff.openWindow({ url: a.href, external: false }); }));
+})();
+</script>
+</body>
+</html>

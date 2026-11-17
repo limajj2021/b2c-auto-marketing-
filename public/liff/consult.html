@@ -66,6 +66,7 @@ async function send() {
   if (cfg.liffId && window.liff) {
     try { await liff.init({ liffId: cfg.liffId }); inLiff = liff.isInClient(); } catch { inLiff = false; }
   }
+  if (new URLSearchParams(location.search).has('liff.state')) return; // 要轉去子路徑（例如 /books），交給 LIFF 處理
   render();
 })();
 </script>
