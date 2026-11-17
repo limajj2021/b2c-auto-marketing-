@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { handleApi } from '../src/admin/routes';
-import { appendCta, buildPrompt, parseParts } from '../src/ai/gemini';
+import { PATTERNS, appendCta, buildPrompt, parseParts, pickPattern } from '../src/ai/gemini';
 import { listAccounts, upsertAccount } from '../src/threads/accounts';
 import { ensureSlots, publishDue, reconcile } from '../src/threads/scheduler';
 import { jres, makeEnv, mockFetch } from './helpers';
@@ -32,6 +32,22 @@ describe('thread generation', () => {
       { style_preset: '爭議化、數據化、具體化', thread_min: 4, thread_max: 7, fact_bank: '贊助平均 3 萬（2025 調查）', content_tone: 't', content_topics: '[]', banned_words: '[]', services: '', audience: '' } as any,
       { account: { persona: '毒舌行銷顧問' } as any, topic: '活動贊助' });
     for (const k of ['爭議化、數據化、具體化', '4 到 7 則', '第 1 則是鉤子', '最後一則', '毒舌行銷顧問', '贊助平均 3 萬', '【待補數據', '活動贊助']) expect(p).toContain(k);
+  });
+
+  it('picks a hook pattern that needs no material when there is none, and never repeats the last one', () => {
+    for (let i = 0; i < 200; i++) {
+      const k = pickPattern(false, 'F', Math.random);
+      expect(PATTERNS[k].needs).toBe(false); expect(k).not.toBe('F');
+    }
+    const seen = new Set(Array.from({ length: 400 }, () => pickPattern(true, null, Math.random)));
+    expect(seen.has('E') && seen.has('G') && seen.has('B')).toBe(true);
+  });
+
+  it('v2 prompt carries the chosen pattern, the 觀點拆解 rules and the no-fabrication rules', () => {
+    const p = buildPrompt({ id: 'b', name: '異構資本', industry: 'general', description: 'd', timezone: 'Asia/Taipei' },
+      { style_preset: '爭議化', thread_min: 5, thread_max: 8, fact_bank: '', content_tone: 't', content_topics: '[]', banned_words: '[]', services: '', audience: '' } as any, { pattern: 'F' });
+    for (const k of ['觀點拆解', '打臉迷思', '5 到 8 則', '懸念切割', '翻轉歸因', '不加 hashtag', '只能來自「可引用數據」', '「👇」', '只輸出 JSON']) expect(p).toContain(k);
+    expect(p).not.toMatch(/\n{3,}/);
   });
 
   it('placeholder data blocks approval until replaced', async () => {
