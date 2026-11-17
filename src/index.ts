@@ -5,7 +5,6 @@ import { withCreds } from './integrations';
 import { handleLineWebhook } from './line/webhook';
 import { runAllTenants } from './tenants';
 import { handleGo } from './links';
-import { handleEbookAsset, handleEbookToken } from './ebook';
 import { handleConnectLink } from './threads/connectlink';
 import { handleCallback, handleMetaCallback } from './threads/oauth';
 import type { Env } from './types';
@@ -23,8 +22,6 @@ export default {
       }
       const go = pathname.match(/^\/go\/([A-Za-z0-9]{6,16})$/);
       if (go && (req.method === 'GET' || req.method === 'HEAD')) return await handleGo(raw, req, go[1]);
-      if (pathname === '/line/ebook-token' && req.method === 'POST') return await handleEbookToken(raw, req);
-      if (pathname.startsWith('/ebook/')) return await handleEbookAsset(raw, req);
       if (pathname === '/threads/callback' && req.method === 'GET') return await handleCallback(raw, req);
       if (pathname === '/threads/connect' && req.method === 'GET') return await handleConnectLink(raw, req);
       if (pathname === '/threads/deauthorize' && req.method === 'POST') return await handleMetaCallback(raw, req, 'deauthorize');
