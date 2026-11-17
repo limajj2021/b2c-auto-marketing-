@@ -937,9 +937,11 @@ function rmDraw(cv, st) {
   for (let c = 1; c < L.c; c++) { g.beginPath(); g.moveTo(c * cw, 60); g.lineTo(c * cw, H - 60); g.stroke(); }
   for (let r = 1; r < L.r; r++) { g.beginPath(); g.moveTo(60, r * ch); g.lineTo(W - 60, r * ch); g.stroke(); }
   g.globalAlpha = 1; g.fillStyle = st.fg; g.textAlign = 'center'; g.textBaseline = 'middle';
-  st.areas.forEach((a, i) => {
+  // 所有按鈕用同一個字級（以最長的名稱為準），看起來才整齊
+  const n = L.c * L.r, longest = Math.max(1, ...st.areas.slice(0, n).map((a) => (a.label || '').length));
+  const size = Math.min(ch * 0.2, (cw * 0.78) / longest);
+  st.areas.slice(0, n).forEach((a, i) => {
     const x = (i % L.c) * cw + cw / 2, y = Math.floor(i / L.c) * ch + ch / 2, t = a.label || '';
-    const size = Math.min(ch * 0.22, (cw * 0.8) / Math.max(t.length, 1));
     g.font = `600 ${Math.round(size)}px -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif`;
     g.fillText(t, x, y);
   });
