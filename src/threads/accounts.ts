@@ -49,11 +49,32 @@ export async function getAccount(env: Env, id: number): Promise<Account | null> 
 
 export async function upsertAccount(env: Env, brandId: string, a: { userId: string; username: string | null; token: string; expiresAt: string | null }): Promise<number> {
   const enc = await encryptText(key(env), a.token);
+  const existed = await env.DB.prepare('SELECT id FROM threads_accounts WHERE brand_id=? AND threads_user_id=?').bind(brandId, a.userId).first<{ id: number }>();
   await env.DB.prepare(
     `INSERT INTO threads_accounts(brand_id,threads_user_id,username,token_enc,expires_at,status,created_at,updated_at) VALUES(?,?,?,?,?,'ok',?,?)
      ON CONFLICT(brand_id,threads_user_id) DO UPDATE SET username=excluded.username,token_enc=excluded.token_enc,expires_at=excluded.expires_at,status='ok',insights_status='unknown',updated_at=excluded.updated_at`,
   ).bind(brandId, a.userId, a.username, enc, a.expiresAt, iso(), iso()).run();
-  return (await env.DB.prepare('SELECT id FROM threads_accounts WHERE brand_id=? AND threads_user_id=?').bind(brandId, a.userId).first<{ id: number }>())!.id;
+  const id = (await env.DB.prepare('SELECT id FROM threads_accounts WHERE brand_id=? AND threads_user_id=?').bind(brandId, a.userId).first<{ id: number }>())!.id;
+  if (!existed) await restoreFromArchive(env, brandId, a.userId, id);
+  return id;
+}
+
+/**
+ * 同一個 Threads 帳號中斷後又重新連結：從封存還原人設等設定，並把舊帳號編號底下的貼文（發文紀錄、成效、草稿）接回新的編號，
+ * 不會因為重新授權而遺失歷史。封存由資料庫觸發器自動寫入（migrations/0021）。
+ */
+async function restoreFromArchive(env: Env, brandId: string, userId: string, newId: number): Promise<void> {
+  const old = await env.DB.prepare(`SELECT * FROM threads_accounts_archive WHERE brand_id=? AND threads_user_id=? AND reason='deleted' AND id<>? ORDER BY archive_id DESC LIMIT 1`)
+    .bind(brandId, userId, newId).first<any>().catch(() => null);
+  if (!old) return;
+  await env.DB.prepare(`UPDATE threads_accounts SET persona=?,tone=?,topics=?,posts_per_day=?,publishing_times=?,cta_text=?,auto_post_enabled=COALESCE(?,auto_post_enabled) WHERE id=?`)
+    .bind(old.persona ?? '', old.tone, old.topics, old.posts_per_day, old.publishing_times, old.cta_text, old.auto_post_enabled, newId).run();
+  const ids = (await env.DB.prepare(`SELECT DISTINCT id FROM threads_accounts_archive WHERE brand_id=? AND threads_user_id=? AND id<>?`).bind(brandId, userId, newId).all<{ id: number }>()).results.map((r) => r.id);
+  for (const oid of ids) {
+    await env.DB.prepare(`UPDATE posts SET account_id=? WHERE brand_id=? AND account_id=?`).bind(newId, brandId, oid).run();
+    await env.DB.prepare(`UPDATE post_links SET account_id=? WHERE brand_id=? AND account_id=?`).bind(newId, brandId, oid).run();
+    await env.DB.prepare(`UPDATE account_daily SET account_id=? WHERE brand_id=? AND account_id=? AND day NOT IN (SELECT day FROM account_daily WHERE account_id=?)`).bind(newId, brandId, oid, newId).run();
+  }
 }
 
 /**

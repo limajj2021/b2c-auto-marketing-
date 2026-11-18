@@ -16,7 +16,7 @@ describe('LINE disconnect', () => {
     await env.DB.prepare(`INSERT INTO integrations(brand_id,name,value_enc,meta,updated_at) VALUES('b2','line_channel_access_token','x','{}','x')`).run();
     await env.DB.prepare(`UPDATE brand_settings SET line_auto_reply_enabled=1`).run();
     const c = ((await call(env, 'POST', '/api/login')).headers.get('set-cookie') ?? '').split(';')[0];
-    expect((await call(env, 'DELETE', '/api/integrations/line', c)).status).toBe(200);
+    expect((await call(env, 'DELETE', '/api/integrations/line?confirm=wrong', c)).status).toBe(200);
     const rows: any[] = (await env.DB.prepare(`SELECT brand_id,name FROM integrations`).all()).results;
     expect(rows).toEqual([{ brand_id: 'b2', name: 'line_channel_access_token' }]);
     expect(((await env.DB.prepare(`SELECT line_auto_reply_enabled v FROM brand_settings WHERE brand_id='b1'`).first()) as any).v).toBe(0);

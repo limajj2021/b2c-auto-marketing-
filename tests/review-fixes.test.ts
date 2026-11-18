@@ -5,7 +5,7 @@ import { budgeted } from '../src/budget';
 import { handleLineWebhook } from '../src/line/webhook';
 import { buildAuthorizeUrl, handleCallback, SCOPES } from '../src/threads/oauth';
 import { ensureSlots, runCron } from '../src/threads/scheduler';
-import { listAccounts, upsertAccount } from '../src/threads/accounts';
+import { removeAccounts, listAccounts, upsertAccount } from '../src/threads/accounts';
 import { runAllTenants } from '../src/tenants';
 import { hmacBase64 } from '../src/util/crypto';
 import { jres, makeEnv, mockFetch } from './helpers';
@@ -65,13 +65,13 @@ describe('#4 generation never leaves an orphaned placeholder when the budget is 
 });
 
 describe('#5/#6 account removal and unschedule', () => {
-  it('disconnecting all accounts sends their scheduled posts back to review on the default account', async () => {
+  it('removing all accounts (e.g. user revoked in Threads) sends their scheduled posts back to review on the default account', async () => {
     const env = await makeEnv();
     const id = await upsertAccount(env, 'b1', { userId: '9', username: 'a', token: 'T', expiresAt: null });
     await env.DB.prepare("INSERT INTO posts(brand_id,account_id,content,status,scheduled_at,approved_by,updated_at,created_at) VALUES('b1',?,'hi','scheduled','2026-11-09T00:00:00Z','boss','x','x')").bind(id).run();
     await env.DB.prepare("INSERT INTO posts(brand_id,account_id,status,slot_key,updated_at,created_at) VALUES('b1',?,'gen_failed','k','x','x')").bind(id).run();
-    const c = await login(env);
-    expect((await api(env, 'DELETE', '/api/integrations/threads', undefined, c)).status).toBe(200);
+    // 「一次中斷全部」的後台功能已移除（防誤按）；同一個函式仍用於使用者在 Threads 撤銷授權
+    await removeAccounts(env, { brandId: 'b1' });
     expect(await listAccounts(env)).toEqual([]);
     const rows = (await env.DB.prepare('SELECT status,account_id,approved_by FROM posts ORDER BY id').all<any>()).results;
     expect(rows[0]).toEqual({ status: 'draft', account_id: null, approved_by: null });

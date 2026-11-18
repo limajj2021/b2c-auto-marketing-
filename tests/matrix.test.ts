@@ -164,7 +164,7 @@ describe('matrix accounts', () => {
     expect(list[0]).toMatchObject({ persona: '學長', posts_per_day: 2, publishing_times: ['09:00', '21:00'] });
     expect(JSON.stringify(list)).not.toContain('token');
     await env.DB.prepare(`INSERT INTO posts(brand_id,account_id,content,status,approved_by,updated_at,created_at) VALUES('b1',?,'x','scheduled','owner','x','x')`).bind(a).run();
-    await api(env, 'DELETE', `/api/accounts/${a}`, undefined, c);
+    await api(env, 'DELETE', `/api/accounts/${a}?confirm=main`, undefined, c);
     expect((await listAccounts(env)).length).toBe(0);
     expect((await env.DB.prepare('SELECT status FROM posts').first<any>()).status).toBe('draft');
   });

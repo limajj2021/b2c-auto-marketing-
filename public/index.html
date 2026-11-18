@@ -102,6 +102,18 @@ function confirmSheet(msg, okText = '確定', danger = true, body = '') {
     });
   });
 }
+/** 防誤按：要輸入指定文字才能執行（中斷授權這類做錯了就要請客戶重來的動作）。回傳輸入的文字，取消回傳 null */
+function typeConfirm(msg, body, expect, okText) {
+  return new Promise((res) => {
+    let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
+    sheet(msg, `<p class="t-sub">${esc(body)}</p><div class="f" style="margin-top:12px"><label for="tcv">請輸入 <b>${esc(expect)}</b> 確認</label><input id="tcv" autocomplete="off" autocapitalize="none" spellcheck="false"></div><div class="actions" style="margin-top:8px"><button class="btn sec" data-v="0">取消</button><button class="btn dng" data-v="1" disabled style="background:var(--bad-bg)">${esc(okText)}</button></div>`, (el, c) => {
+      const inp = el.querySelector('#tcv'), ok = el.querySelector('[data-v="1"]'), norm = (v) => v.trim().replace(/^@/, '').toLowerCase();
+      inp.addEventListener('input', () => { ok.disabled = norm(inp.value) !== norm(expect); });
+      el.addEventListener('click', (e) => { const v = e.target.closest('[data-v]')?.dataset.v; if (v === '0') { fin(null); c(); } else if (v === '1' && !ok.disabled) { fin(inp.value.trim()); c(); } });
+      new MutationObserver(() => { if (!document.body.contains(el)) fin(null); }).observe(document.body, { childList: true });
+    });
+  });
+}
 async function leaveOk() { if (!dirty) return true; const ok = await confirmSheet('有尚未儲存的修改，確定要離開？', '離開不儲存'); if (ok) dirty = false; return ok; }
 
 /* ---------- router ---------- */
@@ -1073,6 +1085,7 @@ async function threadsAccountPage(id) {
     ${field('atimes', '發布時間', input('atimes', (a.publishing_times || []).join(','), `inputmode="numeric" placeholder="沿用預設：${esc(s.publishing_times.join(','))}"`), '留空則沿用預設並自動與其他帳號錯開。')}
     ${field('acta', 'CTA 文字', input('acta', a.cta_text || '', `placeholder="沿用預設：${esc(s.cta_text)}"`))}
     <div class="actions" style="margin-top:24px"><button class="btn sec" id="at">測試連線</button><button class="btn ghost" id="ar">重新連結</button><button class="btn dng" id="aoff">中斷連結</button></div>
+    <p class="t-sub" style="margin-top:8px">授權快過期、看不到曝光數或要更新權限時，按「重新連結」即可，設定與發文紀錄都會保留。</p>
     <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存</button></div></div></div>`, 'form');
   $('#save').onclick = async (e) => {
     const t = list($('#atimes').value).map((x) => x.replace('：', ':')), n = $('#appd').value.trim();
@@ -1081,7 +1094,11 @@ async function threadsAccountPage(id) {
   };
   $('#at').onclick = (e) => act(e.currentTarget, async () => { const r = await api('POST', '/integrations/test', { target: 'threads', account_id: a.id }); toast(r.message, r.ok ? 'ok' : 'bad'); });
   $('#ar').onclick = (e) => act(e.currentTarget, async () => { location.href = (await api('GET', '/integrations/threads/connect?account=' + a.id)).url; });
-  $('#aoff').onclick = (e) => act(e.currentTarget, async () => { if (!(await confirmSheet(`中斷 @${a.username} 的連結？尚未發出的排程會改回草稿。`, '中斷連結'))) return; await api('DELETE', '/accounts/' + a.id); dirty = false; toast('已中斷連結', 'ok'); go('settings/threads'); });
+  $('#aoff').onclick = (e) => act(e.currentTarget, async () => {
+    const v = await typeConfirm(`中斷 @${a.username}？`, '授權過期或要換權限，請按「重新連結」就好，不用中斷。中斷後尚未發出的排程會改回草稿，要再發文就得請帳號本人重新授權。', a.username || '', '中斷連結');
+    if (v === null) return;
+    await api('DELETE', '/accounts/' + a.id + '?confirm=' + encodeURIComponent(v)); dirty = false; toast('已中斷連結', 'ok'); go('settings/threads');
+  });
 }
 // LINE 官方帳號管理後台的直達連結（需先登入 LINE；若登入後回到首頁，畫面上也寫了要點哪裡）
 const oaUrl = (id, path = '') => `https://manager.line.biz/account/@${String(id).replace(/[^a-z0-9._-]/gi, '')}${path}`; // 官方帳號 ID 只含英數與 ._-
@@ -1150,8 +1167,9 @@ async function lineConnPage() {
     <button class="link" id="lhelp">完整圖文說明</button></div>`, 'form');
   $('#lhelp').onclick = () => { S.helpOpen = 'line'; go('help'); };
   $('#lrm')?.addEventListener('click', async (e) => {
-    if (!(await confirmSheet(`中斷 ${l.basic_id || 'LINE 官方帳號'} 的連接？`, '中斷連接', true, '系統會停止讀取這個官方帳號的好友數與自動接待。LINE 官方帳號本身、好友與圖文選單都不受影響，之後可以重新連接正確的帳號。'))) return;
-    if (await act(e.currentTarget, () => api('DELETE', '/integrations/line'), '已中斷 LINE 連接')) render();
+    const v = await typeConfirm(`中斷 ${l.basic_id || 'LINE 官方帳號'} 的連接？`, '系統會停止讀取這個官方帳號的好友數與自動接待。LINE 官方帳號本身、好友與圖文選單都不受影響，之後可以重新連接正確的帳號。', l.basic_id || '中斷', '中斷連接');
+    if (v === null) return;
+    if (await act(e.currentTarget, () => api('DELETE', '/integrations/line?confirm=' + encodeURIComponent(v)), '已中斷 LINE 連接')) render();
   });
   $('[data-act=rm]').onclick = () => go('settings/linemenu');
 

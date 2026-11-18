@@ -325,19 +325,16 @@ export function registerExtra(add: Add, json: J, err: E) {
   });
 
   // 中斷 LINE 官方帳號連接（連錯帳號、換官方帳號時用）：刪掉憑證並停止自動接待；LINE 官方帳號本身不受影響
-  add('DELETE', '/integrations/line', 'admin', async ({ env, actor, brandId }) => {
+  add('DELETE', '/integrations/line', 'admin', async ({ env, actor, brandId, url }) => {
     const meta = await getMeta(env, 'line_channel_access_token');
+    if (meta?.basic_id && (url.searchParams.get('confirm') ?? '').replace(/^@/, '').toLowerCase() !== String(meta.basic_id).replace(/^@/, '').toLowerCase()) return err(400, `請輸入官方帳號 ID ${meta.basic_id} 確認要中斷`);
     await deleteCreds(env, ['line_channel_access_token', 'line_channel_secret', 'line_channel_id']);
     await env.DB.prepare('UPDATE brand_settings SET line_auto_reply_enabled=0,updated_at=? WHERE brand_id=?').bind(new Date().toISOString(), brandId).run();
     await audit(env, brandId, actor.name, 'line_disconnect', meta?.basic_id ?? '');
     return json({ ok: true });
   });
 
-  add('DELETE', '/integrations/threads', 'admin', async ({ env, actor, brandId }) => {
-    await removeAccounts(env, { brandId });
-    await audit(env, brandId, actor.name, 'threads_disconnect');
-    return json({ ok: true });
-  });
+  // 「一次中斷所有 Threads 帳號」的功能已移除：誤按一次就得請所有客戶重新授權。要中斷請逐一到帳號頁操作。
 
   // 連線健康檢查：實際呼叫各服務的唯讀端點
   add('POST', '/integrations/test', 'admin', async ({ env, req }) => {
@@ -473,9 +470,11 @@ export function registerExtra(add: Add, json: J, err: E) {
     return json({ ok: true });
   });
 
-  add('DELETE', '/accounts/(\\d+)', 'admin', async ({ env, m, actor, brandId }) => {
+  add('DELETE', '/accounts/(\\d+)', 'admin', async ({ env, m, actor, brandId, url }) => {
     const a = await getAccount(env, Number(m[1]));
     if (!a || a.brand_id !== brandId) return err(404, '找不到這個帳號');
+    // 防誤按：必須輸入帳號名稱才能中斷（授權過期請用「重新連結」，不用中斷）
+    if ((url.searchParams.get('confirm') ?? '').replace(/^@/, '').toLowerCase() !== String(a.username ?? '').toLowerCase()) return err(400, `請輸入帳號名稱 ${a.username} 確認要中斷`);
     await removeAccounts(env, { brandId, id: a.id }); // 尚未發出的貼文退回草稿，避免誤發
     await audit(env, brandId, actor.name, 'account_disconnect', a.username ?? '');
     return json({ ok: true });
