@@ -123,10 +123,10 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
       return text(items.length ? items.map((x) => `#${x.id}［${x.status}］${x.account}｜${x.hook}（${x.parts} 則）`).join('\n') : '沒有符合的貼文', { posts: items });
     }
     case 'get_post': {
-      const r = await env.DB.prepare(`SELECT id,status,content,parts,topic_tag,error_message FROM posts WHERE id=? AND brand_id=? AND status<>'deleted'`).bind(Number(args?.post_id), a.brandId).first<any>();
+      const r = await env.DB.prepare(`SELECT id,status,content,parts,topic_tag,error_message,account_id FROM posts WHERE id=? AND brand_id=? AND status<>'deleted'`).bind(Number(args?.post_id), a.brandId).first<any>();
       if (!r) throw new ToolError('找不到這篇貼文');
-      const parts = partsOf(r);
-      return text(`#${r.id}［${r.status}］${r.error_message ? `\n注意：${r.error_message}` : ''}\n\n${parts.map((p, i) => `【第 ${i + 1} 則】\n${p}`).join('\n\n')}`, { id: r.id, status: r.status, parts, topic_tag: r.topic_tag });
+      const parts = partsOf(r), who = acctLabel(accts.find((x) => x.id === r.account_id) ?? (r.account_id ? null : accts[0]));
+      return text(`#${r.id}［${r.status}］${who}${r.error_message ? `\n注意：${r.error_message}` : ''}\n\n${parts.map((p, i) => `【第 ${i + 1} 則】\n${p}`).join('\n\n')}`, { id: r.id, status: r.status, parts, topic_tag: r.topic_tag });
     }
     case 'save_drafts': {
       needAdmin(a);
@@ -185,15 +185,31 @@ ${r.plan.map((x) => `・${fmt(x.at)}　${x.account}　#${x.post_id}${x.copy ? '�
     case 'publish_post': {
       needAdmin(a);
       if (args?.confirm !== true) throw new ToolError('發布前請先跟使用者確認，使用者同意後再把 confirm 設為 true。');
+      let postId = Number(args?.post_id);
+      const post = await env.DB.prepare(`SELECT * FROM posts WHERE id=? AND brand_id=? AND status<>'deleted'`).bind(postId, a.brandId).first<any>();
+      if (!post) throw new ToolError(`找不到貼文 #${postId}`);
+      const cur = accts.find((x) => x.id === post.account_id) ?? (post.account_id ? null : accts[0]);
       if (args?.account) {
         const acct = pickAccount(accts, args.account)!;
         if (acct.status !== 'ok') throw new ToolError(`@${acct.username} 的授權已失效，請使用者到後台重新連結`);
-        const u = await env.DB.prepare(`UPDATE posts SET account_id=?,updated_at=? WHERE id=? AND brand_id=? AND status IN ('draft','scheduled')`).bind(acct.id, iso(), Number(args?.post_id), a.brandId).run();
-        if (u.meta.changes !== 1) throw new ToolError('找不到這篇草稿或已排程的貼文（已發布的貼文不能換帳號）');
+        if (post.status === 'published' && acct.id !== cur?.id) {
+          // 已經發到別的帳號：複製一份給指定帳號再發（原本那篇不動）
+          const ins = await env.DB.prepare(`INSERT INTO posts(brand_id,account_id,source_post_id,content,parts,status,topic_tag,seen_at,updated_at,created_at) VALUES(?,?,?,?,?,'draft',?,?,?,?)`)
+            .bind(a.brandId, acct.id, post.id, post.content, post.parts, post.topic_tag, iso(), iso(), iso()).run();
+          postId = ins.meta.last_row_id as number;
+        } else if (post.status === 'published') {
+          throw new ToolError(`#${post.id} 已經發布到 ${acctLabel(cur)} 了`);
+        } else {
+          const u = await env.DB.prepare(`UPDATE posts SET account_id=?,updated_at=? WHERE id=? AND brand_id=? AND status IN ('draft','scheduled')`).bind(acct.id, iso(), postId, a.brandId).run();
+          if (u.meta.changes !== 1) throw new ToolError(`#${post.id} 目前是「${post.status}」狀態，不能換帳號`);
+        }
+      } else if (post.status === 'published') {
+        throw new ToolError(`#${post.id} 已經發布到 ${acctLabel(cur)} 了。要再發到別的帳號，請用 account 指定帳號（會複製一份發出）。`);
       }
-      const r = await publishNow(env, a.brandId, `${a.name}（${a.client}）`, Number(args?.post_id));
+      const r = await publishNow(env, a.brandId, `${a.name}（${a.client}）`, postId);
       if ('error' in r) throw new ToolError(r.error);
-      return text(r.status === 'published' ? `已發布到 Threads（${r.total} 則）` : r.message!, r);
+      const to = acctLabel(accts.find((x) => x.id === (args?.account ? pickAccount(accts, args.account)!.id : cur?.id)));
+      return text(r.status === 'published' ? `已發布到 Threads ${to}（${r.total} 則）${postId !== Number(args?.post_id) ? `，這是 #${args.post_id} 的複本 #${postId}` : ''}` : r.message!, { ...r, post_id: postId });
     }
   }
   throw new ToolError(`沒有這個工具：${name}`);

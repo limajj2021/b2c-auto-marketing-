@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import worker from '../src/index';
 import { handleApi } from '../src/admin/routes';
 import { sha256 } from '../src/mcp/oauth';
-import { makeEnv } from './helpers';
+import { jres, makeEnv, mockFetch } from './helpers';
 
 const O = 'https://x.dev', REDIRECT = 'https://chatgpt.com/connector_platform_oauth_redirect';
 const go = (env: any, path: string, init: RequestInit = {}) => worker.fetch(new Request(O + path, { redirect: 'manual', ...init }), env);
@@ -197,5 +197,24 @@ describe('AI connector tools', () => {
     const tools = ((await (await rpc(env, tok, 'tools/list')).json()) as any).result.tools;
     expect(tools.find((t: any) => t.name === 'publish_post').inputSchema.properties.account).toBeTruthy();
     expect((await tool(env, tok, 'publish_post', { post_id: id, account: '@nobody', confirm: true })).isError).toBe(true);
+  });
+
+  it('publishing an already-published post to another account sends a copy there and leaves the original alone', async () => {
+    const env: any = await makeEnv();
+    const { upsertAccount } = await import('../src/threads/accounts');
+    const can = await upsertAccount(env, 'b1', { userId: 'u1', username: 'vuca.canada', token: 'A', expiresAt: null });
+    const tw = await upsertAccount(env, 'b1', { userId: 'u2', username: 'vuca.tw', token: 'B', expiresAt: null });
+    await env.DB.prepare(`INSERT INTO posts(id,brand_id,account_id,content,parts,status,published_at,threads_post_id,updated_at,created_at) VALUES(163,'b1',?,'GTA6','["GTA6","結尾"]','published','x','T0','x','x')`).bind(can).run();
+    const { access_token: tok } = await connect(env);
+    const plain = await tool(env, tok, 'publish_post', { post_id: 163, confirm: true });
+    expect(plain.isError).toBe(true); expect(plain.content[0].text).toContain('@vuca.canada');
+    const m = mockFetch((u) => u.endsWith('/threads_publish') ? jres({ id: 'P' + Math.random() }) : jres({ id: 'C1', status: 'FINISHED' }));
+    try {
+      const r = await tool(env, tok, 'publish_post', { post_id: 163, account: '@vuca.tw', confirm: true });
+      expect(r.isError).toBeUndefined(); expect(r.content[0].text).toContain('@vuca.tw');
+    } finally { m.restore(); }
+    const rows: any[] = (await env.DB.prepare('SELECT id,account_id,source_post_id,status FROM posts ORDER BY id').all()).results;
+    expect(rows[0]).toMatchObject({ id: 163, account_id: can, status: 'published' });
+    expect(rows[1]).toMatchObject({ account_id: tw, source_post_id: 163, status: 'published' });
   });
 });
