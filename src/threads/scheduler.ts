@@ -254,7 +254,7 @@ export async function refreshInsights(env: Env, now: Date): Promise<void> {
     const m = await postInsights(cred, r.threads_post_id);
     if (m === null) {
       if (cred.accountId) await env.DB.prepare(`UPDATE threads_accounts SET insights_status='no_permission' WHERE id=?`).bind(cred.accountId).run();
-      await logEvent(env, brand.id, 'warn', 'threads_insights', `@${cred.username ?? ''} 沒有成效數據權限：請在 Meta App 加入 threads_manage_insights 後重新連結`);
+      await logEvent(env, brand.id, 'warn', 'threads_insights', `@${cred.username ?? ''} 沒有成效數據權限：請在 Meta App 加入 threads_manage_insights 後重新連結`, undefined, { throttleMinutes: 360 });
       continue;
     }
     if (cred.accountId) await env.DB.prepare(`UPDATE threads_accounts SET insights_status='ok' WHERE id=? AND insights_status<>'ok'`).bind(cred.accountId).run();

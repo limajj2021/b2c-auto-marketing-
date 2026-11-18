@@ -26,7 +26,8 @@ export async function publishNow(env: Env, brandId: string, actorName: string, i
     .bind(actorName, iso(now), acct, iso(now), id).run();
   if (r.meta.changes !== 1) return { status: 409, error: '這則貼文剛剛被其他動作更新了，請重新整理' };
   await audit(env, brandId, actorName, 'post_publish_now', String(id));
-  try { await publishOne(budgeted(env, 38), id, now); } catch (e) { if (!(e instanceof BudgetError)) throw e; }
+  const limit = Math.max(38, (Number(env.CRON_SUBREQUEST_LIMIT) || 0) - 20);
+  try { await publishOne(budgeted(env, limit), id, now); } catch (e) { if (!(e instanceof BudgetError)) throw e; }
   const after = await env.DB.prepare('SELECT status,error_message,part_ids,parts FROM posts WHERE id=?').bind(id).first<any>();
   const sent = after?.part_ids ? JSON.parse(after.part_ids).length : 0, total = partsOf(after).length;
   if (after?.status === 'published') return { ok: true, status: 'published', sent, total };
