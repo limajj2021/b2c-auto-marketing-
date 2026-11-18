@@ -250,7 +250,17 @@ export function registerExtra(add: Add, json: J, err: E) {
     const key = String(b.api_key ?? '').trim();
     if (key.length < 20) return err(400, 'API key 看起來不完整');
     const r = await fetch(GEMINI_MODELS, { headers: { 'x-goog-api-key': key } });
-    if (!r.ok) return err(400, 'Gemini 拒絕了這組 key');
+    if (!r.ok) {
+      // 把 Google 說的原因和這次請求走的機房記下來（金鑰本身不記），方便判斷是金鑰問題還是地區限制
+      const eb: any = await r.json().catch(() => ({}));
+      const why = [eb?.error?.status, eb?.error?.message].filter(Boolean).join(' ').slice(0, 200);
+      const colo = String((req as any).cf?.colo ?? ''), country = String((req as any).cf?.country ?? '');
+      await logEvent(env, brandId, 'warn', 'system', `驗證 Gemini 金鑰失敗（HTTP ${r.status}）：${why || '沒有說明'}`, { colo, country });
+      const location = /location is not supported|not supported in your country|FAILED_PRECONDITION/i.test(why);
+      return err(400, location
+        ? `Google 拒絕了這次請求：系統這次是從 ${colo || '某個'} 機房連線，Google 不支援這個地區（不是金鑰的問題）。請稍後再試一次。`
+        : `Gemini 拒絕了這組 key（HTTP ${r.status}${why ? `：${why}` : ''}）`);
+    }
     await setCred(env, brandId, 'gemini_api_key', key);
     await audit(env, brandId, actor.name, 'integration_gemini');
     return json({ ok: true });
