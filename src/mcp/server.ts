@@ -23,6 +23,8 @@ const INSTRUCTIONS = `這是「異構資本」的 Threads 貼文助理連接器�
 要把多篇草稿排程發出（可以分給多個帳號輪流發，或每個帳號都發）用 schedule_posts；排程前先把帳號、方式、開始時間、間隔講給使用者確認，同意後再把 confirm 設為 true。
 不要自己編造數字、案例或引言。發布（publish_post）一定要使用者在對話中明確說要發布，並把 confirm 設為 true。`;
 
+/** 工具清單有變動就改版本號，提醒 AI 用戶端重新抓工具 */
+const TOOLS_VERSION = '1.4.0';
 const TOOLS = [
   { name: 'get_brand_guide', title: '讀取品牌資料與寫作規則', description: '取得目前連接品牌的介紹、服務、受眾、語氣、主題、禁用詞、可引用數據、Threads 串文寫作與排版規則、結尾 CTA。寫任何貼文前先呼叫。',
     inputSchema: { type: 'object', properties: { topic: { type: 'string', description: '這次想寫的主題（選填）' }, account: { type: 'string', description: '要用哪個 Threads 帳號的人設寫（選填，例如 @vuca.tw）' } }, additionalProperties: false },
@@ -127,7 +129,8 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
       const r = await env.DB.prepare(`SELECT id,status,content,parts,topic_tag,error_message,account_id FROM posts WHERE id=? AND brand_id=? AND status<>'deleted'`).bind(Number(args?.post_id), a.brandId).first<any>();
       if (!r) throw new ToolError('找不到這篇貼文');
       const parts = partsOf(r), who = acctLabel(accts.find((x) => x.id === r.account_id) ?? (r.account_id ? null : accts[0]));
-      return text(`#${r.id}［${r.status}］${who}${r.error_message ? `\n注意：${r.error_message}` : ''}\n\n${parts.map((p, i) => `【第 ${i + 1} 則】\n${p}`).join('\n\n')}`, { id: r.id, status: r.status, parts, topic_tag: r.topic_tag });
+      const hint = r.status === 'published' && accts.length > 1 ? `\n\n（要把這篇也發到其他帳號：呼叫 publish_post，帶 post_id=${r.id}、account（例如 ${accts.filter((x) => x.id !== r.account_id).map((x) => '@' + x.username).join(' 或 ')}）、confirm=true，系統會複製一份發到那個帳號，原貼文不動。）` : '';
+      return text(`#${r.id}［${r.status}］${who}${hint}${r.error_message ? `\n注意：${r.error_message}` : ''}\n\n${parts.map((p, i) => `【第 ${i + 1} 則】\n${p}`).join('\n\n')}`, { id: r.id, status: r.status, parts, topic_tag: r.topic_tag });
     }
     case 'save_drafts': {
       needAdmin(a);
@@ -222,11 +225,13 @@ async function handleMessage(env: Env, a: McpActor, origin: string, m: any): Pro
   const fail = (code: number, message: string) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
   if (!m || m.jsonrpc !== '2.0' || typeof m.method !== 'string') return fail(-32600, 'Invalid Request');
   if (!isReq) return null; // 通知（例如 notifications/initialized）不用回
+  // 除錯用：只記方法、工具名稱與參數名稱（不記內容），在 Cloudflare 的 Worker 紀錄裡看得到
+  console.log(JSON.stringify({ mcp: m.method, tool: m.params?.name, args: Object.keys(m.params?.arguments ?? {}), brand: a.brandId, client: a.client }));
   switch (m.method) {
     case 'initialize': {
       const v = m.params?.protocolVersion;
       return ok({ protocolVersion: PROTOCOLS.includes(v) ? v : PROTOCOLS[0], capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'ego-office-posts', title: '異構資本 貼文助理', version: '1.0.0' }, instructions: `${INSTRUCTIONS}\n目前連接的品牌：${a.brandName}` });
+        serverInfo: { name: 'ego-office-posts', title: '異構資本 貼文助理', version: TOOLS_VERSION }, instructions: `${INSTRUCTIONS}\n目前連接的品牌：${a.brandName}` });
     }
     case 'ping': return ok({});
     case 'tools/list': return ok({ tools: a.role === 'admin' ? TOOLS : TOOLS.filter((t) => t.annotations.readOnlyHint) });
