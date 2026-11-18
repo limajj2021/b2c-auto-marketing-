@@ -183,7 +183,7 @@ function loginView() {
 /* ======================================================================
    首頁：現在需要處理什麼 → 今日摘要 → 快速操作 → 自動化 → 最近活動
    ====================================================================== */
-const ACTION = { account_update: '更新 Threads 帳號設定', account_disconnect: '中斷 Threads 帳號', user_password_reset: '重設同事密碼', user_update: '更新帳號', post_unschedule: '取消排程', post_reschedule: '調整發布時間', post_distribute: '改寫分發', data_export: '匯出資料', integration_line_webhook: '設定 LINE 自動接待', line_token_renewed: 'LINE 憑證自動更新', settings_update: '更新設定', post_approve: '核准貼文', post_generate: 'AI 生成貼文', post_edit: '編輯貼文', post_delete: '刪除貼文', post_retry: '重試發布', inquiry_status: '更新留資狀態', inquiry_delete: '刪除留資', line_config_update: '更新 LINE 接待設定', faq_create: '新增 FAQ', faq_update: '更新 FAQ', faq_delete: '刪除 FAQ', toggle: '切換自動化', integration_line: '設定 LINE 連線', integration_gemini: '設定 AI 連線', threads_connected: '連結 Threads', threads_disconnect: '中斷 Threads', threads_token_refreshed: 'Threads 授權自動續期', threads_deauthorize: 'Threads 解除授權', threads_delete: 'Threads 資料刪除', user_create: '新增帳號', user_update: '更新帳號', password_change: '變更密碼' };
+const ACTION = { account_update: '更新 Threads 帳號設定', account_disconnect: '中斷 Threads 帳號', user_password_reset: '重設同事密碼', user_update: '更新帳號', post_unschedule: '取消排程', post_reschedule: '調整發布時間', post_distribute: '改寫分發', data_export: '匯出資料', integration_line_webhook: '設定 LINE 自動接待', line_token_renewed: 'LINE 憑證自動更新', settings_update: '更新設定', post_approve: '核准貼文', post_generate: 'AI 生成貼文', post_edit: '編輯貼文', post_delete: '刪除貼文', post_retry: '重試發布', inquiry_status: '更新留資狀態', inquiry_delete: '刪除留資', line_config_update: '更新 LINE 接待設定', faq_create: '新增 FAQ', faq_update: '更新 FAQ', faq_delete: '刪除 FAQ', toggle: '切換自動化', integration_line: '設定 LINE 連線', integration_gemini: '設定 AI 連線', threads_connected: '連結 Threads', threads_disconnect: '中斷 Threads', line_disconnect: '中斷 LINE 連接', threads_token_refreshed: 'Threads 授權自動續期', threads_deauthorize: 'Threads 解除授權', threads_delete: 'Threads 資料刪除', user_create: '新增帳號', user_update: '更新帳號', password_change: '變更密碼' };
 const rel = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.floor(m / 60)} 小時前` : fmt(iso); };
 
 async function getSetup() {
@@ -1130,7 +1130,7 @@ async function lineConnPage() {
 
     <section style="margin-top:28px">${sec('連接 LINE 數據（選用）')}
       ${l.configured ? `<div class="list">${row({ go: false, dot: 'ok', title: esc(l.name || '已連接'), sub: `${l.basic_id ? esc(l.basic_id) + ' · ' : ''}${addon ? '自動接待運作中' : '每天讀取新好友數，不回覆訊息'}` })}</div>
-        <div class="actions" style="margin-top:12px"><button class="btn sec" id="lt">測試連線</button></div>` : ''}
+        <div class="actions" style="margin-top:12px"><button class="btn sec" id="lt">測試連線</button><button class="btn sec" id="lrm">中斷連接</button></div>` : ''}
       <p class="t-sub" style="margin:${l.configured ? 12 : 0}px 0 10px">連接後，報表會多出每日「新好友數」，就能看到「點擊 → 加好友」的轉換率。只讀取統計，不會接管訊息。約 3 分鐘，建議用電腦。</p>
       ${l.configured ? `<details><summary class="t-sub" style="cursor:pointer">更換官方帳號或憑證</summary><div style="margin-top:10px">${setupSteps}</div></details>` : setupSteps}
     </section>
@@ -1144,6 +1144,10 @@ async function lineConnPage() {
       </div></section>` : ''}
     <button class="link" id="lhelp">完整圖文說明</button></div>`, 'form');
   $('#lhelp').onclick = () => { S.helpOpen = 'line'; go('help'); };
+  $('#lrm')?.addEventListener('click', async (e) => {
+    if (!(await confirmSheet(`中斷 ${l.basic_id || 'LINE 官方帳號'} 的連接？`, '中斷連接', true, '系統會停止讀取這個官方帳號的好友數與自動接待。LINE 官方帳號本身、好友與圖文選單都不受影響，之後可以重新連接正確的帳號。'))) return;
+    if (await act(e.currentTarget, () => api('DELETE', '/integrations/line'), '已中斷 LINE 連接')) render();
+  });
   $('[data-act=rm]').onclick = () => go('settings/linemenu');
 
   // LINE ID → 加好友連結

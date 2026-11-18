@@ -324,6 +324,15 @@ export function registerExtra(add: Add, json: J, err: E) {
     return json({ url: await buildAuthorizeUrl(env, url.origin, actor.id, Date.now(), { brandId, expect }) });
   });
 
+  // 中斷 LINE 官方帳號連接（連錯帳號、換官方帳號時用）：刪掉憑證並停止自動接待；LINE 官方帳號本身不受影響
+  add('DELETE', '/integrations/line', 'admin', async ({ env, actor, brandId }) => {
+    const meta = await getMeta(env, 'line_channel_access_token');
+    await deleteCreds(env, ['line_channel_access_token', 'line_channel_secret', 'line_channel_id']);
+    await env.DB.prepare('UPDATE brand_settings SET line_auto_reply_enabled=0,updated_at=? WHERE brand_id=?').bind(new Date().toISOString(), brandId).run();
+    await audit(env, brandId, actor.name, 'line_disconnect', meta?.basic_id ?? '');
+    return json({ ok: true });
+  });
+
   add('DELETE', '/integrations/threads', 'admin', async ({ env, actor, brandId }) => {
     await removeAccounts(env, { brandId });
     await audit(env, brandId, actor.name, 'threads_disconnect');
