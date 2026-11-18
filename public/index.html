@@ -860,6 +860,10 @@ async function lineConnPage() {
         <div class="t-sub" id="lineurl" style="word-break:break-all;margin-top:8px">${st.settings.line_add_url ? `貼文會使用：<code>${esc(st.settings.line_add_url)}</code>（發布時自動換成追蹤短連結，統計點擊次數）` : ''}</div>
         <div class="actions" style="margin-top:14px"><button class="btn" id="lidsave">儲存</button>${st.settings.line_add_url ? `<a class="btn sec" href="${esc(st.settings.line_add_url)}" target="_blank" rel="noopener" style="text-decoration:none">測試加好友 ↗</a>` : ''}</div>
       </div>
+      <div class="list" style="padding:4px 16px 16px;margin-top:12px">
+        ${field('lshort', 'LINE 官方短網址（選填）', input('lshort', st.settings.line_short_url || '', 'inputmode="url" placeholder="https://lin.ee/xxxxxxx" autocapitalize="none" autocorrect="off"'), '在 LINE 官方帳號後台「增加好友人數 → 加入好友的工具」複製 <b>lin.ee</b> 開頭的網址。填了之後，貼文結尾直接放這個網址：客人看到的是 LINE 官方連結，LINE 後台會統計從這裡加入的好友數；系統的點擊數則不再計算。')}
+        <div class="actions" style="margin-top:12px"><button class="btn sec" id="lshortsave">儲存短網址</button>${st.settings.line_short_url ? `<a class="btn sec" href="${esc(st.settings.line_short_url)}" target="_blank" rel="noopener" style="text-decoration:none">測試 ↗</a>` : ''}</div>
+      </div>
       <p class="t-sub" style="margin-top:8px">只要這一步就能導流與統計點擊。自動回應、歡迎訊息請直接在 LINE 官方帳號後台設定，系統不會干擾。</p></section>
 
     <section style="margin-top:28px">${sec('圖文選單')}<div class="list">${row({ act: 'rm', title: '設計並發布圖文選單', sub: l.configured ? '選版型、填按鈕，手機上就能完成' : '需要先完成下方「連接 LINE 數據」' })}</div></section>
@@ -885,6 +889,11 @@ async function lineConnPage() {
   // LINE ID → 加好友連結
   const showUrl = () => { const id = normBasicId($('#lineid').value); $('#lineurl').innerHTML = id ? `貼文會使用：<code>https://line.me/R/ti/p/${esc(id)}</code>（發布時自動換成追蹤短連結，統計點擊次數）` : ''; };
   $('#lineid').addEventListener('input', showUrl);
+  $('#lshortsave').onclick = async (e) => {
+    const v = $('#lshort').value.trim(); $('#lshort').value = v;
+    if (!check([[$('#lshort'), v && !/^https?:\/\/lin\.ee\/[A-Za-z0-9_-]{3,30}$/.test(v), '請貼上 https://lin.ee/ 開頭的網址']])) return;
+    if (await act(e.currentTarget, () => api('PUT', '/settings', { line_short_url: v }), v ? '之後的貼文會使用 LINE 短網址' : '已改回系統追蹤連結')) { dirty = false; render(); }
+  };
   $('#lidsave').onclick = async (e) => {
     const id = normBasicId($('#lineid').value); $('#lineid').value = id;
     if (!check([[$('#lineid'), !/^@[a-z0-9._-]{3,40}$/.test(id), '請輸入官方帳號 ID，例如：@033azwud']])) return;

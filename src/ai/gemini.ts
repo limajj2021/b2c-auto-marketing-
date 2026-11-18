@@ -103,6 +103,9 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
 }
 
 /** 解析模型輸出：優先 JSON；失敗時整段視為單則。 */
+/** 貼文結尾用的加好友連結：有設定 LINE 官方短網址（lin.ee）就用它，否則用 line.me 連結（發布時換成系統追蹤短連結） */
+export const postLink = (s: Pick<Settings, 'line_add_url' | 'line_short_url'>) => s.line_short_url || s.line_add_url;
+
 /** 手機上一行能完整顯示的字數（保守值）；超過的行會被自動折行，排版就亂了 */
 export const LINE_MAX = 16;
 
@@ -171,7 +174,7 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
     if (!raw.trim()) throw new Error('Gemini 回傳空內容');
     const max = Math.max(1, s.thread_max ?? 7);
     const e = effective(o.account ?? null, s);
-    const parts = appendCta(parseParts(raw).map(tidyPart).filter(Boolean).slice(0, max), e.cta, s.line_add_url);
+    const parts = appendCta(parseParts(raw).map(tidyPart).filter(Boolean).slice(0, max), e.cta, postLink(s));
     const id = await record('ok', JSON.stringify(parts), null, data?.usageMetadata?.promptTokenCount ?? 0, data?.usageMetadata?.candidatesTokenCount ?? 0);
     return { generationId: id, parts, issues: checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) }) };
   } catch (e) {

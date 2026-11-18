@@ -79,6 +79,8 @@ export interface Settings {
   thread_max: number;
   fact_bank: string;
   leads_enabled: number;
+  /** LINE 官方短網址（https://lin.ee/…）；有填時貼文 CTA 直接用它 */
+  line_short_url?: string;
 }
 
 export interface Post {

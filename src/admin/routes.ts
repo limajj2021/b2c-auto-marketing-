@@ -268,6 +268,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
       regulated: needsReview(brand.industry, { posting_mode: 'A', require_review: 0 }),
       style_preset: s.style_preset, thread_min: s.thread_min, thread_max: s.thread_max, fact_bank: s.fact_bank,
       line_id: lineIdFromUrl(s.line_add_url),
+      line_short_url: s.line_short_url ?? '',
       line_ready: !!parseLineConfig(s.line_config).serviceInfo && !parseLineConfig(s.line_config).serviceInfo.startsWith('（'),
     },
   });
@@ -284,6 +285,11 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
     const u = b.line_id === '' ? '' : lineAddUrl(String(b.line_id));
     if (u === null) return err(400, '官方帳號 ID 格式不正確，例如：@033azwud');
     put('line_add_url', u);
+  }
+  if (b.line_short_url !== undefined) { // LINE 官方短網址（lin.ee），空字串代表不用
+    const v = String(b.line_short_url).trim().replace(/^http:\/\//, 'https://');
+    if (v && !/^https:\/\/lin\.ee\/[A-Za-z0-9_-]{3,30}$/.test(v)) return err(400, '短網址格式應為 https://lin.ee/ 開頭');
+    put('line_short_url', v);
   }
   if (b.style_preset !== undefined) { if (typeof b.style_preset !== 'string' || b.style_preset.length > 500) return err(400, '寫作原則過長'); put('style_preset', b.style_preset); }
   if (b.fact_bank !== undefined) { if (typeof b.fact_bank !== 'string' || b.fact_bank.length > 5000) return err(400, '數據庫不可超過 5000 字'); put('fact_bank', b.fact_bank); }
