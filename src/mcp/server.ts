@@ -9,7 +9,8 @@ import { publishNow } from '../threads/publishnow';
 import { partsOf } from '../threads/scheduler';
 import { normTopicTag } from '../threads/topic';
 import { listAccounts, type Account } from '../threads/accounts';
-import { iso } from '../util/time';
+import { iso, zonedToUtc } from '../util/time';
+import { BATCH_MAX, batchSchedule } from '../threads/batch';
 import type { Env } from '../types';
 import { cors, verifyBearer, type McpActor } from './oauth';
 
@@ -19,6 +20,7 @@ const MAX_POSTS = 10, MAX_PARTS = 10, MAX_CHARS = 500;
 const INSTRUCTIONS = `這是「異構資本」的 Threads 貼文助理連接器。寫貼文前一定先呼叫 get_brand_guide 取得這個品牌的資料與寫作規則，照規則寫。
 寫好先在對話裡給使用者看，使用者同意後再用 save_drafts 存成草稿（一次最多 10 篇）。要寫很多篇時，每次 5 篇分批寫，品質比較穩定。
 這個品牌有多個 Threads 帳號時，先問使用者要發到哪一個帳號，存檔時用 account 指定（例如 @vuca.tw）。
+要把多篇草稿排程發出（可以分給多個帳號輪流發，或每個帳號都發）用 schedule_posts；排程前先把帳號、方式、開始時間、間隔講給使用者確認，同意後再把 confirm 設為 true。
 不要自己編造數字、案例或引言。發布（publish_post）一定要使用者在對話中明確說要發布，並把 confirm 設為 true。`;
 
 const TOOLS = [
@@ -40,6 +42,15 @@ const TOOLS = [
   { name: 'update_draft', title: '修改草稿', description: '修改一篇還在待審核的草稿內容（整串取代）。',
     inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } }, topic_tag: { type: 'string' }, account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）；不填就用品牌預設帳號' } }, required: ['post_id', 'parts'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  { name: 'schedule_posts', title: '批量排程', description: `把多篇待審核草稿一次排程發到 Threads（一次最多 ${BATCH_MAX} 篇）。同一個品牌的多個帳號共用草稿池：mode=assign 每篇只發一次、輪流分給選的帳號（推薦）；mode=copy 每篇發到每個選的帳號（內容完全相同，可能被 Threads 視為重複）。從 start_at 開始，每篇間隔 interval_min 分鐘（0 代表同時發）。排好後時間到會自動公開發布，所以一定要使用者確認後才把 confirm 設為 true。`,
+    inputSchema: { type: 'object', properties: {
+      post_ids: { type: 'array', minItems: 1, maxItems: BATCH_MAX, items: { type: 'integer' }, description: '要排程的草稿編號（list_posts 的 #編號），依這個順序排時間' },
+      accounts: { type: 'array', items: { type: 'string' }, description: '要發到哪些帳號（例如 ["@vuca.tw","@vuca.canada"]）；不填就用所有可發文的帳號' },
+      mode: { type: 'string', enum: ['assign', 'copy'], description: 'assign＝輪流分配（預設）；copy＝每個帳號都發' },
+      start_at: { type: 'string', description: '第一篇的發布時間，例如 2026-11-20 09:00（品牌所在時區）或含時區的 ISO 時間；不填＝現在（5 分鐘內開始）' },
+      interval_min: { type: 'integer', minimum: 0, maximum: 1440, description: '每篇間隔幾分鐘，預設 30；0＝同時發' },
+      confirm: { type: 'boolean', description: '使用者已確認帳號、方式與時間後才設為 true' } }, required: ['post_ids', 'confirm'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
   { name: 'publish_post', title: '立即發布到 Threads', description: '把一篇草稿或已排程的貼文立即發布到 Threads（公開，發出後無法收回）。只有在使用者明確說要發布時才使用，並把 confirm 設為 true。',
     inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, confirm: { type: 'boolean', description: '使用者已明確同意立即發布時才設為 true' } }, required: ['post_id', 'confirm'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
@@ -144,6 +155,27 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
       if (r.meta.changes !== 1) throw new ToolError('只有待審核的草稿可以修改（找不到這篇草稿，或它已排程／發布）');
       await audit(env, a.brandId, `${a.name}（${a.client}）`, 'mcp_update_draft', String(args.post_id));
       return text(`已更新草稿 #${args.post_id}${issues.length ? `，但內容需要修改：${issues.join('；')}` : ''}`);
+    }
+    case 'schedule_posts': {
+      needAdmin(a);
+      if (args?.confirm !== true) throw new ToolError('排程前請先跟使用者確認要發到哪些帳號、輪流或每個帳號都發、從什麼時候開始、間隔多久，使用者同意後再把 confirm 設為 true。');
+      const live = accts.filter((x) => x.status === 'ok');
+      const names: unknown[] = Array.isArray(args?.accounts) ? args.accounts : [];
+      const chosen = names.length ? names.map((n) => pickAccount(accts, n)!) : live;
+      const dead = chosen.filter((x) => x.status !== 'ok');
+      if (dead.length) throw new ToolError(`${dead.map((x) => '@' + x.username).join('、')} 的授權已失效，暫時不能發文，請使用者到後台重新連結`);
+      let start: Date | null = null;
+      if (args?.start_at !== undefined && args.start_at !== null && String(args.start_at).trim()) {
+        const v = String(args.start_at).trim(), m = v.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2})$/);
+        start = m ? zonedToUtc(m[1], m[2], brand.timezone) : new Date(v);
+        if (isNaN(start.getTime())) throw new ToolError('start_at 看不懂，請用 2026-11-20 09:00 這種格式');
+      }
+      const r = await batchSchedule(env, a.brandId, `${a.name}（${a.client}）`, { postIds: args?.post_ids, accountIds: chosen.map((x) => x.id), mode: args?.mode, intervalMin: args?.interval_min ?? 30, start });
+      if (!r.ok) throw new ToolError(r.error);
+      const fmt = (t: string) => new Intl.DateTimeFormat('zh-TW', { timeZone: brand.timezone, month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t));
+      return text(`已排程 ${r.scheduled} 次發文（${Object.entries(r.per_account).map(([k, n]) => `${k} ${n} 篇`).join('、')}）：
+${r.plan.map((x) => `・${fmt(x.at)}　${x.account}　#${x.post_id}${x.copy ? '（複製）' : ''}`).join('\n')}${r.skipped.length ? `\n略過：${r.skipped.map((x) => `#${x.id} ${x.reason}`).join('；')}` : ''}
+時間到會自動發布；要改時間或取消請到後台：${review}`, { ...r, timezone: brand.timezone, review_url: review });
     }
     case 'publish_post': {
       needAdmin(a);

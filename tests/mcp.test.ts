@@ -75,7 +75,7 @@ describe('AI connector tools', () => {
     expect(init.result.protocolVersion).toBe('2025-06-18'); expect(init.result.instructions).toContain('測試品牌');
     expect((await rpc(env, tok, 'notifications/initialized', undefined, null)).status).toBe(202);
     const tools = ((await (await rpc(env, tok, 'tools/list')).json()) as any).result.tools.map((t: any) => t.name);
-    expect(tools).toEqual(['get_brand_guide', 'list_posts', 'get_post', 'save_drafts', 'update_draft', 'publish_post']);
+    expect(tools).toEqual(['get_brand_guide', 'list_posts', 'get_post', 'save_drafts', 'update_draft', 'schedule_posts', 'publish_post']);
     const guide = await tool(env, tok, 'get_brand_guide', { topic: '房仲' });
     expect(guide.content[0].text).toContain('排版規則'); expect(guide.content[0].text).toContain('房仲'); expect(guide.content[0].text).not.toContain('只輸出 JSON');
     const saved = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['鉤子一', '結尾一'] }, { parts: ['鉤子二，', '結尾二'], topic_tag: '#房仲' }] });
@@ -151,5 +151,29 @@ describe('AI connector tools', () => {
     await tool(env, tok, 'update_draft', { post_id: id, parts: ['改到第二個帳號'], account: 'second.tw' });
     expect(((await env.DB.prepare('SELECT account_id FROM posts WHERE id=?').bind(id).first()) as any).account_id).toBe(12);
     expect((await tool(env, tok, 'list_posts', {})).content[0].text).toContain('@second.tw｜改到第二個帳號');
+  });
+
+  it('schedule_posts: needs confirmation, round-robins across named accounts in the brand timezone, and refuses foreign accounts', async () => {
+    const env: any = await makeEnv();
+    for (const [id, u] of [[11, 'a.tw'], [12, 'b.tw']] as const)
+      await env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES(?,'b1',?,?,'x','ok','x','x')`).bind(id, 'u' + id, u).run();
+    await env.DB.prepare(`INSERT INTO brands(id,name,industry,description,timezone,created_at) VALUES('b2','別人','general','x','Asia/Taipei','x')`).run();
+    await env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES(21,'b2','u21','other.tw','x','ok','x','x')`).run();
+    const { access_token: tok } = await connect(env);
+    const ids = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['一'] }, { parts: ['二'] }, { parts: ['三'] }] })).structuredContent.saved.map((x: any) => x.id);
+    const d = new Date(Date.now() + 2 * 86400000), day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(d);
+    const args = { post_ids: ids, accounts: ['@a.tw', 'b.tw'], start_at: `${day} 09:00`, interval_min: 60 };
+    const no = await tool(env, tok, 'schedule_posts', { ...args, confirm: false });
+    expect(no.isError).toBe(true);
+    expect((await env.DB.prepare(`SELECT count(*) n FROM posts WHERE status='scheduled'`).first() as any).n).toBe(0);
+    expect((await tool(env, tok, 'schedule_posts', { ...args, accounts: ['@other.tw'], confirm: true })).isError).toBe(true);
+    const r = await tool(env, tok, 'schedule_posts', { ...args, confirm: true });
+    expect(r.isError).toBeUndefined(); expect(r.structuredContent.scheduled).toBe(3);
+    expect(r.structuredContent.per_account).toEqual({ '@a.tw': 2, '@b.tw': 1 });
+    const rows: any[] = (await env.DB.prepare(`SELECT account_id,scheduled_at FROM posts WHERE brand_id='b1' ORDER BY id`).all()).results;
+    expect(rows.map((x) => x.account_id)).toEqual([11, 12, 11]);
+    expect(rows[0].scheduled_at).toBe(new Date(`${day}T01:00:00Z`).toISOString());
+    expect(Date.parse(rows[2].scheduled_at) - Date.parse(rows[0].scheduled_at)).toBe(2 * 3600000);
+    expect(r.content[0].text).toContain('09:00');
   });
 });

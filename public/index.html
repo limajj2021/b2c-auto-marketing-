@@ -1272,7 +1272,7 @@ async function aiConnPage() {
   const copyBtn = (id, label = '複製') => `<button class="btn sec sm" data-copy="${id}" type="button">${label}</button>`;
   const codeBox = (id, v) => `<div style="display:flex;gap:8px;align-items:flex-start;margin-top:8px"><pre id="${id}" style="flex:1;margin:0;padding:10px 12px;border-radius:10px;background:var(--bg2);font-size:13px;white-space:pre-wrap;word-break:break-all">${esc(v)}</pre>${copyBtn(id)}</div>`;
   setView(`<div data-form>
-    <p class="t-sub">在你自己的 <b>ChatGPT</b> 或 <b>Codex</b> 裡，直接用對話寫貼文：「幫我寫 5 篇給房仲的貼文」「第 3 篇短一點」「存成草稿」。AI 會先讀取${esc(BRAND)}的品牌資料和寫作規則，用的是<b>你自己的 AI 方案額度</b>。</p>
+    <p class="t-sub">在你自己的 <b>ChatGPT</b> 或 <b>Codex</b> 裡，直接用對話寫貼文：「幫我寫 5 篇給房仲的貼文」「第 3 篇短一點」「存成草稿」「把這 6 篇輪流排到兩個帳號，明天早上 9 點開始，每 2 小時一篇」。AI 會先讀取${esc(BRAND)}的品牌資料和寫作規則，用的是<b>你自己的 AI 方案額度</b>。</p>
     <section style="margin-top:20px">${sec('連接網址')}<div class="list" style="padding:12px 16px 14px">${codeBox('mcpurl', url)}
       <p class="t-sub" style="margin-top:8px">連接時會請你登入這個後台帳號、選擇品牌。AI 只能存取你選的那一個品牌。</p></div></section>
 

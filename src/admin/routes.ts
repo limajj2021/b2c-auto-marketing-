@@ -4,6 +4,7 @@ import { getAccount, listAccounts, resolveCred } from '../threads/accounts';
 import { BudgetError, budgeted } from '../budget';
 import { autoTag, normTopicTag } from '../threads/topic';
 import { publishNow } from '../threads/publishnow';
+import { batchSchedule } from '../threads/batch';
 import { lineAddUrl, lineIdFromUrl } from '../line/links';
 import { buildTraffic } from '../attribution';
 import { audit, brandBySlug, forBrand, getBrand, getSettings, isMulti, jsonArr } from '../db';
@@ -496,57 +497,13 @@ add('POST', '/posts/(\\d+)/retry', 'admin', async ({ env, m, actor, brandId }) =
   return json({ ok: true });
 });
 
-// 批量排程（多帳號共用貼文池）：選好幾篇草稿、選要發的帳號，一次排好時間。
-// assign：每篇只發一次，輪流分給選的帳號；copy：每篇發到每個選的帳號（同一段文字，可能被 Threads 視為重複內容）。
-// 時間：從 start_at（或現在）開始，每篇間隔 interval_min 分鐘；0 代表全部同一時間。
-const BATCH_MAX = 50;
+// 批量排程（多帳號共用貼文池）：邏輯在 threads/batch.ts，後台與 MCP 共用
 add('POST', '/posts/batch-schedule', 'admin', async ({ env, req, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
-  const postIds = [...new Set((Array.isArray(b.post_ids) ? b.post_ids : []).map(Number).filter((x: number) => Number.isInteger(x) && x > 0))] as number[];
-  if (!postIds.length) return err(400, '請至少選一篇草稿');
-  if (postIds.length > BATCH_MAX) return err(400, `一次最多 ${BATCH_MAX} 篇`);
-  const mode = b.mode === 'copy' ? 'copy' : 'assign';
-  const interval = Number(b.interval_min ?? 30);
-  if (!Number.isInteger(interval) || interval < 0 || interval > 1440) return err(400, '間隔需為 0 到 1440 分鐘');
-  let start = new Date();
-  if (b.start_at) { const t = scheduleTime(b.start_at); if (typeof t === 'string') return err(400, t); start = t; }
-  const all = await listAccounts(env);
-  const want = new Set((Array.isArray(b.account_ids) ? b.account_ids : []).map(Number));
-  const accts = all.filter((a) => want.has(a.id) && a.status === 'ok');
-  if (!accts.length) return err(400, all.length ? '請至少選一個可以發文的 Threads 帳號' : '這個品牌還沒有連結 Threads 帳號');
-  const brand = await getBrand(env), s = await getSettings(env, brandId);
-  const rows = (await env.DB.prepare(`SELECT * FROM posts WHERE brand_id=? AND status='draft' AND id IN (${postIds.map(() => '?').join(',')})`).bind(brandId, ...postIds).all<any>()).results;
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const skipped: { id: number; reason: string }[] = [];
-  const ready: any[] = [];
-  for (const id of postIds) {
-    const r = byId.get(id);
-    if (!r) { skipped.push({ id, reason: '不是待審核的草稿' }); continue; }
-    const issues = checkParts(partsOf(r), { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
-    if (issues.length) { skipped.push({ id, reason: issues.join('；') }); continue; }
-    ready.push(r);
-  }
-  if (!ready.length) return err(422, `沒有可以排程的草稿：${skipped.map((x) => `#${x.id} ${x.reason}`).join('；')}`);
-  // 排出（貼文, 帳號）清單，依序分配時間
-  const plan: { post: any; acct: typeof accts[number]; copy: boolean }[] = [];
-  ready.forEach((p, i) => {
-    if (mode === 'assign') plan.push({ post: p, acct: accts[i % accts.length], copy: false });
-    else accts.forEach((a, j) => plan.push({ post: p, acct: a, copy: j > 0 }));
-  });
-  const at = (k: number) => new Date(start.getTime() + k * interval * 60000).toISOString();
-  const per: Record<string, number> = {};
-  for (const [k, x] of plan.entries()) {
-    if (x.copy) {
-      await env.DB.prepare(`INSERT INTO posts(brand_id,account_id,source_post_id,content,parts,status,topic_tag,scheduled_at,approved_by,seen_at,updated_at,created_at) VALUES(?,?,?,?,?,'scheduled',?,?,?,?,?,?)`)
-        .bind(brandId, x.acct.id, x.post.id, x.post.content, x.post.parts, x.post.topic_tag, at(k), actor.name, iso(), iso(), iso()).run();
-    } else {
-      await env.DB.prepare(`UPDATE posts SET status='scheduled',account_id=?,scheduled_at=?,approved_by=?,error_message=NULL,seen_at=COALESCE(seen_at,?),updated_at=? WHERE id=? AND status='draft'`)
-        .bind(x.acct.id, at(k), actor.name, iso(), iso(), x.post.id).run();
-    }
-    per['@' + x.acct.username] = (per['@' + x.acct.username] ?? 0) + 1;
-  }
-  await audit(env, brandId, actor.name, 'post_batch_schedule', `${mode}:${ready.map((r) => r.id).join(',')}→${accts.map((a) => a.id).join(',')}`);
-  return json({ ok: true, scheduled: plan.length, per_account: per, first_at: at(0), last_at: at(plan.length - 1), skipped });
+  const r = await batchSchedule(env, brandId, actor.name, { postIds: b.post_ids, accountIds: (Array.isArray(b.account_ids) ? b.account_ids : []).map(Number), mode: b.mode, intervalMin: b.interval_min, start: b.start_at ? new Date(String(b.start_at)) : null });
+  if (!r.ok) return err(r.status, r.error);
+  const { plan: _plan, ...rest } = r;
+  return json(rest);
 });
 
 // 改寫分發：以目標帳號的人設改寫同一串內容，建立各自的草稿並錯開發布時間
