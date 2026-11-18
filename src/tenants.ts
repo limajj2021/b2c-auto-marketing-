@@ -13,9 +13,11 @@ export async function runAllTenants(raw: Env, now = new Date()): Promise<{ proce
   const batch = Math.max(1, Number(raw.CRON_BATCH) || 25);
   // 整次排程共用一份請求額度（Cloudflare 免費方案每次執行 50 次，含資料庫查詢）
   const benv = budgeted(raw, Math.max(10, Number(raw.CRON_SUBREQUEST_LIMIT) || 45));
-  // 最久沒被處理的優先；工作區超過 batch 時，下一輪會輪到其他工作區
-  const rows = (await benv.DB.prepare(`SELECT id FROM brands WHERE COALESCE(status,'active')='active' ORDER BY COALESCE(last_cron_at,'') LIMIT ?`)
-    .bind(batch).all<{ id: string }>()).results;
+  // 有貼文到時間要發的工作區優先（額度共用，排在後面可能輪不到）；其次最久沒被處理的優先
+  const rows = (await benv.DB.prepare(`SELECT b.id FROM brands b WHERE COALESCE(b.status,'active')='active'
+      ORDER BY EXISTS(SELECT 1 FROM posts p WHERE p.brand_id=b.id AND p.status IN ('scheduled','publishing','unknown') AND COALESCE(p.scheduled_at,'')<=?) DESC,
+               COALESCE(b.last_cron_at,'') LIMIT ?`)
+    .bind(iso(now), batch).all<{ id: string }>()).results;
   const processed: string[] = [];
   let budgetHit = false;
   // 系統紀錄保留 30 天：每小時清一次（整個平台一次）

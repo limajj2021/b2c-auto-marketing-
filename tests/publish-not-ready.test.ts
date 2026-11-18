@@ -2,6 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { publishDue, runCron } from '../src/threads/scheduler';
 import { budgeted } from '../src/budget';
+import { runAllTenants } from '../src/tenants';
 import { timing } from '../src/threads/api';
 import { jres, makeEnv, mockFetch } from './helpers';
 
@@ -68,5 +69,19 @@ describe('publishing when Threads is not ready yet', () => {
     for (let i = 0; i < 4 && p.status !== 'published'; i++) { await publishDue(budgeted(env, 30), NOW); p = await env.DB.prepare('SELECT * FROM posts').first(); }
     expect(p.status).toBe('published'); expect(JSON.parse(p.part_ids)).toHaveLength(8);
     expect(m.calls.filter((c) => c.url.endsWith('/threads_publish')).length).toBe(8); // 每則只發一次
+  });
+
+  it('a workspace with posts due goes first, so the shared per-run budget is not used up by idle ones', async () => {
+    const env: any = await makeEnv();
+    for (const id of ['a1', 'a2', 'a3', 'a4']) {
+      await env.DB.prepare(`INSERT INTO brands(id,name,industry,description,timezone,created_at,last_cron_at) VALUES(?,?,'general','x','Asia/Taipei','2026-01-01','2000-01-01')`).bind(id, id).run();
+      await env.DB.prepare(`INSERT INTO brand_settings(brand_id,updated_at) VALUES(?,'x')`).bind(id).run();
+    }
+    await env.DB.prepare(`UPDATE brands SET last_cron_at='2026-11-18T07:59:00Z' WHERE id='b1'`).run(); // 最近才處理過，照舊規則會排最後
+    await insert(env, ['p1', 'p2', 'p3']);
+    let n = 0; const m = mockFetch((u) => u.endsWith('/threads_publish') ? jres({ id: `T${++n}` }) : jres({ id: 'C' })); restore = m.restore;
+    const r = await runAllTenants(env, NOW);
+    expect(r.processed[0]).toBe('b1');
+    expect(((await env.DB.prepare('SELECT status FROM posts').first()) as any).status).toBe('published');
   });
 });
