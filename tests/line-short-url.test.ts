@@ -24,6 +24,7 @@ describe('LINE short URL (lin.ee)', () => {
     expect(postLink({ line_add_url: 'https://line.me/R/ti/p/@test', line_short_url: 'https://lin.ee/AbC123' })).toBe('https://lin.ee/AbC123');
     expect(postLink({ line_add_url: 'https://line.me/R/ti/p/@test', line_short_url: '' })).toBe('https://line.me/R/ti/p/@test');
     const env: any = await makeEnv(); env.PUBLIC_BASE_URL = 'https://x.dev';
+    await env.DB.prepare(`UPDATE brand_settings SET line_short_url='https://lin.ee/AbC123'`).run();
     const parts = ['鉤子', '加 LINE 👇\nhttps://lin.ee/AbC123'];
     expect(await trackedParts(env, { id: 1, brand_id: 'b1', account_id: null } as any, parts)).toEqual(parts);
   });

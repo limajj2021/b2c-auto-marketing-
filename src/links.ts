@@ -10,12 +10,20 @@ const randomCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (
 // 社群平台的連結預覽爬蟲、指令列工具不算點擊
 const BOT = /bot|crawler|spider|facebookexternalhit|meta-externalagent|facebot|preview|slurp|curl|wget|python|headless|fetch/i;
 
+const LINE_LINK = /https?:\/\/(?:line\.me\/R\/ti\/p\/[^\s，。）)]+|lin\.ee\/[A-Za-z0-9_-]+|page\.line\.me\/[^\s，。）)]+)/g;
+/** 不是品牌目前設定的 LINE 加好友連結，換成目前的連結 */
+export function fixLineLinks(parts: string[], current: string[], to: string): string[] {
+  return parts.map((p) => p.replace(LINE_LINK, (m) => (current.includes(m) ? m : to)));
+}
+
 /** 發布前把貼文中的 LINE 連結換成追蹤短連結；同一串貼文固定使用同一個代碼（重試與核對時結果一致）。 */
 export async function trackedParts(env: Env, post: Pick<Post, 'id' | 'brand_id' | 'account_id'>, parts: string[]): Promise<string[]> {
   const base = env.PUBLIC_BASE_URL?.replace(/\/+$/, '');
-  if (!base) return parts;
-  const url = (await getSettings(env, post.brand_id)).line_add_url;
-  if (!url || !parts.some((p) => p.includes(url))) return parts;
+  const st = await getSettings(env, post.brand_id), url = st.line_add_url;
+  if (!url) return parts;
+  // 草稿寫好後品牌換過 LINE（或誤帶別的品牌的 LINE）：發布時一律換成品牌目前設定的連結
+  parts = fixLineLinks(parts, [url, st.line_short_url].filter(Boolean) as string[], url);
+  if (!base || !parts.some((p) => p.includes(url))) return parts;
   let code = (await env.DB.prepare('SELECT code FROM post_links WHERE brand_id=? AND post_id=?').bind(post.brand_id, post.id).first<{ code: string }>())?.code;
   if (!code) {
     code = randomCode();
