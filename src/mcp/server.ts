@@ -8,6 +8,7 @@ import { withCreds } from '../integrations';
 import { publishNow } from '../threads/publishnow';
 import { partsOf } from '../threads/scheduler';
 import { normTopicTag } from '../threads/topic';
+import { listAccounts, type Account } from '../threads/accounts';
 import { iso } from '../util/time';
 import type { Env } from '../types';
 import { cors, verifyBearer, type McpActor } from './oauth';
@@ -17,11 +18,12 @@ const MAX_POSTS = 10, MAX_PARTS = 10, MAX_CHARS = 500;
 
 const INSTRUCTIONS = `這是「異構資本」的 Threads 貼文助理連接器。寫貼文前一定先呼叫 get_brand_guide 取得這個品牌的資料與寫作規則，照規則寫。
 寫好先在對話裡給使用者看，使用者同意後再用 save_drafts 存成草稿（一次最多 10 篇）。要寫很多篇時，每次 5 篇分批寫，品質比較穩定。
+這個品牌有多個 Threads 帳號時，先問使用者要發到哪一個帳號，存檔時用 account 指定（例如 @vuca.tw）。
 不要自己編造數字、案例或引言。發布（publish_post）一定要使用者在對話中明確說要發布，並把 confirm 設為 true。`;
 
 const TOOLS = [
   { name: 'get_brand_guide', title: '讀取品牌資料與寫作規則', description: '取得目前連接品牌的介紹、服務、受眾、語氣、主題、禁用詞、可引用數據、Threads 串文寫作與排版規則、結尾 CTA。寫任何貼文前先呼叫。',
-    inputSchema: { type: 'object', properties: { topic: { type: 'string', description: '這次想寫的主題（選填）' } }, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { topic: { type: 'string', description: '這次想寫的主題（選填）' }, account: { type: 'string', description: '要用哪個 Threads 帳號的人設寫（選填，例如 @vuca.tw）' } }, additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: 'list_posts', title: '列出貼文', description: '列出這個品牌最近的貼文（草稿、已排程、已發布），回傳編號、狀態、第一句。',
     inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['draft', 'scheduled', 'published', 'failed'] }, limit: { type: 'integer', minimum: 1, maximum: 30 } }, additionalProperties: false },
@@ -32,10 +34,11 @@ const TOOLS = [
   { name: 'save_drafts', title: '存成草稿', description: '把寫好的貼文存進後台的待審核草稿（一次最多 10 篇；每篇是一串 Threads 串文，parts 每個元素是一則，最多 10 則、每則最多 500 字）。不要自己寫連結：系統會在最後一則自動加上品牌的 CTA 與 LINE 連結。',
     inputSchema: { type: 'object', properties: { posts: { type: 'array', minItems: 1, maxItems: MAX_POSTS, items: { type: 'object', properties: {
       parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } },
-      topic_tag: { type: 'string', description: 'Threads 主題標籤（選填，不含 #）；不填就用品牌預設' } }, required: ['parts'], additionalProperties: false } } }, required: ['posts'], additionalProperties: false },
+      topic_tag: { type: 'string', description: 'Threads 主題標籤（選填，不含 #）；不填就用品牌預設' },
+      account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）；不填就用品牌預設帳號' } }, required: ['parts'], additionalProperties: false } } }, required: ['posts'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   { name: 'update_draft', title: '修改草稿', description: '修改一篇還在待審核的草稿內容（整串取代）。',
-    inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } }, topic_tag: { type: 'string' } }, required: ['post_id', 'parts'], additionalProperties: false },
+    inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } }, topic_tag: { type: 'string' }, account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）；不填就用品牌預設帳號' } }, required: ['post_id', 'parts'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   { name: 'publish_post', title: '立即發布到 Threads', description: '把一篇草稿或已排程的貼文立即發布到 Threads（公開，發出後無法收回）。只有在使用者明確說要發布時才使用，並把 confirm 設為 true。',
     inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, confirm: { type: 'boolean', description: '使用者已明確同意立即發布時才設為 true' } }, required: ['post_id', 'confirm'], additionalProperties: false },
@@ -66,31 +69,47 @@ const cleanTag = (v: unknown): string | null => {
   const t = normTopicTag(v); if (t === null) throw new ToolError('主題標籤最多 50 字，不能有句點或 &'); return t;
 };
 
+/** 找出要發文的帳號：指定了就必須是這個品牌的帳號；沒指定用品牌預設（第一個） */
+function pickAccount(accts: Account[], v: unknown): Account | null {
+  if (v === undefined || v === null || String(v).trim() === '') return accts[0] ?? null;
+  const want = String(v).trim().replace(/^@/, '').toLowerCase();
+  const hit = accts.find((x) => (x.username ?? '').toLowerCase() === want);
+  if (!hit) throw new ToolError(accts.length ? `這個品牌沒有 @${want}。可以用的帳號：${accts.map((x) => '@' + x.username).join('、')}` : '這個品牌還沒有連結 Threads 帳號');
+  return hit;
+}
+const acctLabel = (a: Account | null | undefined) => (a?.username ? '@' + a.username : '預設帳號');
+
 async function callTool(env: Env, a: McpActor, origin: string, name: string, args: any) {
-  const brand = await getBrand(env), s = await getSettings(env, a.brandId);
+  const brand = await getBrand(env), s = await getSettings(env, a.brandId), accts = await listAccounts(env);
   const review = `${origin}/#/posts`;
   switch (name) {
     case 'get_brand_guide': {
-      const guide = buildPrompt(brand, s, { topic: args?.topic ? String(args.topic).slice(0, 200) : undefined }).split('\n# 輸出')[0].trim();
+      const acct = args?.account ? pickAccount(accts, args.account) : null;
+      const guide = buildPrompt(brand, s, { topic: args?.topic ? String(args.topic).slice(0, 200) : undefined, account: acct }).split('\n# 輸出')[0].trim();
+      const acctList = accts.length ? accts.map((x, i) => `・@${x.username}${i === 0 ? '（預設）' : ''}${x.status !== 'ok' ? '（授權失效，暫時不能發文）' : ''}${x.persona ? `：${x.persona}` : ''}`).join('\n') : '（還沒有連結 Threads 帳號）';
       const link = postLink(s);
       return text(`${guide}
 
 # 套路（每篇挑一個，不要連續重複）
 ${Object.values(PATTERNS).map((p) => `・${p.name}：${p.flow}`).join('\n')}
 
+# Threads 帳號
+${acctList}
+${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者要發到哪一個，存檔時用 account 指定；每個帳號的人設可能不同，可以用 get_brand_guide 的 account 參數取得該帳號的寫法。' : ''}
+
 # 存檔
 ・寫好後用 save_drafts 存成草稿，每篇的 parts 是一則一則的串文。
 ・不要自己寫連結。系統會在最後一則加上：${[s.cta_text, link].filter(Boolean).join(' ') || '（這個品牌還沒設定 CTA 與 LINE 連結）'}
 ・主題標籤預設：${s.topic_tag || '（無）'}。可以在 save_drafts 每篇另外指定 topic_tag。
-・存好後請使用者到後台審核：${review}`, { brand: brand.name, thread_min: s.thread_min, thread_max: s.thread_max, topic_tag: s.topic_tag || null, cta: s.cta_text, link });
+・存好後請使用者到後台審核：${review}`, { brand: brand.name, accounts: accts.map((x) => ({ username: x.username, persona: x.persona || null, active: x.status === 'ok' })), thread_min: s.thread_min, thread_max: s.thread_max, topic_tag: s.topic_tag || null, cta: s.cta_text, link });
     }
     case 'list_posts': {
       const st = ['draft', 'scheduled', 'published', 'failed'].includes(args?.status) ? args.status : null;
       const lim = Math.min(Math.max(Number(args?.limit) || 10, 1), 30);
-      const rows = (await env.DB.prepare(`SELECT id,status,content,parts,scheduled_at,published_at FROM posts WHERE brand_id=? AND status<>'deleted' AND (? IS NULL OR status=?) ORDER BY id DESC LIMIT ?`)
+      const rows = (await env.DB.prepare(`SELECT id,status,content,parts,scheduled_at,published_at,account_id FROM posts WHERE brand_id=? AND status<>'deleted' AND (? IS NULL OR status=?) ORDER BY id DESC LIMIT ?`)
         .bind(a.brandId, st, st, lim).all<any>()).results;
-      const items = rows.map((r) => ({ id: r.id, status: r.status, parts: partsOf(r).length, hook: String(r.content).split('\n')[0].slice(0, 60), scheduled_at: r.scheduled_at, published_at: r.published_at }));
-      return text(items.length ? items.map((x) => `#${x.id}［${x.status}］${x.hook}（${x.parts} 則）`).join('\n') : '沒有符合的貼文', { posts: items });
+      const items = rows.map((r) => ({ id: r.id, status: r.status, account: acctLabel(accts.find((x) => x.id === r.account_id) ?? (r.account_id ? null : accts[0])), parts: partsOf(r).length, hook: String(r.content).split('\n')[0].slice(0, 60), scheduled_at: r.scheduled_at, published_at: r.published_at }));
+      return text(items.length ? items.map((x) => `#${x.id}［${x.status}］${x.account}｜${x.hook}（${x.parts} 則）`).join('\n') : '沒有符合的貼文', { posts: items });
     }
     case 'get_post': {
       const r = await env.DB.prepare(`SELECT id,status,content,parts,topic_tag,error_message FROM posts WHERE id=? AND brand_id=? AND status<>'deleted'`).bind(Number(args?.post_id), a.brandId).first<any>();
@@ -103,24 +122,25 @@ ${Object.values(PATTERNS).map((p) => `・${p.name}：${p.flow}`).join('\n')}
       const posts = Array.isArray(args?.posts) ? args.posts : [];
       if (!posts.length) throw new ToolError('沒有要存的貼文');
       if (posts.length > MAX_POSTS) throw new ToolError(`一次最多存 ${MAX_POSTS} 篇`);
-      const link = postLink(s), saved: { id: number; parts: number; issues: string[] }[] = [];
-      const prepared = posts.map((p: any) => ({ parts: withCta(cleanParts(p?.parts), s.cta_text, link), tag: cleanTag(p?.topic_tag) }));
+      const link = postLink(s), saved: { id: number; parts: number; account: string; issues: string[] }[] = [];
+      const prepared = posts.map((p: any) => ({ parts: withCta(cleanParts(p?.parts), s.cta_text, link), tag: cleanTag(p?.topic_tag), acct: pickAccount(accts, p?.account) }));
       for (const p of prepared) {
         const issues = checkParts(p.parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
-        const r = await env.DB.prepare(`INSERT INTO posts(brand_id,content,parts,status,topic_tag,error_message,updated_at,created_at) VALUES(?,?,?,'draft',?,?,?,?)`)
-          .bind(a.brandId, p.parts[0], JSON.stringify(p.parts), p.tag, issues.length ? `內容檢查未通過：${issues.join('；')}` : null, iso(), iso()).run();
-        saved.push({ id: r.meta.last_row_id as number, parts: p.parts.length, issues });
+        const r = await env.DB.prepare(`INSERT INTO posts(brand_id,account_id,content,parts,status,topic_tag,error_message,updated_at,created_at) VALUES(?,?,?,?,'draft',?,?,?,?)`)
+          .bind(a.brandId, p.acct?.id ?? null, p.parts[0], JSON.stringify(p.parts), p.tag, issues.length ? `內容檢查未通過：${issues.join('；')}` : null, iso(), iso()).run();
+        saved.push({ id: r.meta.last_row_id as number, parts: p.parts.length, account: acctLabel(p.acct), issues });
       }
       await audit(env, a.brandId, `${a.name}（${a.client}）`, 'mcp_save_drafts', saved.map((x) => x.id).join(','));
       const warn = saved.filter((x) => x.issues.length);
-      return text(`已存成 ${saved.length} 篇草稿：${saved.map((x) => `#${x.id}`).join('、')}。${warn.length ? `\n其中 ${warn.map((x) => `#${x.id}`).join('、')} 有內容需要修改：${warn.map((x) => x.issues.join('；')).join(' / ')}` : ''}\n請到後台審核：${review}`, { saved, review_url: review });
+      return text(`已存成 ${saved.length} 篇草稿：${saved.map((x) => `#${x.id}（${x.account}）`).join('、')}。${warn.length ? `\n其中 ${warn.map((x) => `#${x.id}`).join('、')} 有內容需要修改：${warn.map((x) => x.issues.join('；')).join(' / ')}` : ''}\n請到後台審核：${review}`, { saved, review_url: review });
     }
     case 'update_draft': {
       needAdmin(a);
       const parts = withCta(cleanParts(args?.parts), s.cta_text, postLink(s)), tag = args?.topic_tag === undefined ? undefined : cleanTag(args.topic_tag);
+      const acct = args?.account === undefined ? undefined : pickAccount(accts, args.account);
       const issues = checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
-      const r = await env.DB.prepare(`UPDATE posts SET content=?,parts=?,${tag !== undefined ? 'topic_tag=?,' : ''}error_message=?,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
-        .bind(...[parts[0], JSON.stringify(parts), ...(tag !== undefined ? [tag] : []), issues.length ? `內容檢查未通過：${issues.join('；')}` : null, iso(), Number(args?.post_id), a.brandId]).run();
+      const r = await env.DB.prepare(`UPDATE posts SET content=?,parts=?,${tag !== undefined ? 'topic_tag=?,' : ''}${acct !== undefined ? 'account_id=?,' : ''}error_message=?,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
+        .bind(...[parts[0], JSON.stringify(parts), ...(tag !== undefined ? [tag] : []), ...(acct !== undefined ? [acct?.id ?? null] : []), issues.length ? `內容檢查未通過：${issues.join('；')}` : null, iso(), Number(args?.post_id), a.brandId]).run();
       if (r.meta.changes !== 1) throw new ToolError('只有待審核的草稿可以修改（找不到這篇草稿，或它已排程／發布）');
       await audit(env, a.brandId, `${a.name}（${a.client}）`, 'mcp_update_draft', String(args.post_id));
       return text(`已更新草稿 #${args.post_id}${issues.length ? `，但內容需要修改：${issues.join('；')}` : ''}`);

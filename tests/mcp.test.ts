@@ -127,4 +127,29 @@ describe('AI connector tools', () => {
     const staff = ((await api(env, 'POST', '/api/login', { username: 'cs', password: 'staff-password-1' })).headers.get('set-cookie') ?? '').split(';')[0];
     expect((await api(env, 'POST', '/api/mcp/tokens', {}, staff)).status).toBe(403);
   });
+
+  it('drafts are always tied to a Threads account: the one named, or the brand default; unknown accounts are refused', async () => {
+    const env: any = await makeEnv();
+    const acct = (id: number, u: string, persona: string) => env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,persona,created_at,updated_at) VALUES(?,'b1',?,?,'x',?,'x','x')`).bind(id, 'u' + id, u, persona).run();
+    await acct(11, 'main.tw', '品牌主帳號'); await acct(12, 'second.tw', '老闆個人帳號');
+    await env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,created_at,updated_at) VALUES(13,'b2','u13','other.tw','x','x','x')`).run();
+    const { access_token: tok } = await connect(env);
+    const guide = await tool(env, tok, 'get_brand_guide', {});
+    expect(guide.content[0].text).toContain('@main.tw（預設）'); expect(guide.content[0].text).toContain('@second.tw：老闆個人帳號');
+    expect(guide.content[0].text).toContain('先問使用者要發到哪一個');
+    expect((await tool(env, tok, 'get_brand_guide', { account: '@second.tw' })).content[0].text).toContain('老闆個人帳號');
+    const saved = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['預設'] }, { parts: ['指定'], account: '@Second.TW' }] });
+    expect(saved.content[0].text).toContain('（@main.tw）'); expect(saved.content[0].text).toContain('（@second.tw）');
+    const rows: any[] = (await env.DB.prepare(`SELECT account_id FROM posts WHERE brand_id='b1' ORDER BY id`).all()).results;
+    expect(rows.map((r) => r.account_id)).toEqual([11, 12]);
+    // 別的品牌的帳號、不存在的帳號：拒絕，而且一篇都不存
+    const bad = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['好'] }, { parts: ['壞'], account: 'other.tw' }] });
+    expect(bad.isError).toBe(true); expect(bad.content[0].text).toContain('@main.tw、@second.tw');
+    expect(((await env.DB.prepare(`SELECT COUNT(*) n FROM posts WHERE brand_id='b1'`).first()) as any).n).toBe(2);
+    // 修改草稿可以換帳號
+    const id = saved.structuredContent.saved[0].id;
+    await tool(env, tok, 'update_draft', { post_id: id, parts: ['改到第二個帳號'], account: 'second.tw' });
+    expect(((await env.DB.prepare('SELECT account_id FROM posts WHERE id=?').bind(id).first()) as any).account_id).toBe(12);
+    expect((await tool(env, tok, 'list_posts', {})).content[0].text).toContain('@second.tw｜改到第二個帳號');
+  });
 });

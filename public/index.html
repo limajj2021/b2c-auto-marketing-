@@ -428,7 +428,7 @@ async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
   if (r.sub === 'patrol') return patrolPage();
   const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone; TAG_DEFAULT = st.settings.topic_tag || '';
-  const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct()) : all;
+  const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct() || (p.account_id == null && curAcct() === ACCTS[0]?.id)) : all; // 沒指定帳號的貼文會用預設帳號（第一個）發
   const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
   bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/patrol" aria-label="海巡">${svg('search')}</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
   $('[data-act=gen3]').onclick = openGenerate;
