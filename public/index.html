@@ -423,28 +423,148 @@ async function setupPage() {
 /* ======================================================================
    貼文
    ====================================================================== */
-const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publishing: ['發布中', ''], published: ['已發布', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
+const PST = { draft: ['草稿', 'gold'], scheduled: ['已排程', ''], publishing: ['發布中', ''], published: ['已發佈', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
+let SEL = new Set(), SELMODE = false;
+/** 帳號標籤：每個帳號固定一個顏色，一眼分得出是哪個帳號的貼文 */
+const ACCT_COLORS = ['#c2ab78', '#6f9bd1', '#7bb38b', '#d1866f', '#a58bd1', '#d1b56f', '#6fc2c2'];
+const acctChip = (id) => { const i = Math.max(0, ACCTS.findIndex((a) => a.id === id)); const a = ACCTS[i]; if (!a) return ''; return `<span class="pchip" style="--c:${ACCT_COLORS[i % ACCT_COLORS.length]}"><i></i>@${esc(a.username || a.id)}</span>`; };
+const tagOf = (p) => (p.topic_tag !== null && p.topic_tag !== undefined ? p.topic_tag : TAG_DEFAULT);
+/** 依品牌時區分天：今天／明天／昨天／11/20（五） */
+function dayLabel(iso) {
+  const ms = Date.parse(iso), p = tzParts(ms), today = tzParts(Date.now());
+  const key = (x) => `${x.year}-${x.month}-${x.day}`;
+  const diff = Math.round((Date.UTC(+p.year, +p.month - 1, +p.day) - Date.UTC(+today.year, +today.month - 1, +today.day)) / 86400000);
+  const wd = WD[new Date(Date.UTC(+p.year, +p.month - 1, +p.day)).getUTCDay()];
+  return { key: key(p), label: `${diff === 0 ? '今天 ' : diff === 1 ? '明天 ' : diff === -1 ? '昨天 ' : ''}${+p.month}/${+p.day}（${wd}）` };
+}
+const hhmm = (iso) => { const p = tzParts(Date.parse(iso)); return `${p.hour}:${p.minute}`; };
+
+function postCard(p, seg) {
+  const parts = p.parts?.length ? p.parts : [p.content || ''];
+  const lines = parts[0].split('\n').filter((l) => l.trim());
+  const hook = lines[0] || '（空白）', second = lines[1] || (parts[1] || '').split('\n')[0] || '';
+  const tag = tagOf(p), when = p.published_at || p.scheduled_at;
+  const st = PST[p.status] || [p.status, ''];
+  const metric = (ic, v, label) => v !== null && v !== undefined ? `<span class="pm" title="${label}">${ic} ${nf(v)}</span>` : '';
+  const sel = SELMODE && seg === 'draft';
+  const flags = [p.error_message ? `<span class="pflag bad">${p.status === 'draft' ? '需修改' : '需處理'}</span>` : '', p.source_post_id ? '<span class="pflag">改寫</span>' : ''].join('');
+  return `<button class="pcard${sel && SEL.has(p.id) ? ' on' : ''}${p.status === 'failed' || p.status === 'gen_failed' ? ' fail' : ''}" data-act="post" data-id="${p.id}">
+    ${sel ? `<span class="pcheck" aria-hidden="true">${SEL.has(p.id) ? '✓' : ''}</span>` : ''}
+    ${seg === 'queue' && when ? `<span class="ptime">${hhmm(when)}</span>` : ''}
+    <span class="pbody">
+      <span class="ptop">${p.seen_at ? '' : '<span class="new-badge" aria-label="新文章">NEW</span>'}${acctChip(p.account_id ?? ACCTS[0]?.id)}${tag ? `<span class="ptag">#${esc(tag)}</span>` : ''}
+        <span class="pst ${st[1]}">${seg === 'hist' && when ? hhmm(when) : seg === 'draft' ? (when ? '預定 ' + fmt(when) : '') : st[0] !== '已排程' ? st[0] : ''}</span></span>
+      <span class="phook">${esc(hook)}</span>
+      ${second ? `<span class="psec">${esc(second)}</span>` : ''}
+      <span class="pfoot">${parts.length > 1 ? `<span class="pm">串文 ${parts.length} 則</span>` : '<span class="pm">單則</span>'}${flags}
+        ${seg === 'hist' && p.status === 'published' ? `${metric('👁', p.views, '曝光')}${metric('👆', p.uniques || p.clicks || (p.views !== null && p.views !== undefined ? 0 : null), '點擊人數')}${metric('♥', p.likes, '按讚')}${metric('💬', p.replies, '回覆')}` : ''}
+        ${seg === 'hist' && p.status !== 'published' ? `<span class="pflag bad">${st[0]}</span>` : ''}</span>
+    </span></button>`;
+}
+
 async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
   if (r.sub === 'patrol') return patrolPage();
   const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone; TAG_DEFAULT = st.settings.topic_tag || st.settings.topic_tag_auto || '';
   const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct() || (p.account_id == null && curAcct() === ACCTS[0]?.id)) : all; // 沒指定帳號的貼文會用預設帳號（第一個）發
-  const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
+  const by = (k) => (a, b) => (Date.parse(a[k] || a.created_at || 0) || 0) - (Date.parse(b[k] || b.created_at || 0) || 0);
+  const G = {
+    draft: posts.filter((p) => p.status === 'draft'),
+    queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)).sort(by('scheduled_at')),
+    hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)).sort((a, b) => -by('published_at')(a, b)),
+  };
   bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/patrol" aria-label="海巡">${svg('search')}</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
   $('[data-act=gen3]').onclick = openGenerate;
-  const seg = S.postSeg, items = G[seg];
-  const copy = { draft: ['沒有待審核的草稿', '開啟自動發文或按「AI 生成」後，草稿會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿或開啟自動發文後，排程會顯示在這裡。'], hist: ['還沒有發布紀錄', '貼文發布後會顯示在這裡。'] }[seg];
+  const seg = S.postSeg in G ? S.postSeg : 'draft', items = G[seg];
+  if (seg !== 'draft') { SELMODE = false; SEL.clear(); }
+  for (const id of [...SEL]) if (!G.draft.some((p) => p.id === id)) SEL.delete(id);
+  const admin = me.role === 'admin';
+  const copy = { draft: ['沒有草稿', '開啟自動發文、按「AI 生成」或從 ChatGPT／Codex 存進來的文章，會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿、或用「批量排程」把草稿排進來。'], hist: ['還沒有發佈紀錄', '貼文發佈後會顯示在這裡，並附上曝光與點擊。'] }[seg];
+  // 已排程、已發佈：依日期分組
+  const grouped = () => {
+    if (seg === 'draft') return items.map((p) => postCard(p, seg)).join('');
+    let last = '', out = '';
+    for (const p of items) {
+      const w = p.published_at || p.scheduled_at;
+      const d = w ? dayLabel(w) : { key: 'none', label: seg === 'queue' ? '等待中' : '沒有時間' };
+      if (d.key !== last) { out += `<div class="pday">${d.label}</div>`; last = d.key; }
+      out += postCard(p, seg);
+    }
+    return out;
+  };
+  const paint = () => {
+    $('#plist').innerHTML = items.length ? grouped() : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '');
+    $('#ptool').innerHTML = seg === 'draft' && items.length && admin ? (SELMODE
+      ? `<span class="t-sub">點文章來選取</span><button class="link" id="pselall">${SEL.size === items.length ? '全部取消' : '全選'}</button><button class="link" id="pselx">完成</button>`
+      : `<span class="t-sub">${items.length} 篇草稿，可以共用給任何帳號</span><button class="link" id="psel">選取</button>`) : '';
+    $('#pbatch').classList.toggle('hide', !(SELMODE && seg === 'draft'));
+    $('#pbatchn').textContent = SEL.size ? `已選 ${SEL.size} 篇` : '還沒選';
+    $('#pbatchgo').disabled = !SEL.size;
+    $('[data-act=gen2]')?.addEventListener('click', openGenerate);
+    $('#psel')?.addEventListener('click', () => { SELMODE = true; paint(); });
+    $('#pselx')?.addEventListener('click', () => { SELMODE = false; SEL.clear(); paint(); });
+    $('#pselall')?.addEventListener('click', () => { if (SEL.size === items.length) SEL.clear(); else items.forEach((p) => SEL.add(p.id)); paint(); });
+    $$('#plist [data-act=post]').forEach((b) => b.onclick = () => {
+      const p = all.find((x) => x.id == b.dataset.id); if (!p) return;
+      if (SELMODE && seg === 'draft') { SEL.has(p.id) ? SEL.delete(p.id) : SEL.add(p.id); paint(); return; }
+      if (!p.seen_at) { p.seen_at = new Date().toISOString(); $('.new-badge', b)?.remove(); api('POST', `/posts/${p.id}/seen`).catch(() => {}); }
+      openPost(p);
+    });
+  };
   setView(`${multi ? `<div class="tight">${acctStrip()}</div>` : ''}
-    <div class="tight"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div>
-    ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${p.seen_at ? '' : '<span class="new-badge" aria-label="新文章">NEW</span>'}${esc((p.parts?.[0] || p.content).split('\n')[0] || '（空白）')}</span>`,
-      sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.status === 'published' && (p.views !== null && p.views !== undefined || p.clicks) ? ` · 曝光 ${nf(p.views)} · 點擊 ${p.uniques ? nf(p.uniques) + ' 人' : nf(p.clicks || 0)}` : ''}${p.parts?.length > 1 ? ` · 串文 ${p.parts.length} 則` : ''}${multi && p.account_id ? ` · ${esc(acctName(p.account_id))}` : ''}${p.source_post_id ? ' · 改寫' : ''}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '')}`);
+    <div class="tight"><div class="tabs-h" role="tablist">${[['draft', '草稿'], ['queue', '已排程'], ['hist', '已發佈']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div>
+    <div class="tight pwrap"><div class="ptool" id="ptool"></div><div class="plist" id="plist"></div></div>
+    <div class="pbatch hide" id="pbatch"><div class="in"><span id="pbatchn"></span><button class="btn" id="pbatchgo">批量排程</button></div></div>`);
   $$('[data-seg]').forEach((b) => b.onclick = () => { S.postSeg = b.dataset.seg; render(); });
   bindAcctStrip();
-  $('[data-act=gen2]')?.addEventListener('click', openGenerate);
-  $$('[data-act=post]').forEach((b) => b.onclick = () => {
-    const p = all.find((x) => x.id == b.dataset.id);
-    if (p && !p.seen_at) { p.seen_at = new Date().toISOString(); $('.new-badge', b)?.remove(); api('POST', `/posts/${p.id}/seen`).catch(() => {}); }
-    openPost(p);
+  $('#pbatchgo').onclick = () => openBatch(all.filter((p) => SEL.has(p.id)));
+  paint();
+}
+
+/** 批量排程：選帳號、分配方式、開始時間、間隔，送出前先看預覽 */
+function openBatch(list) {
+  const ok = ACCTS.filter((a) => a.status === 'ok');
+  if (!ok.length) return toast('這個品牌還沒有可以發文的 Threads 帳號', 'bad');
+  const pad = (n) => String(n).padStart(2, '0');
+  const local = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  sheet(`批量排程 ${list.length} 篇`, `
+    <div class="f"><div class="lab">發到哪些帳號</div>${ok.map((a) => `<label class="bopt"><input type="checkbox" data-ba="${a.id}" checked>${acctChip(a.id)}</label>`).join('')}</div>
+    <div class="f"><div class="lab">怎麼分配</div>
+      <label class="bopt"><input type="radio" name="bm" value="assign" checked><span><b>輪流分配</b><span class="t-sub" style="display:block">每篇只發一次，輪流給選的帳號（推薦）</span></span></label>
+      <label class="bopt"><input type="radio" name="bm" value="copy"><span><b>每個帳號都發</b><span class="t-sub" style="display:block">同一篇發到每個帳號</span></span></label>
+      <div class="note warn hide" id="bcopyw" style="margin-top:8px">多個帳號發一模一樣的文字，容易被 Threads 判定為重複內容、降低觸及。想讓每個帳號說法不同，請用貼文裡的「改寫分發」。</div></div>
+    <div class="f"><div class="lab">從什麼時候開始</div>
+      <label class="bopt"><input type="radio" name="bt" value="now" checked><span><b>現在</b><span class="t-sub" style="display:block">5 分鐘內開始陸續發出</span></span></label>
+      <label class="bopt"><input type="radio" name="bt" value="at"><span><b>指定時間</b></span></label>
+      <input type="datetime-local" id="bat" class="hide" value="${local(new Date(Date.now() + 3600000))}" min="${local(new Date())}" style="margin-top:8px"></div>
+    <div class="f"><label for="biv">每篇間隔</label><select id="biv"><option value="0">同時發（不間隔）</option><option value="15">15 分鐘</option><option value="30" selected>30 分鐘</option><option value="60">1 小時</option><option value="120">2 小時</option><option value="180">3 小時</option><option value="1440">1 天</option></select></div>
+    <div class="note" id="bprev" style="margin-top:4px"></div>
+    <div class="actions" style="margin-top:18px"><button class="btn block" id="bgo">確認排程</button></div>`, (el, close) => {
+    const val = () => {
+      const ids = $$('[data-ba]', el).filter((x) => x.checked).map((x) => +x.dataset.ba);
+      const mode = $('[name=bm]:checked', el).value, at = $('[name=bt]:checked', el).value === 'at' ? new Date($('#bat', el).value) : new Date();
+      return { ids, mode, at, iv: +$('#biv', el).value };
+    };
+    const prev = () => {
+      const v = val(); $('#bat', el).classList.toggle('hide', $('[name=bt]:checked', el).value !== 'at'); $('#bcopyw', el).classList.toggle('hide', v.mode !== 'copy');
+      if (!v.ids.length) { $('#bprev', el).textContent = '請至少選一個帳號'; return; }
+      const n = v.mode === 'copy' ? list.length * v.ids.length : list.length;
+      const per = v.ids.map((id, j) => `${acctName(id)} ${v.mode === 'copy' ? list.length : Math.floor(list.length / v.ids.length) + (j < list.length % v.ids.length ? 1 : 0)} 篇`).join('、');
+      const end = new Date(v.at.getTime() + (n - 1) * v.iv * 60000);
+      $('#bprev', el).innerHTML = `共 <b>${n}</b> 次發文：${esc(per)}<br>${v.iv === 0 ? `全部在 <b>${fmtW(v.at.getTime())}</b> 同時發` : `從 <b>${fmtW(v.at.getTime())}</b> 開始，每 ${v.iv >= 60 ? v.iv / 60 + ' 小時' : v.iv + ' 分鐘'}一篇，最後一篇約 <b>${fmtW(end.getTime())}</b>`}`;
+    };
+    $$('input,select', el).forEach((x) => x.addEventListener('change', prev)); prev();
+    $('#bgo', el).onclick = (e) => {
+      const v = val();
+      if (!v.ids.length) return toast('請至少選一個帳號', 'bad');
+      if ($('[name=bt]:checked', el).value === 'at' && !(v.at.getTime() > Date.now())) return toast('開始時間要在現在之後', 'bad');
+      act(e.currentTarget, async () => {
+        const r = await api('POST', '/posts/batch-schedule', { post_ids: list.map((p) => p.id), account_ids: v.ids, mode: v.mode, interval_min: v.iv, start_at: $('[name=bt]:checked', el).value === 'at' ? v.at.toISOString() : null });
+        close(); SELMODE = false; SEL.clear(); S.postSeg = 'queue';
+        toast(`已排程 ${r.scheduled} 次發文${r.skipped.length ? `；${r.skipped.length} 篇沒排（${r.skipped.map((x) => '#' + x.id).join('、')} 內容需要修改）` : ''}`, r.skipped.length ? '' : 'ok');
+        render();
+      });
+    };
   });
 }
 const WD = '日一二三四五六';
