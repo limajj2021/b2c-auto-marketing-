@@ -168,7 +168,12 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
         generationConfig: { temperature: 0.9, maxOutputTokens: 3000, responseMimeType: 'application/json' },
       }),
     });
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+    if (!res.ok) {
+      // 記下 Gemini 說的原因（例如地區不支援、模型名稱錯誤、金鑰無效），不記任何內容或金鑰
+      const eb: any = await res.json().catch(() => ({}));
+      const why = [eb?.error?.status, eb?.error?.message].filter(Boolean).join(' ').replace(/key=[^&\s]+/gi, 'key=***').slice(0, 200);
+      throw new Error(`Gemini HTTP ${res.status}${why ? `：${why}` : ''}`);
+    }
     const data: any = await res.json();
     const raw: string = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? '').join('') ?? '';
     if (!raw.trim()) throw new Error('Gemini 回傳空內容');
