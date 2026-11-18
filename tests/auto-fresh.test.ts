@@ -71,4 +71,27 @@ describe('full-auto posting with fresh topics', () => {
     expect(similarity('房仲做影片沒人看是因為開場太慢', '房仲影片｜房仲做影片沒人看，因為開場太慢了')).toBeGreaterThan(0.5);
     expect(similarity('租屋族心態｜租一輩子不一定輸', '房仲影片｜開場太慢')).toBeLessThan(0.3);
   });
+
+  it('never leaves a draft to edit: placeholders are forbidden, a failing post is rewritten once, then skipped', async () => {
+    const { env } = await setup();
+    await env.DB.prepare(`UPDATE threads_accounts SET publishing_times='["10:00"]'`).run();
+    const writes: string[] = [];
+    let k = 0;
+    const m = mockFetch((u, i) => {
+      if (u.includes('/threads?fields=')) return jres({ data: [] });
+      const body = String(i?.body);
+      if (body.includes('只想題材')) { k++; return gemText(JSON.stringify([{ topic: '租屋族心態', angle: '租一輩子不一定輸給買房' }, { topic: '預售屋陷阱', angle: '樣品屋越漂亮越該看合約' }, { topic: '社區管委會', angle: '管理費高低決定轉手價格' }][(k - 1) % 3])); }
+      writes.push(body);
+      // 今天：第一版留了空格，重寫後乾淨；明天：兩版都沒過
+      const bad = writes.length !== 2;
+      return gemText(JSON.stringify({ parts: [bad ? '成交率提升【待補數據：比例】' : '乾淨的鉤子', '結尾'] }));
+    }); restore = m.restore;
+    await ensureSlots(env, NOW);
+    expect(writes[0]).toContain('絕對不要寫【待補數據】'); expect(writes[0]).not.toContain('讓人工補上');
+    expect(writes[1]).toContain('上一版沒有通過檢查');
+    const rows: any[] = (await env.DB.prepare(`SELECT status,content,error_message FROM posts WHERE slot_key IS NOT NULL ORDER BY scheduled_at`).all()).results;
+    expect(rows[0]).toMatchObject({ status: 'scheduled', content: '乾淨的鉤子' });
+    expect(rows[1].status).toBe('gen_failed'); expect(rows[1].error_message).toContain('換題材');
+    expect((await env.DB.prepare(`SELECT count(*) c FROM posts WHERE status='draft'`).first() as any).c).toBe(0);
+  });
 });

@@ -232,7 +232,7 @@ async function homePage() {
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
     <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="report">成效報告</button>'}</section>
     <section>${sec('自動化')}<div class="list">
-      ${row({ go: false, title: '全自動發文', sub: d.auto_fresh_enabled ? '每個帳號每天 1 篇・AI 讀過去的貼文找沒寫過的題材，寫完直接發布' : '開啟後每天 1 篇，自己找不重複的題材、不用審核', end: sw('t0', d.auto_fresh_enabled, '全自動發文') })}
+      ${row({ go: false, title: '全自動發文', sub: d.auto_fresh_enabled ? '每個帳號每天 1 篇・AI 讀過去的貼文找沒寫過的題材，寫完直接發布' : '開啟後每天 1 篇，自己找不重複的題材、寫完直接發，不用進系統', end: sw('t0', d.auto_fresh_enabled, '全自動發文') })}
       ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程自動生成並發布' : '已暫停 AI 生成；你核准的貼文仍會照時間發布', end: sw('t1', d.auto_post_enabled, '自動發文') })}
       ${d.leads_enabled ? row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') }) : ''}</div></section>
     <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 3).map((a) => row({ go: false, title: esc(ACTION[a.action] || '其他操作'), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
@@ -248,7 +248,7 @@ async function homePage() {
   };
   bindAcctStrip();
   $('#t0').onchange = async (e) => {
-    if (e.target.checked && !(await confirmSheet('開啟全自動發文？', '開啟', false, '每個帳號每天會自動發 1 篇。AI 會先讀過去的貼文，挑一個沒寫過的題材或觀點，寫完不經審核直接排程發布（內容檢查沒過的會留在草稿）。'))) { e.target.checked = false; return; }
+    if (e.target.checked && !(await confirmSheet('開啟全自動發文？', '開啟', false, '每個帳號每天會自動發 1 篇。AI 會先讀過去的貼文，挑一個沒寫過的題材或觀點，寫完不經審核直接發布。沒通過檢查的會自動重寫，還是不行就跳過、隔天換題材，不會留草稿要你改。'))) { e.target.checked = false; return; }
     return flip('auto_fresh_enabled', '全自動發文')(e);
   };
   $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2')?.addEventListener('change', flip('line_auto_reply_enabled', 'LINE 自動接待'));

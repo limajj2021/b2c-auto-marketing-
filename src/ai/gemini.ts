@@ -10,7 +10,8 @@ import { geminiFetch } from '../budget';
 export class QuotaError extends Error {}
 
 export interface GenResult { generationId: number; parts: string[]; issues: string[]; /** AI 為這篇挑的主題標籤 */ tag: string }
-export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey }
+/** autoPublish：全自動發文，寫完沒人會改，所以不能留空格給人補；fix：上一版沒過檢查的原因，這次要避開 */
+export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey; autoPublish?: boolean; fix?: string[] }
 
 /** 底層 Prompt 版本：寫進 ai_generations.prompt_version（格式 v2:套路代號），方便日後比較哪個套路成效好 */
 export const PROMPT_VERSION = 'v2';
@@ -88,13 +89,17 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     '# 事實規則（最高優先，違反就整串作廢）',
     '・數字、比例、金額、排名、報告、引言、客戶案例只能來自「可引用數據」，並寫出來源。',
     '・沒有素材時改用具體場景、案例情境或邏輯推演，不要寫成統計結果；不可以寫「研究顯示」「某業內人直言」「調查發現」這類沒有出處的說法。',
-    '・真的需要一個數字才講得通時，寫成【待補數據：要補什麼】讓人工補上；只用於數字，整串最多 2 處。',
+    o.autoPublish
+      ? '・這串會直接自動發布，沒有人會再修改：絕對不要寫【待補數據】或任何要人補的空格、括號註記；沒有素材就不要用數字，改用具體場景或邏輯推演。'
+      : '・真的需要一個數字才講得通時，寫成【待補數據：要補什麼】讓人工補上；只用於數字，整串最多 2 處。',
+    o.autoPublish ? '・不要用「保證」「零風險」「0 費用」「免審核」「秒過件」這類誇大或絕對的說法。' : '',
     regulated ? '・本業務受金融法規監管：只提供一般知識與諮詢邀請，不得提及任何利率、成數、額度或核貸可能性，也不得使用【待補數據】以外的數字。' : '',
     '',
     '# 結尾',
     '・最後一則：可先用 🧭 反問收束 →「這就是我們在做的事」或「你不是一個人」→ 一句價值主張（不賣夢想，專賣＿＿）→ 一句邀請讀者私訊或加 LINE，最後一行用「👇」結尾。',
     '・不要自己寫連結或 LINE ID，系統會在最後一則下方自動附上 CTA 與連結。',
     `・每則不超過 ${THREADS_MAX_CHARS - 80} 字。`,
+    o.fix?.length ? `\n# 修正\n上一版沒有通過檢查，這次一定要避開：\n${o.fix.map((x) => `・${x}`).join('\n')}` : '',
     o.rewriteOf ? `\n# 改寫\n請改寫以下串文：保留核心觀點，但鉤子、切角、用字與例子要完全不同，符合上述人設，避免與原文雷同。\n原文：\n${o.rewriteOf.map((p, i) => `(${i + 1}) ${p}`).join('\n')}` : '',
     '',
     '# 輸出',

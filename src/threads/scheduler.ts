@@ -91,7 +91,7 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
         if (at.getTime() < now.getTime() - 3600_000) continue;
         const slot = `${day}#${i}${a ? `@a${a.id}` : ''}`;
         // 先確認額度再佔位：佔位後才發現額度不足，會留下沒人處理的「生成中」貼文
-        if (!canAfford(env, fresh ? 16 : 10)) return; // 生成一串約需 8～10 次請求，不夠就留到下一輪
+        if (!canAfford(env, fresh ? 24 : 10)) return; // 生成一串約需 8～10 次請求，不夠就留到下一輪
         const ins = await env.DB.prepare(`INSERT OR IGNORE INTO posts(brand_id,account_id,status,slot_key,scheduled_at,updated_at,created_at) VALUES(?,?,?,?,?,?,?)`)
           .bind(brand.id, a?.id ?? null, 'generating', slot, at.toISOString(), iso(now), iso(now)).run();
         let postId: number | null = ins.meta.changes === 1 ? (ins.meta.last_row_id as number) : null;
@@ -110,7 +110,10 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
             idea = `${found.topic}｜${found.angle}`;
           }
           const topic = idea ? `${idea}（這是這個帳號從沒寫過的題材／觀點，整串都圍繞這個核心觀點，不要寫成老生常談）` : s.posting_mode === 'C' ? s.weekly_topic : '';
-          const g = await generateThread(env, { topic, account: a }, now);
+          let g = await generateThread(env, { topic, account: a, autoPublish: fresh }, now);
+          // 全自動：沒過檢查就帶著原因重寫一次；還是沒過就不發也不留草稿（下一輪換題材重來），客戶不用進系統修改
+          if (fresh && g.issues.length) g = await generateThread(env, { topic, account: a, autoPublish: true, fix: g.issues }, now);
+          if (fresh && g.issues.length) throw new Error(`自動重寫後內容檢查仍未通過，下一輪換題材重新生成：${g.issues.join('；')}`);
           const status = g.issues.length || review ? 'draft' : 'scheduled';
           await env.DB.prepare(`UPDATE posts SET content=?,parts=?,status=?,topic_tag=?,generation_id=?,approved_by=?,error_message=?,idea=?,updated_at=? WHERE id=?`)
             .bind(g.parts[0], JSON.stringify(g.parts), status, s.topic_tag ? null : g.tag || null, g.generationId, status === 'scheduled' ? 'auto' : null,
