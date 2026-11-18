@@ -37,7 +37,8 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { posts: { type: 'array', minItems: 1, maxItems: MAX_POSTS, items: { type: 'object', properties: {
       parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } },
       topic_tag: { type: 'string', description: 'Threads 主題標籤（選填，不含 #）；不填就用品牌預設' },
-      account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）。品牌有多個帳號時必填' } }, required: ['parts'], additionalProperties: false } } }, required: ['posts'], additionalProperties: false },
+      account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）。品牌有多個帳號時必填' } }, required: ['parts'], additionalProperties: false } },
+      account: { type: 'string', description: '整批都存到這個 Threads 帳號（例如 @vuca.tw）；每篇另外填 account 的以每篇為準' } }, required: ['posts'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   { name: 'update_draft', title: '修改草稿', description: '修改一篇還在待審核的草稿：可以整串取代內容（parts）、改主題標籤，或只用 account 改發到別的帳號（不用重傳內容）。',
     inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } }, topic_tag: { type: 'string' }, account: { type: 'string', description: '改發到哪個 Threads 帳號（例如 @vuca.tw）；不填就維持原本的帳號' } }, required: ['post_id'], additionalProperties: false },
@@ -135,8 +136,8 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
       if (posts.length > MAX_POSTS) throw new ToolError(`一次最多存 ${MAX_POSTS} 篇`);
       const link = postLink(s), saved: { id: number; parts: number; account: string; issues: string[] }[] = [];
       const live = accts.filter((x) => x.status === 'ok');
-      if (live.length > 1 && posts.some((p: any) => !p?.account)) throw new ToolError(`這個品牌有 ${live.map((x) => '@' + x.username).join('、')} 多個帳號，請先問使用者要存到哪一個，並在每篇的 account 填上帳號。`);
-      const prepared = posts.map((p: any) => ({ parts: withCta(cleanParts(p?.parts), s.cta_text, link), tag: cleanTag(p?.topic_tag), acct: pickAccount(accts, p?.account) }));
+      if (live.length > 1 && !args?.account && posts.some((p: any) => !p?.account)) throw new ToolError(`這個品牌有 ${live.map((x) => '@' + x.username).join('、')} 多個帳號，請先問使用者要存到哪一個，並在每篇的 account 填上帳號。`);
+      const prepared = posts.map((p: any) => ({ parts: withCta(cleanParts(p?.parts), s.cta_text, link), tag: cleanTag(p?.topic_tag), acct: pickAccount(accts, p?.account ?? args?.account) }));
       for (const p of prepared) {
         const issues = checkParts(p.parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
         const r = await env.DB.prepare(`INSERT INTO posts(brand_id,account_id,content,parts,status,topic_tag,error_message,updated_at,created_at) VALUES(?,?,?,?,'draft',?,?,?,?)`)

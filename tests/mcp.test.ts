@@ -189,6 +189,8 @@ describe('AI connector tools', () => {
     const miss = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['GTA6'] }] });
     expect(miss.isError).toBe(true); expect(miss.content[0].text).toContain('@vuca.tw');
     const id = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['GTA6'], account: '@vuca.canada' }] })).structuredContent.saved[0].id;
+    const top = (await tool(env, tok, 'save_drafts', { account: '@vuca.tw', posts: [{ parts: ['整批'] }] })).structuredContent.saved[0];
+    expect(top.account).toBe('@vuca.tw');
     // 只改帳號，不用重傳內容
     const moved = await tool(env, tok, 'update_draft', { post_id: id, account: 'vuca.tw' });
     expect(moved.isError).toBeUndefined();
