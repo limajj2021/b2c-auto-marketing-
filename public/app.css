@@ -198,3 +198,36 @@ nav.tabs button.brand svg{flex:none;width:16px;height:16px;margin-left:auto;stro
 
 /* 新文章標示：AI 剛產生、還沒有人點開看過 */
 .new-badge{display:inline-block;background:#e5484d;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.06em;line-height:1;padding:3px 6px;border-radius:5px;margin-right:7px;vertical-align:2px}
+
+/* 立即發布的進度畫面 */
+.pubov{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgba(20,18,15,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:pubfade .2s ease}
+.pubov.out{animation:pubfade .18s ease reverse forwards}
+@keyframes pubfade{from{opacity:0}to{opacity:1}}
+.pubcard{width:100%;max-width:380px;background:var(--bg1);color:var(--text);border-radius:20px;padding:28px 22px 22px;text-align:center;box-shadow:0 20px 50px -20px rgba(0,0,0,.5);animation:pubpop .28s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes pubpop{from{transform:translateY(12px) scale(.96);opacity:0}to{transform:none;opacity:1}}
+.pubicon{width:64px;height:64px;margin:0 auto 14px}
+.pubicon svg{width:100%;height:100%;fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}
+.pubicon .ring{stroke:var(--gold);stroke-dasharray:90 36;transform-origin:24px 24px;animation:pubspin 1s linear infinite}
+.pubicon .tick{stroke:#fff;stroke-dasharray:30;stroke-dashoffset:30}
+@keyframes pubspin{to{transform:rotate(360deg)}}
+.pubov.ok .pubicon .ring{stroke:var(--ok);fill:var(--ok);stroke-dasharray:none;animation:pubring .35s ease}
+.pubov.ok .pubicon .tick{animation:pubtick .35s .2s ease forwards}
+.pubov.fail .pubicon .ring{stroke:var(--bad);stroke-dasharray:none;animation:none}
+@keyframes pubring{from{transform:scale(.6)}to{transform:scale(1)}}
+@keyframes pubtick{to{stroke-dashoffset:0}}
+.pubttl{font-size:19px;font-weight:700;margin:0}
+.pubsub{font-size:14px;color:var(--text2);margin:6px 0 18px;min-height:20px}
+.pubsteps{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.pubstep{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--bg2);color:var(--text3);font-size:12.5px;transition:background .25s,color .25s,transform .25s}
+.pubstep b{font-weight:700}
+.pubstep.done{background:var(--gold);color:var(--gold-ink);transform:scale(1.02)}
+.pubstep.now{background:var(--bg1);color:var(--text);box-shadow:0 0 0 2px var(--gold);animation:pubpulse 1.1s ease-in-out infinite}
+.pubstep.bad{background:var(--bad-bg);color:var(--bad)}
+@keyframes pubpulse{50%{box-shadow:0 0 0 6px rgba(196,171,120,.25)}}
+.pubbar{height:6px;border-radius:3px;background:var(--bg2);overflow:hidden}
+.pubbar i{display:block;height:100%;width:0;background:var(--gold);border-radius:3px;transition:width .5s ease}
+.pubov.ok .pubbar i{background:var(--ok)}
+.pubnow{font-size:13px;color:var(--text2);margin:12px 0 0;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pubhint{font-size:12px;color:var(--text3);margin:10px 0 0}
+.pubcard .btn{margin-top:18px}
+@media (prefers-reduced-motion:reduce){.pubov,.pubcard,.pubicon .ring,.pubstep.now{animation:none}}

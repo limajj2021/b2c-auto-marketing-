@@ -571,6 +571,55 @@ async function patrolPage() {
   };
 }
 let TAG_DEFAULT = '';
+/* ---------- 立即發布的進度畫面：每發出一則就亮一格，客戶看得到進度、不會以為當掉 ---------- */
+async function publishWithProgress(id, parts) {
+  const total = parts.length;
+  const el = document.createElement('div'); el.className = 'pubov'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', '發布進度');
+  el.innerHTML = `<div class="pubcard">
+    <div class="pubicon" id="pbicon"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20" class="ring"/><path d="M15 24.5l6.5 6.5L33.5 18" class="tick"/></svg></div>
+    <h2 class="pubttl" id="pbttl">正在發布到 Threads</h2>
+    <p class="pubsub" id="pbsub">準備中…</p>
+    <div class="pubsteps" aria-hidden="true">${parts.map((_, i) => `<span class="pubstep" data-i="${i}"><b>${i + 1}</b></span>`).join('')}</div>
+    <div class="pubbar"><i id="pbbar"></i></div>
+    <p class="pubnow" id="pbnow"></p>
+    <p class="pubhint" id="pbhint">每一則要幾秒鐘，請不要關閉這個畫面</p>
+    <button class="btn block hide" id="pbok">完成</button></div>`;
+  document.body.append(el);
+  const warnLeave = (e) => { e.preventDefault(); e.returnValue = ''; };
+  window.addEventListener('beforeunload', warnLeave);
+  const show = (sent, failed = false) => {
+    $$('.pubstep', el).forEach((s, i) => { s.className = 'pubstep' + (i < sent ? ' done' : i === sent && !failed ? ' now' : i === sent && failed ? ' bad' : ''); s.querySelector('b').textContent = i < sent ? '✓' : String(i + 1); });
+    $('#pbbar', el).style.width = `${Math.round((sent / total) * 100)}%`;
+    if (!failed && sent < total) {
+      $('#pbsub', el).textContent = `第 ${sent + 1}／${total} 則`;
+      $('#pbnow', el).textContent = (parts[sent] || '').split('\n')[0].slice(0, 40);
+    }
+  };
+  show(0);
+  // 每秒問一次發到第幾則（系統每發出一則就會記錄）
+  let alive = true;
+  const poll = async () => { while (alive) { await new Promise((r) => setTimeout(r, 1000)); if (!alive) break; try { const p = await api('GET', `/posts/${id}/progress`); if (alive) show(Math.min(p.sent, total)); } catch { /* 下一秒再問 */ } } };
+  poll();
+  const finish = (ok, title, sub, sent) => new Promise((res) => {
+    alive = false; window.removeEventListener('beforeunload', warnLeave);
+    show(sent, !ok);
+    el.classList.add(ok ? 'ok' : 'fail');
+    $('#pbttl', el).textContent = title; $('#pbsub', el).textContent = sub; $('#pbnow', el).textContent = '';
+    $('#pbhint', el).classList.add('hide');
+    const btn = $('#pbok', el); btn.classList.remove('hide'); btn.focus();
+    btn.onclick = () => { el.classList.add('out'); setTimeout(() => { el.remove(); res(); }, 180); };
+  });
+  try {
+    const r = await api('POST', `/posts/${id}/publish-now`, {});
+    if (r.status === 'published') await finish(true, '已發布到 Threads', total > 1 ? `串文 ${total} 則全部發出` : '貼文已發出', total);
+    else await finish(true, `已發出 ${r.sent}／${r.total} 則`, r.message || '其餘會在 5 分鐘內自動接續', r.sent);
+    return r;
+  } catch (e) {
+    let sent = 0; try { sent = (await api('GET', `/posts/${id}/progress`)).sent; } catch { /* 用 0 */ }
+    await finish(false, sent ? `發到第 ${sent} 則時停住了` : '發布沒有完成', e.message || '請稍後再試', sent);
+    throw Object.assign(new Error(e.message), { shown: true });
+  }
+}
 function openPost(p) {
   const draft = p.status === 'draft', parts = p.parts?.length ? [...p.parts] : [p.content], done = p.part_ids?.length || 0;
   const role = (i, n) => n === 1 ? '' : i === 0 ? '鉤子' : i === n - 1 ? 'CTA' : '';
@@ -628,8 +677,8 @@ function openPost(p) {
           if (draft) { const over = body.parts.findIndex((x) => [...x].length > 500); if (over >= 0) throw new Error(`第 ${over + 1} 則超過 500 字，Threads 會拒收`); }
           if (!(await confirmSheet(`現在就發到 Threads？${body.parts.length > 1 ? `（串文 ${body.parts.length} 則）` : ''}`, '立即發布', false))) return;
           if (draft) await api('PUT', '/posts/' + p.id, body);
-          const r = await api('POST', `/posts/${p.id}/publish-now`, {});
-          toast(r.status === 'published' ? `已發布到 Threads${r.total > 1 ? `（${r.total} 則）` : ''}` : r.message, 'ok');
+          let r;
+          try { r = await publishWithProgress(p.id, body.parts); } catch (er) { if (er.shown) { close(); render(); return; } throw er; }
           S.postSeg = r.status === 'published' ? 'hist' : S.postSeg; close(); render(); return;
         }
         if (a === 'save') { await api('PUT', '/posts/' + p.id, body); toast('已儲存', 'ok'); return; }

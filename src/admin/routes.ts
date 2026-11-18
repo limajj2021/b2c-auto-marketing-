@@ -418,6 +418,13 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
 });
 
+// 發布進度：「立即發布」等待時，畫面每秒查一次發到第幾則（每發出一則系統就會記錄）
+add('GET', '/posts/(\\d+)/progress', 'admin', async ({ env, m, brandId }) => {
+  const r = await env.DB.prepare('SELECT status,parts,content,part_ids,error_message FROM posts WHERE id=? AND brand_id=?').bind(m[1], brandId).first<any>();
+  if (!r) return err(404, '找不到這篇貼文');
+  return json({ status: r.status, sent: r.part_ids ? JSON.parse(r.part_ids).length : 0, total: partsOf(r).length, error: r.error_message });
+});
+
 // 點開過的貼文：不再標示 NEW（記在伺服器，換裝置也一樣）
 add('POST', '/posts/(\\d+)/seen', 'staff', async ({ env, m, brandId }) => {
   await env.DB.prepare('UPDATE posts SET seen_at=? WHERE id=? AND brand_id=? AND seen_at IS NULL').bind(iso(), m[1], brandId).run();
