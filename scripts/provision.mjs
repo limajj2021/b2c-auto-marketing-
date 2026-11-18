@@ -81,7 +81,7 @@ CRON_SUBREQUEST_LIMIT = "${cfg.cronSubrequestLimit ?? ''}"
 [assets]
 directory = "../public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/line/*", "/threads/*"]
+run_worker_first = ["/api/*", "/line/*", "/threads/*", "/mcp", "/oauth/*", "/.well-known/*"]
 
 [observability]
 enabled = true

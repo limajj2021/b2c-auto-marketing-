@@ -14,6 +14,7 @@ import type { Env } from '../types';
 import { hashPassword } from '../util/crypto';
 import { fill, normKeywords, parsePostUrl, rank, type Template } from '../patrol';
 import { postLink } from '../ai/gemini';
+import { PERSONAL_TTL, randomToken, sha256 } from '../mcp/oauth';
 import type { Actor } from './routes';
 
 type Ctx = { env: Env; req: Request; actor: Actor; m: RegExpMatchArray; url: URL; brandId: string };
@@ -117,6 +118,32 @@ export function registerExtra(add: Add, json: J, err: E) {
     await audit(env, brandId, actor.name, 'integration_line_webhook');
     await logEvent(env, brandId, wh.verified ? 'info' : 'warn', 'line_connect', wh.verified ? '自動接待 Webhook 已設定並驗證通過' : '自動接待 Webhook 設定未完成：請到 LINE Developers 開啟 Use webhook');
     return json({ ok: true, webhook_set: wh.set, webhook_verified: wh.verified });
+  });
+
+  // ---- AI 連接器（MCP）：已連接的 AI、中斷連線、Codex 連線金鑰 ----
+  add('GET', '/mcp/connections', 'admin', async ({ env, brandId }) => {
+    const rows = (await env.DB.prepare(`SELECT t.client_id,t.client_name,t.user_id,u.authentication_id username,MIN(t.created_at) since,MAX(t.last_used_at) last_used,
+        MAX(CASE WHEN t.kind='personal' THEN 1 ELSE 0 END) personal, MAX(t.expires_at) expires_at
+      FROM oauth_tokens t JOIN admin_users u ON u.id=t.user_id
+      WHERE t.brand_id=? AND t.revoked=0 AND t.expires_at>? AND t.kind IN ('refresh','personal')
+      GROUP BY t.client_id,t.user_id ORDER BY since DESC`).bind(brandId, iso()).all()).results;
+    return json(rows.map((r: any) => ({ ...r, personal: !!r.personal })));
+  });
+  add('DELETE', '/mcp/connections/([A-Za-z0-9_-]{3,60})/(\\d+)', 'admin', async ({ env, m, actor, brandId }) => {
+    const r = await env.DB.prepare('UPDATE oauth_tokens SET revoked=1 WHERE brand_id=? AND client_id=? AND user_id=? AND revoked=0').bind(brandId, m[1], m[2]).run();
+    if (!r.meta.changes) return err(404, '找不到這個連線');
+    await audit(env, brandId, actor.name, 'mcp_disconnect', m[1]);
+    return json({ ok: true });
+  });
+  // Codex 這類工具可以直接用連線金鑰（只顯示一次，90 天有效，只對應目前這個品牌）
+  add('POST', '/mcp/tokens', 'admin', async ({ env, req, actor, brandId }) => {
+    const b: any = await req.json().catch(() => ({}));
+    const name = String(b.name ?? '').trim().slice(0, 40) || 'Codex';
+    const tok = 'ego_' + randomToken(32), cid = 'personal_' + randomToken(6);
+    await env.DB.prepare('INSERT INTO oauth_tokens(token_hash,kind,client_id,client_name,user_id,brand_id,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)')
+      .bind(await sha256(tok), 'personal', cid, `${name}（連線金鑰）`, actor.id, brandId, new Date(Date.now() + PERSONAL_TTL * 1000).toISOString(), iso()).run();
+    await audit(env, brandId, actor.name, 'mcp_token_create', name);
+    return json({ token: tok, days: PERSONAL_TTL / 86400 });
   });
 
   // ---- 半自動海巡：固定回覆範本 ----

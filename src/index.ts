@@ -5,6 +5,8 @@ import { withCreds } from './integrations';
 import { handleLineWebhook } from './line/webhook';
 import { runAllTenants } from './tenants';
 import { handleGo } from './links';
+import { authServerMetadata, cors, handleAuthorize, handleRegister, handleToken, resourceMetadata } from './mcp/oauth';
+import { handleMcp } from './mcp/server';
 import { handleConnectLink } from './threads/connectlink';
 import { handleCallback, handleMetaCallback } from './threads/oauth';
 import type { Env } from './types';
@@ -22,6 +24,18 @@ export default {
       }
       const go = pathname.match(/^\/go\/([A-Za-z0-9]{6,16})$/);
       if (go && (req.method === 'GET' || req.method === 'HEAD')) return await handleGo(raw, req, go[1]);
+      // AI 連接器（MCP）與它的登入授權
+      if (pathname === '/mcp') return await handleMcp(raw, req);
+      if (pathname.startsWith('/.well-known/oauth-') || pathname.startsWith('/oauth/')) {
+        const origin = new URL(req.url).origin;
+        if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (pathname === '/.well-known/oauth-authorization-server') return Response.json(authServerMetadata(origin), { headers: cors });
+        if (pathname === '/.well-known/oauth-protected-resource' || pathname === '/.well-known/oauth-protected-resource/mcp') return Response.json(resourceMetadata(origin), { headers: cors });
+        if (pathname === '/oauth/register' && req.method === 'POST') return await handleRegister(raw, req);
+        if (pathname === '/oauth/authorize') return await handleAuthorize(raw, req);
+        if (pathname === '/oauth/token' && req.method === 'POST') return await handleToken(raw, req);
+        return new Response('not found', { status: 404, headers: cors });
+      }
       if (pathname === '/threads/callback' && req.method === 'GET') return await handleCallback(raw, req);
       if (pathname === '/threads/connect' && req.method === 'GET') return await handleConnectLink(raw, req);
       if (pathname === '/threads/deauthorize' && req.method === 'POST') return await handleMetaCallback(raw, req, 'deauthorize');

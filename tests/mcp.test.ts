@@ -1,0 +1,130 @@
+// AI 連接器（MCP）：OAuth 登入授權 → 通行證 → 在 ChatGPT/Codex 裡讀品牌指南、存草稿；品牌隔離與權限
+import { describe, expect, it } from 'vitest';
+import worker from '../src/index';
+import { handleApi } from '../src/admin/routes';
+import { sha256 } from '../src/mcp/oauth';
+import { makeEnv } from './helpers';
+
+const O = 'https://x.dev', REDIRECT = 'https://chatgpt.com/connector_platform_oauth_redirect';
+const go = (env: any, path: string, init: RequestInit = {}) => worker.fetch(new Request(O + path, { redirect: 'manual', ...init }), env);
+const form = (o: Record<string, string>) => ({ method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o).toString() });
+const rpc = (env: any, tok: string | null, method: string, params?: unknown, id: number | null = 1) => go(env, '/mcp', { method: 'POST',
+  headers: { 'content-type': 'application/json', ...(tok ? { authorization: `Bearer ${tok}` } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', ...(id === null ? {} : { id }), method, ...(params ? { params } : {}) }) });
+const tool = async (env: any, tok: string, name: string, args: unknown) => ((await (await rpc(env, tok, 'tools/call', { name, arguments: args })).json()) as any).result;
+const api = (env: any, method: string, path: string, body?: unknown, cookie?: string) => handleApi(env, new Request(O + path, {
+  method, body: body ? JSON.stringify(body) : undefined, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui', ...(cookie ? { cookie } : {}) } }));
+
+/** 跑完整個 OAuth 流程，回傳通行證 */
+async function connect(env: any, username = 'boss', password = 'correct-horse-1') {
+  const reg = (await (await go(env, '/oauth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client_name: 'ChatGPT', redirect_uris: [REDIRECT] }) })).json()) as any;
+  const verifier = 'v'.repeat(50), challenge = await sha256(verifier);
+  const p = { client_id: reg.client_id, redirect_uri: REDIRECT, state: 'st1', code_challenge: challenge, code_challenge_method: 'S256', scope: 'posts' };
+  expect((await go(env, '/oauth/authorize?' + new URLSearchParams({ ...p, response_type: 'code' }))).status).toBe(200);
+  const consent = await (await go(env, '/oauth/authorize', form({ ...p, step: 'login', username, password }))).text();
+  const ticket = consent.match(/name="ticket" value="([^"]+)"/)?.[1];
+  expect(ticket).toBeTruthy();
+  const brand = consent.match(/name="brand_id" value="([^"]+)"/)![1];
+  const ok = await go(env, '/oauth/authorize', form({ ...p, ticket: ticket!, brand_id: brand, step: 'approve' }));
+  expect(ok.status).toBe(302);
+  const loc = new URL(ok.headers.get('location')!);
+  expect(loc.origin + loc.pathname).toBe(REDIRECT); expect(loc.searchParams.get('state')).toBe('st1');
+  const tok = (await (await go(env, '/oauth/token', form({ grant_type: 'authorization_code', code: loc.searchParams.get('code')!, redirect_uri: REDIRECT, client_id: reg.client_id, code_verifier: verifier }))).json()) as any;
+  return { ...tok, client_id: reg.client_id, code: loc.searchParams.get('code')!, verifier };
+}
+
+describe('AI connector OAuth', () => {
+  it('publishes discovery metadata and asks unauthenticated MCP calls to log in', async () => {
+    const env: any = await makeEnv();
+    const as = (await (await go(env, '/.well-known/oauth-authorization-server')).json()) as any;
+    expect(as.registration_endpoint).toBe(`${O}/oauth/register`); expect(as.code_challenge_methods_supported).toEqual(['S256']);
+    expect(((await (await go(env, '/.well-known/oauth-protected-resource')).json()) as any).resource).toBe(`${O}/mcp`);
+    const r = await rpc(env, null, 'initialize', { protocolVersion: '2025-06-18' });
+    expect(r.status).toBe(401); expect(r.headers.get('www-authenticate')).toContain('/.well-known/oauth-protected-resource');
+  });
+
+  it('wrong password, reused code, wrong PKCE verifier and foreign redirect are all refused', async () => {
+    const env: any = await makeEnv();
+    const t = await connect(env);
+    expect(t.access_token).toBeTruthy(); expect(t.refresh_token).toBeTruthy(); expect(t.expires_in).toBe(3600);
+    // 授權碼只能用一次
+    expect((await go(env, '/oauth/token', form({ grant_type: 'authorization_code', code: t.code, redirect_uri: REDIRECT, client_id: t.client_id, code_verifier: t.verifier }))).status).toBe(400);
+    // 不在註冊清單的回傳網址：不跳轉，直接顯示錯誤
+    const bad = await go(env, '/oauth/authorize?' + new URLSearchParams({ client_id: t.client_id, redirect_uri: 'https://evil.example/cb', response_type: 'code', code_challenge: 'x', code_challenge_method: 'S256' }));
+    expect(bad.status).toBe(400); expect(bad.headers.get('location')).toBeNull();
+    // 密碼錯誤：留在登入頁
+    const p = { client_id: t.client_id, redirect_uri: REDIRECT, state: '', code_challenge: 'abc', code_challenge_method: 'S256', scope: '' };
+    expect(await (await go(env, '/oauth/authorize', form({ ...p, step: 'login', username: 'boss', password: 'nope' }))).text()).toContain('帳號或密碼錯誤');
+    // 沒有登入憑證（ticket）不能直接按允許
+    expect(await (await go(env, '/oauth/authorize', form({ ...p, step: 'approve', brand_id: 'b1', ticket: 'forged' }))).text()).toContain('重新登入');
+  });
+
+  it('refresh tokens rotate: the old one stops working once used', async () => {
+    const env: any = await makeEnv();
+    const t = await connect(env);
+    const n = (await (await go(env, '/oauth/token', form({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: t.client_id }))).json()) as any;
+    expect(n.access_token).toBeTruthy(); expect(n.refresh_token).not.toBe(t.refresh_token);
+    expect((await go(env, '/oauth/token', form({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: t.client_id }))).status).toBe(400);
+  });
+});
+
+describe('AI connector tools', () => {
+  it('reads the brand guide, saves drafts with the CTA added, and only publishes with explicit confirmation', async () => {
+    const env: any = await makeEnv();
+    const { access_token: tok } = await connect(env);
+    const init = (await (await rpc(env, tok, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } })).json()) as any;
+    expect(init.result.protocolVersion).toBe('2025-06-18'); expect(init.result.instructions).toContain('測試品牌');
+    expect((await rpc(env, tok, 'notifications/initialized', undefined, null)).status).toBe(202);
+    const tools = ((await (await rpc(env, tok, 'tools/list')).json()) as any).result.tools.map((t: any) => t.name);
+    expect(tools).toEqual(['get_brand_guide', 'list_posts', 'get_post', 'save_drafts', 'update_draft', 'publish_post']);
+    const guide = await tool(env, tok, 'get_brand_guide', { topic: '房仲' });
+    expect(guide.content[0].text).toContain('排版規則'); expect(guide.content[0].text).toContain('房仲'); expect(guide.content[0].text).not.toContain('只輸出 JSON');
+    const saved = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['鉤子一', '結尾一'] }, { parts: ['鉤子二，', '結尾二'], topic_tag: '#房仲' }] });
+    expect(saved.isError).toBeUndefined(); expect(saved.structuredContent.saved).toHaveLength(2);
+    const rows: any[] = (await env.DB.prepare(`SELECT parts,topic_tag,status FROM posts WHERE brand_id='b1' ORDER BY id`).all()).results;
+    expect(JSON.parse(rows[0].parts)).toEqual(['鉤子一', '結尾一\n\n加 LINE 諮詢 https://line.me/R/ti/p/@test']);
+    expect(JSON.parse(rows[1].parts)[0]).toBe('鉤子二'); expect(rows[1].topic_tag).toBe('房仲'); expect(rows.every((r) => r.status === 'draft')).toBe(true);
+    const id = saved.structuredContent.saved[0].id;
+    const noConfirm = await tool(env, tok, 'publish_post', { post_id: id, confirm: false });
+    expect(noConfirm.isError).toBe(true); expect(noConfirm.content[0].text).toContain('確認');
+    expect(((await env.DB.prepare('SELECT status FROM posts WHERE id=?').bind(id).first()) as any).status).toBe('draft');
+    expect((await tool(env, tok, 'list_posts', { status: 'draft' })).structuredContent.posts.length).toBe(2);
+    expect((await tool(env, tok, 'save_drafts', { posts: Array(11).fill({ parts: ['x'] }) })).isError).toBe(true);
+  });
+
+  it('cannot touch another brand; read-only staff get read tools only; revoked and disabled accounts lose access', async () => {
+    const env: any = await makeEnv();
+    await env.DB.prepare(`INSERT INTO brands(id,name,industry,description,timezone,created_at) VALUES('b2','別人','general','x','Asia/Taipei','x')`).run();
+    await env.DB.prepare(`INSERT INTO posts(brand_id,content,parts,status,updated_at,created_at) VALUES('b2','別人的秘密','["別人的秘密"]','draft','x','x')`).run();
+    const { access_token: tok, client_id } = await connect(env);
+    const other = await tool(env, tok, 'get_post', { post_id: 1 });
+    expect(other.isError).toBe(true); expect(JSON.stringify(other)).not.toContain('秘密');
+    expect((await tool(env, tok, 'update_draft', { post_id: 1, parts: ['改掉'] })).isError).toBe(true);
+    expect(((await env.DB.prepare('SELECT content FROM posts WHERE id=1').first()) as any).content).toBe('別人的秘密');
+    // 只有讀取權限的員工
+    const { access_token: st } = await connect(env, 'cs', 'staff-password-1');
+    expect(((await (await rpc(env, st, 'tools/list')).json()) as any).result.tools.map((t: any) => t.name)).toEqual(['get_brand_guide', 'list_posts', 'get_post']);
+    expect((await tool(env, st, 'save_drafts', { posts: [{ parts: ['x'] }] })).isError).toBe(true);
+    // 後台中斷連線
+    const cookie = ((await api(env, 'POST', '/api/login', { username: 'boss', password: 'correct-horse-1' })).headers.get('set-cookie') ?? '').split(';')[0];
+    const list = (await (await api(env, 'GET', '/api/mcp/connections', undefined, cookie)).json()) as any[];
+    expect(list.map((c) => c.client_name)).toContain('ChatGPT');
+    const mine = list.find((c) => c.client_id === client_id && c.username === 'boss');
+    expect((await api(env, 'DELETE', `/api/mcp/connections/${mine.client_id}/${mine.user_id}`, undefined, cookie)).status).toBe(200);
+    expect((await rpc(env, tok, 'tools/list')).status).toBe(401);
+    // 員工帳號被停用
+    await env.DB.prepare(`UPDATE admin_users SET enabled=0 WHERE authentication_id='cs'`).run();
+    expect((await rpc(env, st, 'tools/list')).status).toBe(401);
+  });
+
+  it('Codex connection keys work, are shown once, and belong to the current brand', async () => {
+    const env: any = await makeEnv();
+    const cookie = ((await api(env, 'POST', '/api/login', { username: 'boss', password: 'correct-horse-1' })).headers.get('set-cookie') ?? '').split(';')[0];
+    const r = (await (await api(env, 'POST', '/api/mcp/tokens', { name: 'Codex' }, cookie)).json()) as any;
+    expect(r.token).toMatch(/^ego_/); expect(r.days).toBe(90);
+    const g = await tool(env, r.token, 'get_brand_guide', {});
+    expect(g.isError).toBeUndefined();
+    expect(((await env.DB.prepare('SELECT COUNT(*) n FROM oauth_tokens WHERE token_hash=?').bind(r.token).first()) as any).n).toBe(0); // 不存原文
+    const staff = ((await api(env, 'POST', '/api/login', { username: 'cs', password: 'staff-password-1' })).headers.get('set-cookie') ?? '').split(';')[0];
+    expect((await api(env, 'POST', '/api/mcp/tokens', {}, staff)).status).toBe(403);
+  });
+});
