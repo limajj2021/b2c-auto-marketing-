@@ -81,12 +81,16 @@ export interface Settings {
   leads_enabled: number;
   /** LINE 官方短網址（https://lin.ee/…）；有填時貼文 CTA 直接用它 */
   line_short_url?: string;
+  /** Threads 主題標籤預設值（每篇最多 1 個） */
+  topic_tag?: string;
 }
 
 export interface Post {
   id: number;
   brand_id: string;
   content: string;
+  /** NULL＝用品牌預設；空字串＝這篇不加 */
+  topic_tag?: string | null;
   status: string;
   slot_key: string | null;
   scheduled_at: string | null;

@@ -427,7 +427,7 @@ const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publis
 async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
   if (r.sub === 'patrol') return patrolPage();
-  const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone;
+  const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone; TAG_DEFAULT = st.settings.topic_tag || '';
   const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct()) : all;
   const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
   bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/patrol" aria-label="海巡">${svg('search')}</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
@@ -566,6 +566,7 @@ async function patrolPage() {
     });
   };
 }
+let TAG_DEFAULT = '';
 function openPost(p) {
   const draft = p.status === 'draft', parts = p.parts?.length ? [...p.parts] : [p.content], done = p.part_ids?.length || 0;
   const role = (i, n) => n === 1 ? '' : i === 0 ? '鉤子' : i === n - 1 ? 'CTA' : '';
@@ -576,6 +577,10 @@ function openPost(p) {
   sheet(`${PST[p.status]?.[0] || '貼文'}${parts.length > 1 ? `・串文 ${parts.length} 則` : ''}`, `${p.error_message ? `<div class="note ${draft ? 'warn' : 'bad'}" style="margin-bottom:12px">${esc(p.error_message)}</div>` : ''}
     ${draft || p.status === 'scheduled' ? `<div class="sched"><div><div class="t-sub" style="margin:0">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${draft ? '核准後的發布時間' : '排程發布時間'}</div><div class="when" id="twhen"></div></div><button class="btn sm sec" data-a="time">${draft ? '選擇時間' : '調整時間'}</button><div id="tpick" style="width:100%"></div></div>`
       : `<p class="t-sub" style="margin-bottom:12px">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>`}
+    ${draft ? `<div class="f"><label for="ptag">Threads 主題標籤</label><input id="ptag" value="${esc(p.topic_tag || '')}" placeholder="${TAG_DEFAULT ? '使用預設：' + esc(TAG_DEFAULT) : '不加標籤'}" maxlength="51">
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px"><input type="checkbox" id="pnotag" style="width:18px;height:18px;min-height:0" ${p.topic_tag === '' ? 'checked' : ''}>這篇不加主題標籤</label>
+      <div class="hint">只放在第 1 則，不寫進內文。留空會用預設標籤（在「發文設定」修改）。</div></div>`
+      : (p.topic_tag ?? TAG_DEFAULT) ? `<p class="t-sub" style="margin-bottom:12px">主題標籤：${esc(p.topic_tag ?? TAG_DEFAULT)}</p>` : ''}
     <div id="parts">${draft ? editor() : view()}</div>
     <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="now">立即發布</button><button class="btn sec" data-a="ok">核准排程</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}${p.status === 'scheduled' ? '<button class="btn" data-a="now">立即發布</button>' : ''}
     ${p.status === 'failed' ? `<button class="btn" data-a="retry">${done ? `從第 ${done + 1} 則接續發布` : '重試發布'}</button>` : ''}
@@ -609,6 +614,11 @@ function openPost(p) {
       act(b, async () => {
         const a = b.dataset.a; if (draft) sync();
         const body = { parts: parts.map((x) => x.trim()) };
+        if (draft) {
+          const tg = $('#ptag', el).value.trim().replace(/^#+/, '');
+          if (!$('#pnotag', el).checked && !/^[^.&#\n]{0,50}$/.test(tg)) throw new Error('主題標籤最多 50 字，不能有句點（.）或 &');
+          body.topic_tag = $('#pnotag', el).checked ? '' : (tg || null);
+        }
         if ((a === 'save' || a === 'ok' || (a === 'now' && draft)) && body.parts.some((x) => !x)) throw new Error('有空白的則數，請填寫或移除');
         if (a === 'now') {
           if (draft) { const over = body.parts.findIndex((x) => [...x].length > 500); if (over >= 0) throw new Error(`第 ${over + 1} 則超過 500 字，Threads 會拒收`); }
@@ -662,6 +672,7 @@ async function postSettingsPage() {
     ${field('facts', '可引用數據', area('facts', s.fact_bank, 'style="min-height:140px" placeholder="每行一筆，附上出處，例如：\n台灣大學社團活動贊助平均約 3 萬元（2025 某某調查）"'), 'AI 只能使用這裡的數字；需要數據但這裡沒有時，會寫成【待補數據】，補上真實數字前無法核准。')}
     <h2 class="t-sec" style="margin-top:32px">預設語氣與導流</h2>
     ${field('tone', '品牌語氣', input('tone', s.content_tone))}${field('tops', '內容主題', input('tops', s.content_topics.join(',')), '逗號分隔。')}${field('ban', '禁用詞', input('ban', s.banned_words.join(',')), '逗號分隔；貼文含這些詞時會被擋下。')}
+    ${field('ttag', 'Threads 主題標籤（預設）', input('ttag', s.topic_tag || '', 'placeholder="例如：短影音剪輯" maxlength="51"'), '每篇最多 1 個，只會放在串文第 1 則（不寫進內文）。不含 #、句點和 &；留空代表不加。每篇也可以在編輯時改掉。')}
     ${field('cta', 'CTA 文字', input('cta', s.cta_text))}${field('url', 'LINE 加好友網址', input('url', s.line_add_url, 'inputmode="url" placeholder="https://line.me/R/ti/p/@你的ID"'), '貼文結尾會自動附上「CTA 文字 + 網址」。請先用手機點開確認可加入好友。')}
     <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存設定</button></div></div></div>`, 'form');
   $('#mode').value = s.posting_mode;
@@ -670,11 +681,11 @@ async function postSettingsPage() {
     const btn = e.currentTarget, t = list($('#times').value).map((x) => x.replace('：', ':')); $('#times').value = t.join(',');
     const url = $('#url').value.trim(); $('#url').value = url;
     if (!check([[$('#ppd'), !(+$('#ppd').value >= 1 && +$('#ppd').value <= 5), '每日發文數需為 1 到 5'], [$('#times'), !t.length || t.some((x) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)), '發布時間格式需為 HH:MM，例如 09:30,14:00'],
-      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`], [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭'],
+      [$('#times'), t.length < +$('#ppd').value, `每日 ${$('#ppd').value} 篇，至少需要 ${$('#ppd').value} 個發布時間`], [$('#url'), url && !/^https:\/\//.test(url), '網址需以 https:// 開頭'], [$('#ttag'), !/^[^.&#\n]{0,50}$/.test($('#ttag').value.trim().replace(/^#+/, '')), '主題標籤最多 50 字，不能有句點（.）或 &'],
       [$('#tmin'), !(+$('#tmin').value >= 1 && +$('#tmax').value <= 10 && +$('#tmin').value <= +$('#tmax').value), '每串則數需為 1 到 10，且最少不可大於最多']])) return;
     if (url && !/line\.me/.test(url) && !(await confirmSheet('這個網址看起來不是 LINE 的加好友連結，仍要使用？', '仍要使用', false))) return;
     if ($('#mode').value === 'A' && s.posting_mode !== 'A' && !s.regulated && !(await confirmSheet('全自動模式不會經過人工審核就直接發布，確定切換？', '確定切換', false))) return;
-    const ok = await act(btn, () => api('PUT', '/settings', { posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: t, content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url, style_preset: $('#style').value.trim(), thread_min: +$('#tmin').value, thread_max: +$('#tmax').value, fact_bank: $('#facts').value }), '已儲存');
+    const ok = await act(btn, () => api('PUT', '/settings', { topic_tag: $('#ttag').value, posting_mode: $('#mode').value, weekly_topic: $('#topic').value, require_review: $('#rr').checked, posts_per_day: +$('#ppd').value, publishing_times: t, content_tone: $('#tone').value, content_topics: list($('#tops').value), banned_words: list($('#ban').value), cta_text: $('#cta').value, line_add_url: url, style_preset: $('#style').value.trim(), thread_min: +$('#tmin').value, thread_max: +$('#tmax').value, fact_bank: $('#facts').value }), '已儲存');
     if (ok) dirty = false;
   };
 }

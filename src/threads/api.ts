@@ -31,9 +31,10 @@ const form = (o: Record<string, string>) => ({
 });
 
 /** 步驟 1：建立 media container；replyTo 有值時成為該則的回覆（串文） */
-export async function createContainer(c: Cred, text: string, replyTo?: string): Promise<string> {
+export async function createContainer(c: Cred, text: string, replyTo?: string, topicTag?: string): Promise<string> {
   const p: Record<string, string> = { media_type: 'TEXT', text, access_token: c.token };
   if (replyTo) p.reply_to_id = replyTo;
+  if (topicTag) p.topic_tag = topicTag;
   return (await call(`${BASE}/${c.userId}/threads`, form(p), c.f)).id as string;
 }
 /** 步驟 2：發布 container，回傳平台貼文 ID */

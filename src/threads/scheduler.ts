@@ -7,6 +7,7 @@ import { effective, listAccounts, markAccount, resolveCred, type Account } from 
 import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, notReady, postInsights, publishContainer, timing } from './api';
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
+import { effectiveTag } from './topic';
 import { renewLineTokenIfNeeded } from '../line/token';
 import { syncLineFollowers } from '../line/insights';
 import { logEvent } from '../log';
@@ -170,7 +171,9 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
       }
       let creation = i === ids.length ? post.threads_creation_id : null;
       if (!creation) {
-        creation = await createContainer(cred, parts[i], i > 0 ? ids[i - 1] : undefined);
+        // 主題標籤只放在第 1 則（每篇最多 1 個）
+        const tag = i === 0 ? effectiveTag(post.topic_tag, (await getSettings(env, post.brand_id)).topic_tag) : '';
+        creation = await createContainer(cred, parts[i], i > 0 ? ids[i - 1] : undefined, tag || undefined);
         await env.DB.prepare('UPDATE posts SET threads_creation_id=? WHERE id=?').bind(creation, id).run();
       }
       // 剛建立的 container 偶爾還沒準備好：等一下再發，最多再試 2 次；還是不行就丟掉這個 container，下一輪重新建立

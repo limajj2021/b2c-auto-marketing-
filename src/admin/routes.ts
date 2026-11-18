@@ -2,6 +2,7 @@ import { generateThread, QuotaError } from '../ai/gemini';
 import { checkParts } from '../ai/compliance';
 import { getAccount, listAccounts, resolveCred } from '../threads/accounts';
 import { BudgetError, budgeted } from '../budget';
+import { normTopicTag } from '../threads/topic';
 import { lineAddUrl, lineIdFromUrl } from '../line/links';
 import { buildTraffic } from '../attribution';
 import { audit, brandBySlug, forBrand, getBrand, getSettings, isMulti, jsonArr } from '../db';
@@ -270,6 +271,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
       style_preset: s.style_preset, thread_min: s.thread_min, thread_max: s.thread_max, fact_bank: s.fact_bank,
       line_id: lineIdFromUrl(s.line_add_url),
       line_short_url: s.line_short_url ?? '',
+      topic_tag: s.topic_tag ?? '',
       line_ready: !!parseLineConfig(s.line_config).serviceInfo && !parseLineConfig(s.line_config).serviceInfo.startsWith('（'),
     },
   });
@@ -286,6 +288,11 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
     const u = b.line_id === '' ? '' : lineAddUrl(String(b.line_id));
     if (u === null) return err(400, '官方帳號 ID 格式不正確，例如：@033azwud');
     put('line_add_url', u);
+  }
+  if (b.topic_tag !== undefined) {
+    const t = normTopicTag(b.topic_tag);
+    if (t === null) return err(400, '主題標籤最多 50 字，不能有句點（.）或 &');
+    put('topic_tag', t);
   }
   if (b.line_short_url !== undefined) { // LINE 官方短網址（lin.ee），空字串代表不用
     const v = String(b.line_short_url).trim().replace(/^http:\/\//, 'https://');
@@ -334,7 +341,7 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
 add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
-    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,a.username,
+    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,p.topic_tag,a.username,
        m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,(SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,
@@ -370,8 +377,12 @@ add('PUT', '/posts/(\\d+)', 'admin', async ({ env, req, m, actor, brandId }) => 
   const parts: string[] = Array.isArray(b.parts) ? b.parts.map((x: unknown) => String(x ?? '').trim()) : typeof b.content === 'string' ? [b.content.trim()] : [];
   if (!parts.length || parts.some((x) => !x)) return err(400, '每一則內容都不可為空');
   if (parts.length > 10) return err(400, '串文最多 10 則');
-  const r = await env.DB.prepare(`UPDATE posts SET content=?,parts=?,error_message=NULL,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
-    .bind(parts[0], JSON.stringify(parts), iso(), m[1], brandId).run();
+  // topic_tag：沒傳＝不變；null＝改回品牌預設；字串＝這篇自己的（'' 代表不加）
+  let tag: string | null | undefined;
+  if (b.topic_tag === null) tag = null;
+  else if (b.topic_tag !== undefined) { const t = normTopicTag(b.topic_tag); if (t === null) return err(400, '主題標籤最多 50 字，不能有句點（.）或 &'); tag = t; }
+  const r = await env.DB.prepare(`UPDATE posts SET content=?,parts=?,${tag !== undefined ? 'topic_tag=?,' : ''}error_message=NULL,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
+    .bind(...[parts[0], JSON.stringify(parts), ...(tag !== undefined ? [tag] : []), iso(), m[1], brandId]).run();
   if (r.meta.changes !== 1) return err(409, '只有草稿可以修改');
   await audit(env, brandId, actor.name, 'post_edit', m[1]);
   return json({ ok: true });
