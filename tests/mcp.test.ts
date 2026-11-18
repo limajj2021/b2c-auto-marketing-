@@ -128,7 +128,7 @@ describe('AI connector tools', () => {
     expect((await api(env, 'POST', '/api/mcp/tokens', {}, staff)).status).toBe(403);
   });
 
-  it('drafts are always tied to a Threads account: the one named, or the brand default; unknown accounts are refused', async () => {
+  it('drafts are always tied to a Threads account: with several accounts it must be named; unknown accounts are refused', async () => {
     const env: any = await makeEnv();
     const acct = (id: number, u: string, persona: string) => env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,persona,created_at,updated_at) VALUES(?,'b1',?,?,'x',?,'x','x')`).bind(id, 'u' + id, u, persona).run();
     await acct(11, 'main.tw', '品牌主帳號'); await acct(12, 'second.tw', '老闆個人帳號');
@@ -138,7 +138,11 @@ describe('AI connector tools', () => {
     expect(guide.content[0].text).toContain('@main.tw（預設）'); expect(guide.content[0].text).toContain('@second.tw：老闆個人帳號');
     expect(guide.content[0].text).toContain('先問使用者要發到哪一個');
     expect((await tool(env, tok, 'get_brand_guide', { account: '@second.tw' })).content[0].text).toContain('老闆個人帳號');
-    const saved = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['預設'] }, { parts: ['指定'], account: '@Second.TW' }] });
+    // 有多個帳號卻沒指定：不存，請 AI 先問使用者（避免存到錯的帳號）
+    const ask = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['預設'] }, { parts: ['指定'], account: '@Second.TW' }] });
+    expect(ask.isError).toBe(true); expect(ask.content[0].text).toContain('請先問使用者');
+    expect((await env.DB.prepare(`SELECT count(*) n FROM posts`).first() as any).n).toBe(0);
+    const saved = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['預設'], account: 'main.tw' }, { parts: ['指定'], account: '@Second.TW' }] });
     expect(saved.content[0].text).toContain('（@main.tw）'); expect(saved.content[0].text).toContain('（@second.tw）');
     const rows: any[] = (await env.DB.prepare(`SELECT account_id FROM posts WHERE brand_id='b1' ORDER BY id`).all()).results;
     expect(rows.map((r) => r.account_id)).toEqual([11, 12]);
@@ -160,7 +164,7 @@ describe('AI connector tools', () => {
     await env.DB.prepare(`INSERT INTO brands(id,name,industry,description,timezone,created_at) VALUES('b2','別人','general','x','Asia/Taipei','x')`).run();
     await env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES(21,'b2','u21','other.tw','x','ok','x','x')`).run();
     const { access_token: tok } = await connect(env);
-    const ids = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['一'] }, { parts: ['二'] }, { parts: ['三'] }] })).structuredContent.saved.map((x: any) => x.id);
+    const ids = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['一'], account: 'a.tw' }, { parts: ['二'], account: 'a.tw' }, { parts: ['三'], account: 'a.tw' }] })).structuredContent.saved.map((x: any) => x.id);
     const d = new Date(Date.now() + 2 * 86400000), day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(d);
     const args = { post_ids: ids, accounts: ['@a.tw', 'b.tw'], start_at: `${day} 09:00`, interval_min: 60 };
     const no = await tool(env, tok, 'schedule_posts', { ...args, confirm: false });
@@ -175,5 +179,23 @@ describe('AI connector tools', () => {
     expect(rows[0].scheduled_at).toBe(new Date(`${day}T01:00:00Z`).toISOString());
     expect(Date.parse(rows[2].scheduled_at) - Date.parse(rows[0].scheduled_at)).toBe(2 * 3600000);
     expect(r.content[0].text).toContain('09:00');
+  });
+
+  it('multi-account brands: must name the account when saving; can move a draft or publish to another account', async () => {
+    const env: any = await makeEnv();
+    for (const [id, u] of [[11, 'vuca.canada'], [12, 'vuca.tw']] as const)
+      await env.DB.prepare(`INSERT INTO threads_accounts(id,brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES(?,'b1',?,?,'x','ok','x','x')`).bind(id, 'u' + id, u).run();
+    const { access_token: tok } = await connect(env);
+    const miss = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['GTA6'] }] });
+    expect(miss.isError).toBe(true); expect(miss.content[0].text).toContain('@vuca.tw');
+    const id = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['GTA6'], account: '@vuca.canada' }] })).structuredContent.saved[0].id;
+    // 只改帳號，不用重傳內容
+    const moved = await tool(env, tok, 'update_draft', { post_id: id, account: 'vuca.tw' });
+    expect(moved.isError).toBeUndefined();
+    const r: any = await env.DB.prepare('SELECT account_id,parts FROM posts WHERE id=?').bind(id).first();
+    expect(r.account_id).toBe(12); expect(JSON.parse(r.parts)[0]).toMatch(/^GTA6/);
+    const tools = ((await (await rpc(env, tok, 'tools/list')).json()) as any).result.tools;
+    expect(tools.find((t: any) => t.name === 'publish_post').inputSchema.properties.account).toBeTruthy();
+    expect((await tool(env, tok, 'publish_post', { post_id: id, account: '@nobody', confirm: true })).isError).toBe(true);
   });
 });

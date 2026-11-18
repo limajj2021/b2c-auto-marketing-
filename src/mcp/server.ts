@@ -19,7 +19,7 @@ const MAX_POSTS = 10, MAX_PARTS = 10, MAX_CHARS = 500;
 
 const INSTRUCTIONS = `這是「異構資本」的 Threads 貼文助理連接器。寫貼文前一定先呼叫 get_brand_guide 取得這個品牌的資料與寫作規則，照規則寫。
 寫好先在對話裡給使用者看，使用者同意後再用 save_drafts 存成草稿（一次最多 10 篇）。要寫很多篇時，每次 5 篇分批寫，品質比較穩定。
-這個品牌有多個 Threads 帳號時，先問使用者要發到哪一個帳號，存檔時用 account 指定（例如 @vuca.tw）。
+這個品牌有多個 Threads 帳號時，每個工具都可以用 account 參數指定帳號（例如 @vuca.tw）：save_drafts 存到指定帳號、update_draft 改到別的帳號、publish_post 發到指定帳號、schedule_posts 排到指定帳號。使用者說「發到某帳號」時直接帶 account，不要說做不到。
 要把多篇草稿排程發出（可以分給多個帳號輪流發，或每個帳號都發）用 schedule_posts；排程前先把帳號、方式、開始時間、間隔講給使用者確認，同意後再把 confirm 設為 true。
 不要自己編造數字、案例或引言。發布（publish_post）一定要使用者在對話中明確說要發布，並把 confirm 設為 true。`;
 
@@ -37,10 +37,10 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { posts: { type: 'array', minItems: 1, maxItems: MAX_POSTS, items: { type: 'object', properties: {
       parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } },
       topic_tag: { type: 'string', description: 'Threads 主題標籤（選填，不含 #）；不填就用品牌預設' },
-      account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）；不填就用品牌預設帳號' } }, required: ['parts'], additionalProperties: false } } }, required: ['posts'], additionalProperties: false },
+      account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）。品牌有多個帳號時必填' } }, required: ['parts'], additionalProperties: false } } }, required: ['posts'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-  { name: 'update_draft', title: '修改草稿', description: '修改一篇還在待審核的草稿內容（整串取代）。',
-    inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } }, topic_tag: { type: 'string' }, account: { type: 'string', description: '要發到哪個 Threads 帳號（例如 @vuca.tw）；不填就用品牌預設帳號' } }, required: ['post_id', 'parts'], additionalProperties: false },
+  { name: 'update_draft', title: '修改草稿', description: '修改一篇還在待審核的草稿：可以整串取代內容（parts）、改主題標籤，或只用 account 改發到別的帳號（不用重傳內容）。',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, parts: { type: 'array', minItems: 1, maxItems: MAX_PARTS, items: { type: 'string', maxLength: MAX_CHARS } }, topic_tag: { type: 'string' }, account: { type: 'string', description: '改發到哪個 Threads 帳號（例如 @vuca.tw）；不填就維持原本的帳號' } }, required: ['post_id'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   { name: 'schedule_posts', title: '批量排程', description: `把多篇待審核草稿一次排程發到 Threads（一次最多 ${BATCH_MAX} 篇）。同一個品牌的多個帳號共用草稿池：mode=assign 每篇只發一次、輪流分給選的帳號（推薦）；mode=copy 每篇發到每個選的帳號（內容完全相同，可能被 Threads 視為重複）。從 start_at 開始，每篇間隔 interval_min 分鐘（0 代表同時發）。排好後時間到會自動公開發布，所以一定要使用者確認後才把 confirm 設為 true。`,
     inputSchema: { type: 'object', properties: {
@@ -51,8 +51,8 @@ const TOOLS = [
       interval_min: { type: 'integer', minimum: 0, maximum: 1440, description: '每篇間隔幾分鐘，預設 30；0＝同時發' },
       confirm: { type: 'boolean', description: '使用者已確認帳號、方式與時間後才設為 true' } }, required: ['post_ids', 'confirm'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
-  { name: 'publish_post', title: '立即發布到 Threads', description: '把一篇草稿或已排程的貼文立即發布到 Threads（公開，發出後無法收回）。只有在使用者明確說要發布時才使用，並把 confirm 設為 true。',
-    inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, confirm: { type: 'boolean', description: '使用者已明確同意立即發布時才設為 true' } }, required: ['post_id', 'confirm'], additionalProperties: false },
+  { name: 'publish_post', title: '立即發布到 Threads', description: '把一篇草稿或已排程的貼文立即發布到 Threads（公開，發出後無法收回）。可以用 account 指定要發到哪個帳號。只有在使用者明確說要發布時才使用，並把 confirm 設為 true。',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'integer' }, account: { type: 'string', description: '發到哪個 Threads 帳號（例如 @vuca.tw）；不填就發到這篇目前指定的帳號' }, confirm: { type: 'boolean', description: '使用者已明確同意立即發布時才設為 true' } }, required: ['post_id', 'confirm'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
 ];
 
@@ -134,6 +134,8 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
       if (!posts.length) throw new ToolError('沒有要存的貼文');
       if (posts.length > MAX_POSTS) throw new ToolError(`一次最多存 ${MAX_POSTS} 篇`);
       const link = postLink(s), saved: { id: number; parts: number; account: string; issues: string[] }[] = [];
+      const live = accts.filter((x) => x.status === 'ok');
+      if (live.length > 1 && posts.some((p: any) => !p?.account)) throw new ToolError(`這個品牌有 ${live.map((x) => '@' + x.username).join('、')} 多個帳號，請先問使用者要存到哪一個，並在每篇的 account 填上帳號。`);
       const prepared = posts.map((p: any) => ({ parts: withCta(cleanParts(p?.parts), s.cta_text, link), tag: cleanTag(p?.topic_tag), acct: pickAccount(accts, p?.account) }));
       for (const p of prepared) {
         const issues = checkParts(p.parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
@@ -147,14 +149,17 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
     }
     case 'update_draft': {
       needAdmin(a);
-      const parts = withCta(cleanParts(args?.parts), s.cta_text, postLink(s)), tag = args?.topic_tag === undefined ? undefined : cleanTag(args.topic_tag);
+      const cur = await env.DB.prepare(`SELECT parts,content FROM posts WHERE id=? AND brand_id=? AND status='draft'`).bind(Number(args?.post_id), a.brandId).first<any>();
+      if (!cur) throw new ToolError('只有待審核的草稿可以修改（找不到這篇草稿，或它已排程／發布）');
+      if (args?.parts === undefined && args?.account === undefined && args?.topic_tag === undefined) throw new ToolError('沒有要修改的內容');
+      const parts = args?.parts === undefined ? partsOf(cur) : withCta(cleanParts(args.parts), s.cta_text, postLink(s)), tag = args?.topic_tag === undefined ? undefined : cleanTag(args.topic_tag);
       const acct = args?.account === undefined ? undefined : pickAccount(accts, args.account);
       const issues = checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
       const r = await env.DB.prepare(`UPDATE posts SET content=?,parts=?,${tag !== undefined ? 'topic_tag=?,' : ''}${acct !== undefined ? 'account_id=?,' : ''}error_message=?,updated_at=? WHERE id=? AND brand_id=? AND status='draft'`)
         .bind(...[parts[0], JSON.stringify(parts), ...(tag !== undefined ? [tag] : []), ...(acct !== undefined ? [acct?.id ?? null] : []), issues.length ? `內容檢查未通過：${issues.join('；')}` : null, iso(), Number(args?.post_id), a.brandId]).run();
       if (r.meta.changes !== 1) throw new ToolError('只有待審核的草稿可以修改（找不到這篇草稿，或它已排程／發布）');
       await audit(env, a.brandId, `${a.name}（${a.client}）`, 'mcp_update_draft', String(args.post_id));
-      return text(`已更新草稿 #${args.post_id}${issues.length ? `，但內容需要修改：${issues.join('；')}` : ''}`);
+      return text(`已更新草稿 #${args.post_id}${acct ? `（帳號：${acctLabel(acct)}）` : ''}${issues.length ? `，但內容需要修改：${issues.join('；')}` : ''}`);
     }
     case 'schedule_posts': {
       needAdmin(a);
@@ -180,6 +185,12 @@ ${r.plan.map((x) => `・${fmt(x.at)}　${x.account}　#${x.post_id}${x.copy ? '�
     case 'publish_post': {
       needAdmin(a);
       if (args?.confirm !== true) throw new ToolError('發布前請先跟使用者確認，使用者同意後再把 confirm 設為 true。');
+      if (args?.account) {
+        const acct = pickAccount(accts, args.account)!;
+        if (acct.status !== 'ok') throw new ToolError(`@${acct.username} 的授權已失效，請使用者到後台重新連結`);
+        const u = await env.DB.prepare(`UPDATE posts SET account_id=?,updated_at=? WHERE id=? AND brand_id=? AND status IN ('draft','scheduled')`).bind(acct.id, iso(), Number(args?.post_id), a.brandId).run();
+        if (u.meta.changes !== 1) throw new ToolError('找不到這篇草稿或已排程的貼文（已發布的貼文不能換帳號）');
+      }
       const r = await publishNow(env, a.brandId, `${a.name}（${a.client}）`, Number(args?.post_id));
       if ('error' in r) throw new ToolError(r.error);
       return text(r.status === 'published' ? `已發布到 Threads（${r.total} 則）` : r.message!, r);
