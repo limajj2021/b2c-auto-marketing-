@@ -10,6 +10,7 @@ import { credStatus, deleteCreds, getMeta, setCred } from '../integrations';
 import { buildAuthorizeUrl, oauthConfigured } from '../threads/oauth';
 import { credFor, getAccount, listAccounts, publicAccount, removeAccounts, resolveCred } from '../threads/accounts';
 import { iso } from '../util/time';
+import { geminiFetch } from '../budget';
 import type { Env } from '../types';
 import { hashPassword } from '../util/crypto';
 import { fill, normKeywords, parsePostUrl, rank, type Template } from '../patrol';
@@ -249,7 +250,7 @@ export function registerExtra(add: Add, json: J, err: E) {
     const b: any = await req.json().catch(() => ({}));
     const key = String(b.api_key ?? '').trim();
     if (key.length < 20) return err(400, 'API key 看起來不完整');
-    const r = await fetch(GEMINI_MODELS, { headers: { 'x-goog-api-key': key } });
+    const r = await geminiFetch(env)(GEMINI_MODELS, { headers: { 'x-goog-api-key': key } });
     if (!r.ok) {
       // 把 Google 說的原因和這次請求走的機房記下來（金鑰本身不記），方便判斷是金鑰問題還是地區限制
       const eb: any = await r.json().catch(() => ({}));
@@ -345,8 +346,12 @@ export function registerExtra(add: Add, json: J, err: E) {
       }
       if (b.target === 'gemini') {
         if (!env.GEMINI_API_KEY) return json({ ok: false, message: '尚未設定' });
-        const r = await fetch(GEMINI_MODELS, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
-        return json({ ok: r.ok, message: r.ok ? '連線正常' : `Gemini 回應 ${r.status}` });
+        const r = await geminiFetch(env)(GEMINI_MODELS, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
+        // 顯示轉送程式實際從哪裡連線（確認不是 Google 不支援的地區）
+        let via = '';
+        if (env.GEMINI_PROXY) { const t = await (await env.GEMINI_PROXY.fetch('https://relay/__where')).text().catch(() => ''); const g = (k: string) => t.match(new RegExp(`^${k}=(.+)$`, 'm'))?.[1] ?? ''; via = `（經由 ${g('colo')} / ${g('loc')} 連線）`; }
+        const eb: any = r.ok ? null : await r.json().catch(() => ({}));
+        return json({ ok: r.ok, message: r.ok ? `連線正常${via}` : `Gemini 回應 ${r.status}：${eb?.error?.message ?? ''}${via}` });
       }
       if (b.target === 'threads') {
         const accts = (await listAccounts(env)).filter((a) => !b.account_id || a.id === Number(b.account_id));

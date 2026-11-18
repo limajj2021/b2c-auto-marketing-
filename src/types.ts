@@ -34,6 +34,8 @@ export interface Env {
   CRON_SUBREQUEST_LIMIT?: string;
   /** 排程期間由 budget.ts 注入 */
   SUBFETCH?: typeof fetch;
+  /** Gemini 轉送（固定在美國執行的小程式，避開 Google 不支援的地區）；沒有設定時直接連線 */
+  GEMINI_PROXY?: Fetcher;
   BUDGET?: import('./budget').Budget;
   /** 排程額度用完時仍可用於收尾寫入的資料庫（不計數）；只在 budget.ts 設定 */
   DB_RESERVE?: D1Database;

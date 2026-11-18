@@ -83,6 +83,11 @@ directory = "../public"
 binding = "ASSETS"
 run_worker_first = ["/api/*", "/line/*", "/threads/*", "/mcp", "/oauth/*", "/.well-known/*"]
 
+# Gemini 轉送（固定在美國執行，避開 Google 不支援的地區）
+[[services]]
+binding = "GEMINI_PROXY"
+service = "gemini-proxy"
+
 [observability]
 enabled = true
 
@@ -120,6 +125,10 @@ writeFileSync(`${dir}/seed.${brand}.sql`, seed);
 wr(['d1', 'execute', 'DB', '--remote', '--config', tomlPath, '--file', `${dir}/seed.${brand}.sql`]);
 
 step(6, '部署 Worker 與管理頁');
+// 先部署 Gemini 轉送程式（主程式綁定它；同一個帳號只需要一份）
+const proxyToml = `${dir}/wrangler.gemini-proxy.toml`;
+writeFileSync(proxyToml, `name = "gemini-proxy"\nmain = "../src/gemini-proxy.ts"\ncompatibility_date = "2025-01-01"\nworkers_dev = false\n\n[placement]\nregion = "aws:us-east-1"\n`);
+wr(['deploy', '--config', proxyToml]);
 const out = wr(['deploy', '--config', tomlPath]);
 const url = (out.match(/https:\/\/[^\s]+\.workers\.dev/) ?? [])[0];
 
