@@ -227,12 +227,12 @@ async function homePage() {
     ${setup.done < setup.steps.length ? (() => { const nx = setup.steps.find((x) => !x.ok); return `<div class="banner"><div class="main"><div class="t-label">開通進度 ${setup.done}/${setup.steps.length}</div><div class="t-sub">下一步：${esc(nx.t)}</div></div><button class="btn sm" data-go="setup">繼續設定</button></div>`; })() : ''}
     <section>${sec('今日')}
       <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${ac ? '' : d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.clicks_today, 'LINE 點擊') + m(d.line_data ? d.friends_yesterday : null, '昨日新好友')}</div>
-      <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停'}</p></section>
+      <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停（你核准的貼文仍會照時間發布）'}</p></section>
     ${fn ? funnelBlock(fn, ac ? `導流成效・${esc('@' + (acctOf(ac)?.username || ''))}・近 30 天` : '導流成效・近 30 天', true) : ''}
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
     <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="report">成效報告</button>'}</section>
     <section>${sec('自動化')}<div class="list">
-      ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程生成並發布' : '已暫停', end: sw('t1', d.auto_post_enabled, '自動發文') })}
+      ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程自動生成並發布' : '已暫停 AI 生成；你核准的貼文仍會照時間發布', end: sw('t1', d.auto_post_enabled, '自動發文') })}
       ${d.leads_enabled ? row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') }) : ''}</div></section>
     <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 3).map((a) => row({ go: false, title: esc(ACTION[a.action] || '其他操作'), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
       <p class="t-sub" style="margin-top:12px">今日 AI 生成 ${d.gen_today}/${d.gen_limit}${audit.length > 3 ? ' · <a href="#/settings/audit">全部紀錄</a>' : ''}</p></section>`);

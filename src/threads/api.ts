@@ -9,6 +9,11 @@ export class ThreadsApiError extends Error {
   /** 缺少權限（例如未授權 threads_manage_replies 卻嘗試串文） */
   get permission() { return this.code === 10 || this.code === 200 || /permission/i.test(this.message); }
 }
+/** Threads 還沒準備好剛建立的 container（剛建立就發布時偶爾會回「資源不存在」），稍等再發通常就會成功 */
+export const notReady = (e: unknown) => e instanceof ThreadsApiError && (e.code === 24 || /does not exist|not (yet )?(ready|available)|try again/i.test(e.message));
+/** 等待用的計時器；測試時換成不等待 */
+export const timing = { sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) };
+
 /** 請求送出後未取得回應（結果未知）。 */
 export class ThreadsUnknownError extends Error {}
 

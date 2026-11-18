@@ -4,7 +4,7 @@ import type { Env, Post, Settings } from '../types';
 import { REGULATED_INDUSTRIES } from '../types';
 import { addDays, iso, localDate, zonedToUtc } from '../util/time';
 import { effective, listAccounts, markAccount, resolveCred, type Account } from './accounts';
-import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, postInsights, publishContainer } from './api';
+import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, notReady, postInsights, publishContainer, timing } from './api';
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
 import { renewLineTokenIfNeeded } from '../line/token';
@@ -12,6 +12,8 @@ import { syncLineFollowers } from '../line/insights';
 import { logEvent } from '../log';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
+/** 發一則大約要用的請求數（建立＋發布＋2 次寫入，再加重試的餘裕） */
+const PER_PART = 6;
 const MAX_GEN_ATTEMPTS = 3;
 const STALE_MS = 10 * 60 * 1000;
 const STAGGER_MIN = 20; // 多帳號共用預設時段時，依序錯開分鐘數，避免同時發文
@@ -39,12 +41,14 @@ export async function runCron(env: Env, now = new Date()): Promise<void> {
   // 每個工作區每小時清理一次（各自計時；工作區很多、輪替處理時也不會漏掉）
   const lastHk = brand.last_housekeeping_at ? new Date(brand.last_housekeeping_at).getTime() : 0;
   if (now.getTime() - lastHk >= 3600_000) await step('housekeeping', () => housekeeping(env, now));
-  if (s.auto_post_enabled) {
-    // 額度有限時的優先順序：先核對與發布，再生成新草稿
+  // 額度有限時的優先順序：先核對與發布，再生成新草稿。
+  // 自動發文關閉時：仍然發布「有人核准」的貼文（那是明確的發布意圖），只停止 AI 生成與 AI 自動核准的貼文
+  const pending = s.auto_post_enabled || !!(await env.DB.prepare(`SELECT 1 FROM posts WHERE brand_id=? AND status IN ('scheduled','publishing','unknown') LIMIT 1`).bind(brand.id).first());
+  if (pending) {
     await step('reconcile', () => reconcile(env, now));
-    await step('publish', () => publishDue(env, now));
-    await step('generate', () => ensureSlots(env, now));
+    await step('publish', () => publishDue(env, now, !s.auto_post_enabled));
   }
+  if (s.auto_post_enabled) await step('generate', () => ensureSlots(env, now));
   await step('insights', () => refreshInsights(env, now));
 }
 
@@ -119,7 +123,7 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
   }
 }
 
-export async function publishDue(env: Env, now: Date): Promise<void> {
+export async function publishDue(env: Env, now: Date, humanOnly = false): Promise<void> {
   const brand = await getBrand(env);
   const s = await getSettings(env, brand.id);
   const accts = await listAccounts(env);
@@ -127,11 +131,14 @@ export async function publishDue(env: Env, now: Date): Promise<void> {
   const due = await env.DB.prepare(
     `SELECT p.id,p.parts,p.part_ids,p.content FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id
      WHERE p.brand_id=? AND p.status='scheduled' AND p.scheduled_at<=? AND (p.account_id IS NULL OR a.status='ok')
+       AND (?=0 OR COALESCE(p.approved_by,'auto')<>'auto')
      ORDER BY p.scheduled_at LIMIT 3`,
-  ).bind(brand.id, iso(now)).all<{ id: number; parts: string | null; part_ids: string | null; content: string }>();
+  ).bind(brand.id, iso(now), humanOnly ? 1 : 0).all<{ id: number; parts: string | null; part_ids: string | null; content: string }>();
   for (const r of due.results) {
     // 每則 = 建立 + 發布 2 次對外呼叫 + 2 次寫入；另有搶佔、讀取、追蹤連結、憑證、收尾約 12 次。額度不夠就留到下一輪，不會發到一半
-    if (!canAfford(env, (partsOf(r).length - idsOf(r).length) * 4 + 12)) return;
+    // 長串文一輪的額度可能不夠：至少夠發幾則就開始，發不完的下一輪從斷點接續（每則都會記錄，不會重複發）
+    const need = (partsOf(r).length - idsOf(r).length) * 4 + 12;
+    if (!canAfford(env, Math.min(need, PER_PART + 12))) return;
     await publishOne(env, r.id, now);
   }
 }
@@ -155,12 +162,27 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
 
   try {
     for (let i = ids.length; i < parts.length; i++) {
+      // 這一輪的額度不夠再發一則：已發出的都記下了，退回排程，下一輪從這一則接續（不算失敗）
+      if (i > 0 && !canAfford(env, PER_PART + 4)) {
+        await reserveDb(env).prepare(`UPDATE posts SET status='scheduled',attempts=MAX(attempts-1,0),error_message=?,updated_at=? WHERE id=? AND status='publishing'`)
+          .bind(`已發出 ${ids.length}/${parts.length} 則，其餘會在下一輪排程（5 分鐘內）接續`, iso(now), id).run();
+        return;
+      }
       let creation = i === ids.length ? post.threads_creation_id : null;
       if (!creation) {
         creation = await createContainer(cred, parts[i], i > 0 ? ids[i - 1] : undefined);
         await env.DB.prepare('UPDATE posts SET threads_creation_id=? WHERE id=?').bind(creation, id).run();
       }
-      ids.push(await publishContainer(cred, creation));
+      // 剛建立的 container 偶爾還沒準備好：等一下再發，最多再試 2 次；還是不行就丟掉這個 container，下一輪重新建立
+      let pubId: string | undefined;
+      for (let t = 0; ; t++) {
+        try { pubId = await publishContainer(cred, creation); break; } catch (e) {
+          if (notReady(e) && t < 2) { await timing.sleep(t ? 3000 : 1500); continue; }
+          if (notReady(e)) await env.DB.prepare('UPDATE posts SET threads_creation_id=NULL WHERE id=?').bind(id).run();
+          throw e;
+        }
+      }
+      ids.push(pubId!);
       // 已發出的 ID 一定要記下（即使額度剛好用完），否則下次會重複發同一則
       await reserveDb(env).prepare('UPDATE posts SET part_ids=?,threads_post_id=?,threads_creation_id=NULL WHERE id=?').bind(JSON.stringify(ids), ids[0], id).run();
     }
@@ -182,6 +204,7 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
       else await setErr('failed', `第 ${n} 則結果未知，請到 Threads 確認是否已發出；未發出可按「重試」從第 ${n} 則接續`);
     } else if (e instanceof ThreadsApiError) {
       if (e.tokenInvalid) { await markAccount(env, cred.accountId, 'token_invalid'); await setErr('scheduled', `Threads 授權失效，請重新連結：${e.message}`); }
+      else if (notReady(e)) await setErr(post.attempts >= MAX_PUBLISH_ATTEMPTS ? 'failed' : 'scheduled', `${chain ? `第 ${n} 則` : '貼文'}：Threads 暫時還沒準備好（${e.message}），${post.attempts >= MAX_PUBLISH_ATTEMPTS ? `請按「從第 ${n} 則接續發布」` : '系統會在 5 分鐘內自動接續'}`);
       else if (chain && ids.length && e.permission) await setErr('failed', `串文需要 threads_manage_replies 權限：請在 Meta App 加入此權限並重新連結，再按「重試」從第 ${n} 則接續`);
       else await setErr(post.attempts >= MAX_PUBLISH_ATTEMPTS ? 'failed' : 'scheduled', chain ? `第 ${n} 則：${e.message}` : e.message);
     } else await setErr('failed', (e as Error).message);
