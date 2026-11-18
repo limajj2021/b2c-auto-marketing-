@@ -69,6 +69,7 @@ export interface Settings {
   publishing_times: string;
   weekly_topic: string;
   auto_post_enabled: number;
+  auto_fresh_enabled: number;
   line_auto_reply_enabled: number;
   daily_gen_limit: number;
   monthly_token_limit: number;

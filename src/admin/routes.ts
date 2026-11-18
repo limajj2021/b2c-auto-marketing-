@@ -225,6 +225,7 @@ add('GET', '/dashboard', 'admin', async ({ env, brandId }) => {
     line_data: !!env.LINE_CHANNEL_ACCESS_TOKEN,
     handoffs_today: await metricSum(env, brandId, 'handoff', localDate(new Date(), brand.timezone)),
     auto_post_enabled: !!s.auto_post_enabled,
+    auto_fresh_enabled: !!s.auto_fresh_enabled,
     line_auto_reply_enabled: !!s.line_auto_reply_enabled,
     gen_today: await n('SELECT COUNT(*) c FROM ai_generations WHERE brand_id=? AND created_at>=?', brandId, dayStart),
     gen_limit: s.daily_gen_limit,
@@ -235,10 +236,11 @@ add('POST', '/pause', 'admin', async ({ env, req, actor, brandId }) => {
   const b: any = await req.json().catch(() => ({}));
   const sets: string[] = []; const vals: unknown[] = [];
   if (typeof b.auto_post_enabled === 'boolean') { sets.push('auto_post_enabled=?'); vals.push(b.auto_post_enabled ? 1 : 0); }
+  if (typeof b.auto_fresh_enabled === 'boolean') { sets.push('auto_fresh_enabled=?'); vals.push(b.auto_fresh_enabled ? 1 : 0); }
   if (typeof b.line_auto_reply_enabled === 'boolean') { sets.push('line_auto_reply_enabled=?'); vals.push(b.line_auto_reply_enabled ? 1 : 0); }
   if (!sets.length) return err(400, 'nothing to update');
   // 防呆：必要連線未完成時不允許開啟自動化
-  if (b.auto_post_enabled === true) {
+  if (b.auto_post_enabled === true || b.auto_fresh_enabled === true) {
     const s = await getSettings(env, brandId);
     const accts = await listAccounts(env);
     const ok = accts.filter((a) => a.status === 'ok');
@@ -344,7 +346,7 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
 add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
-    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,p.topic_tag,p.seen_at,a.username,
+    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,p.topic_tag,p.seen_at,p.idea,a.username,
        m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,(SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,

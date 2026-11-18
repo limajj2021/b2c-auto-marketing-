@@ -260,3 +260,5 @@ nav.tabs button.brand svg{flex:none;width:16px;height:16px;margin-left:auto;stro
 .bopt,.f label.bopt{display:flex;font-weight:400;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer}
 .bopt input{width:18px;height:18px;min-height:0;margin-top:2px;flex:none}
 @media (min-width:900px){.pbatch{left:216px;bottom:0}}
+
+.pidea{font-size:12.5px;color:var(--gold-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -11,6 +11,7 @@ import { autoTag, effectiveTag } from './topic';
 import { renewLineTokenIfNeeded } from '../line/token';
 import { syncLineFollowers } from '../line/insights';
 import { logEvent } from '../log';
+import { collectHistory, ideate } from '../ai/ideate';
 
 const MAX_PUBLISH_ATTEMPTS = 3;
 /** 發一則大約要用的請求數（建立＋發布＋2 次寫入，再加重試的餘裕） */
@@ -44,12 +45,13 @@ export async function runCron(env: Env, now = new Date()): Promise<void> {
   if (now.getTime() - lastHk >= 3600_000) await step('housekeeping', () => housekeeping(env, now));
   // 額度有限時的優先順序：先核對與發布，再生成新草稿。
   // 自動發文關閉時：仍然發布「有人核准」的貼文（那是明確的發布意圖），只停止 AI 生成與 AI 自動核准的貼文
-  const pending = s.auto_post_enabled || !!(await env.DB.prepare(`SELECT 1 FROM posts WHERE brand_id=? AND status IN ('scheduled','publishing','unknown') LIMIT 1`).bind(brand.id).first());
+  const auto = !!(s.auto_post_enabled || s.auto_fresh_enabled);
+  const pending = auto || !!(await env.DB.prepare(`SELECT 1 FROM posts WHERE brand_id=? AND status IN ('scheduled','publishing','unknown') LIMIT 1`).bind(brand.id).first());
   if (pending) {
     await step('reconcile', () => reconcile(env, now));
-    await step('publish', () => publishDue(env, now, !s.auto_post_enabled));
+    await step('publish', () => publishDue(env, now, !auto));
   }
-  if (s.auto_post_enabled) await step('generate', () => ensureSlots(env, now));
+  if (auto) await step('generate', () => ensureSlots(env, now));
   await step('insights', () => refreshInsights(env, now));
 }
 
@@ -74,20 +76,22 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
   const s = await getSettings(env, brand.id);
   const accts = (await listAccounts(env)).filter((a) => a.status === 'ok' && a.auto_post_enabled);
   const targets: (Account | null)[] = accts.length ? accts : [null]; // 無帳號表時沿用舊版單帳號
-  const review = needsReview(brand.industry, s);
+  // 全自動發文：每個帳號每天 1 篇、先找沒寫過的題材、寫完直接排程（受監管產業與內容檢查沒過的仍留草稿）
+  const fresh = !!s.auto_fresh_enabled;
+  const review = fresh ? REGULATED_INDUSTRIES.includes(brand.industry) : needsReview(brand.industry, s);
   const today = localDate(now, brand.timezone);
   let shared = 0;
   for (const a of targets) {
     const e = effective(a, s);
     const offset = a && !a.publishing_times ? (shared++) * STAGGER_MIN * 60000 : 0;
-    const times = e.times.slice(0, e.postsPerDay);
+    const times = e.times.slice(0, fresh ? 1 : e.postsPerDay);
     for (const day of [today, addDays(today, 1)]) {
       for (let i = 0; i < times.length; i++) {
         const at = new Date(zonedToUtc(day, times[i], brand.timezone).getTime() + offset);
         if (at.getTime() < now.getTime() - 3600_000) continue;
         const slot = `${day}#${i}${a ? `@a${a.id}` : ''}`;
         // 先確認額度再佔位：佔位後才發現額度不足，會留下沒人處理的「生成中」貼文
-        if (!canAfford(env, 10)) return; // 生成一串約需 8～10 次請求，不夠就留到下一輪
+        if (!canAfford(env, fresh ? 16 : 10)) return; // 生成一串約需 8～10 次請求，不夠就留到下一輪
         const ins = await env.DB.prepare(`INSERT OR IGNORE INTO posts(brand_id,account_id,status,slot_key,scheduled_at,updated_at,created_at) VALUES(?,?,?,?,?,?,?)`)
           .bind(brand.id, a?.id ?? null, 'generating', slot, at.toISOString(), iso(now), iso(now)).run();
         let postId: number | null = ins.meta.changes === 1 ? (ins.meta.last_row_id as number) : null;
@@ -99,11 +103,18 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
           postId = row.id;
         }
         try {
-          const g = await generateThread(env, { topic: s.posting_mode === 'C' ? s.weekly_topic : '', account: a }, now);
+          let idea: string | null = null;
+          if (fresh) {
+            const found = await ideate(env, brand, s, a, await collectHistory(env, brand.id, a), now);
+            if (!found) throw new Error('這次找不到跟過去不重複的題材，稍後再試');
+            idea = `${found.topic}｜${found.angle}`;
+          }
+          const topic = idea ? `${idea}（這是這個帳號從沒寫過的題材／觀點，整串都圍繞這個核心觀點，不要寫成老生常談）` : s.posting_mode === 'C' ? s.weekly_topic : '';
+          const g = await generateThread(env, { topic, account: a }, now);
           const status = g.issues.length || review ? 'draft' : 'scheduled';
-          await env.DB.prepare(`UPDATE posts SET content=?,parts=?,status=?,topic_tag=?,generation_id=?,approved_by=?,error_message=?,updated_at=? WHERE id=?`)
+          await env.DB.prepare(`UPDATE posts SET content=?,parts=?,status=?,topic_tag=?,generation_id=?,approved_by=?,error_message=?,idea=?,updated_at=? WHERE id=?`)
             .bind(g.parts[0], JSON.stringify(g.parts), status, s.topic_tag ? null : g.tag || null, g.generationId, status === 'scheduled' ? 'auto' : null,
-              g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(now), postId).run();
+              g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, idea, iso(now), postId).run();
         } catch (err) {
           if (err instanceof BudgetError) {
             // 額度在生成途中用完：把佔位還原成可重試狀態（用保留額度寫入），下一輪再生成

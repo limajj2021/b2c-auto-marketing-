@@ -93,10 +93,10 @@ function sheet(title, html, mount) {
   setTimeout(() => $('input:not([type=checkbox]),textarea,button.btn', el)?.focus({ preventScroll: true }), 30);
   mount?.(el, close); return close;
 }
-function confirmSheet(msg, okText = '確定', danger = true) {
+function confirmSheet(msg, okText = '確定', danger = true, body = '') {
   return new Promise((res) => {
     let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
-    const close = sheet(msg, `<div class="actions" style="margin-top:8px"><button class="btn sec" data-v="0">取消</button><button class="btn ${danger ? 'dng' : ''}" data-v="1" style="${danger ? 'background:var(--bad-bg)' : ''}">${esc(okText)}</button></div>`, (el, c) => {
+    const close = sheet(msg, `${body ? `<p class="t-sub">${esc(body)}</p>` : ''}<div class="actions" style="margin-top:8px"><button class="btn sec" data-v="0">取消</button><button class="btn ${danger ? 'dng' : ''}" data-v="1" style="${danger ? 'background:var(--bad-bg)' : ''}">${esc(okText)}</button></div>`, (el, c) => {
       el.addEventListener('click', (e) => { const v = e.target.closest('[data-v]')?.dataset.v; if (v !== undefined) { fin(v === '1'); c(); } });
       new MutationObserver(() => { if (!document.body.contains(el)) fin(false); }).observe(document.body, { childList: true });
     });
@@ -227,11 +227,12 @@ async function homePage() {
     ${setup.done < setup.steps.length ? (() => { const nx = setup.steps.find((x) => !x.ok); return `<div class="banner"><div class="main"><div class="t-label">開通進度 ${setup.done}/${setup.steps.length}</div><div class="t-sub">下一步：${esc(nx.t)}</div></div><button class="btn sm" data-go="setup">繼續設定</button></div>`; })() : ''}
     <section>${sec('今日')}
       <div class="metrics">${m(d.posted_today, '已發文')}${m(d.pending_drafts, '待審核')}${ac ? '' : d.leads_enabled ? m(d.inquiries_today, '新留資') + m(d.inquiries_pending, '未處理') : m(d.clicks_today, 'LINE 點擊') + m(d.line_data ? d.friends_yesterday : null, '昨日新好友')}</div>
-      <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停（你核准的貼文仍會照時間發布）'}</p></section>
+      <p class="t-sub" style="margin-top:10px">${d.auto_post_enabled || d.auto_fresh_enabled ? (next ? `下一則排程：${fmt(next.scheduled_at)}` : '自動發文運作中，目前沒有排程中的貼文') : '自動發文已暫停（你核准的貼文仍會照時間發布）'}</p></section>
     ${fn ? funnelBlock(fn, ac ? `導流成效・${esc('@' + (acctOf(ac)?.username || ''))}・近 30 天` : '導流成效・近 30 天', true) : ''}
     <section>${sec('需要處理')}${todo.length ? `<div class="list">${todo.map((x, i) => row({ act: 'todo', id: String(i), dot: x.dot, title: x.t, sub: esc(x.s) })).join('')}</div>` : `<p class="t-sub">目前沒有需要處理的事項。</p>`}</section>
     <section class="actions"><button class="btn" data-act="gen">${svg('spark')}AI 生成貼文</button>${d.leads_enabled ? '<button class="btn sec" data-go="leads">查看留資</button>' : '<button class="btn sec" data-go="report">成效報告</button>'}</section>
     <section>${sec('自動化')}<div class="list">
+      ${row({ go: false, title: '全自動發文', sub: d.auto_fresh_enabled ? '每個帳號每天 1 篇・AI 讀過去的貼文找沒寫過的題材，寫完直接發布' : '開啟後每天 1 篇，自己找不重複的題材、不用審核', end: sw('t0', d.auto_fresh_enabled, '全自動發文') })}
       ${row({ go: false, title: '自動發文', sub: d.auto_post_enabled ? '依排程自動生成並發布' : '已暫停 AI 生成；你核准的貼文仍會照時間發布', end: sw('t1', d.auto_post_enabled, '自動發文') })}
       ${d.leads_enabled ? row({ go: false, title: 'LINE 自動接待', sub: d.line_auto_reply_enabled ? '自動回覆選單與 FAQ' : '已暫停', end: sw('t2', d.line_auto_reply_enabled, 'LINE 自動接待') }) : ''}</div></section>
     <section>${sec('最近活動', '')}${audit.length ? `<div class="list">${audit.slice(0, 3).map((a) => row({ go: false, title: esc(ACTION[a.action] || '其他操作'), sub: `${esc(a.actor || '系統')} · ${rel(a.created_at)}` })).join('')}</div>` : `<p class="t-sub">尚無活動紀錄。</p>`}
@@ -246,6 +247,10 @@ async function homePage() {
     render();
   };
   bindAcctStrip();
+  $('#t0').onchange = async (e) => {
+    if (e.target.checked && !(await confirmSheet('開啟全自動發文？', '開啟', false, '每個帳號每天會自動發 1 篇。AI 會先讀過去的貼文，挑一個沒寫過的題材或觀點，寫完不經審核直接排程發布（內容檢查沒過的會留在草稿）。'))) { e.target.checked = false; return; }
+    return flip('auto_fresh_enabled', '全自動發文')(e);
+  };
   $('#t1').onchange = flip('auto_post_enabled', '自動發文'); $('#t2')?.addEventListener('change', flip('line_auto_reply_enabled', 'LINE 自動接待'));
 }
 
@@ -456,6 +461,7 @@ function postCard(p, seg) {
         <span class="pst ${st[1]}">${seg === 'hist' && when ? hhmm(when) : seg === 'draft' ? (when ? '預定 ' + fmt(when) : '') : st[0] !== '已排程' ? st[0] : ''}</span></span>
       <span class="phook">${esc(hook)}</span>
       ${second ? `<span class="psec">${esc(second)}</span>` : ''}
+      ${p.idea ? `<span class="pidea">💡 ${esc(p.idea)}</span>` : ''}
       <span class="pfoot">${parts.length > 1 ? `<span class="pm">串文 ${parts.length} 則</span>` : '<span class="pm">單則</span>'}${flags}
         ${seg === 'hist' && p.status === 'published' ? `${metric('👁', p.views, '曝光')}${metric('👆', p.uniques || p.clicks || (p.views !== null && p.views !== undefined ? 0 : null), '點擊人數')}${metric('♥', p.likes, '按讚')}${metric('💬', p.replies, '回覆')}` : ''}
         ${seg === 'hist' && p.status !== 'published' ? `<span class="pflag bad">${st[0]}</span>` : ''}</span>
