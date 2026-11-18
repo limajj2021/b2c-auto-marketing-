@@ -67,7 +67,15 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     '',
     '# 寫作規則',
     max === 1 ? '・只寫 1 則。' : `・共 ${min} 到 ${max} 則。第 1 則是鉤子：1 到 3 行、不超過 60 字，不給答案、不放連結。`,
-    '・每則 2～6 行，一則一個重點，一行約 20 字內；段落之間空一行，也可以用單獨一行「-」分隔。',
+    '・每則 2～8 行，一則只講一個重點。',
+    '',
+    '# 排版規則（手機上要整齊，務必遵守）',
+    `・每一行最多 ${LINE_MAX} 個字（含標點）。超過就在語意斷點自己換行，不要寫成一長句讓手機自動折行。`,
+    '・在逗號、頓號、冒號的位置換行，換行處的逗號拿掉；不要把「」裡的詞、數字和單位、英文單字拆到兩行。',
+    '・一行只放一個意思；句子很長時拆成兩三行，每行都要能單獨讀懂。',
+    '・段落之間空一行，只空一行；不要用「-」「—」「---」之類的符號分隔。',
+    '・條列時每一項獨立一行，用 emoji 或 1️⃣2️⃣3️⃣ 開頭；項目的說明寫在下一行，不要跟在同一行後面。',
+    '・行首不要空格，行尾不要逗號或空格。',
     '・懸念切割：前一則停在「真相是……」「而是⋯」，下一則開頭重複這句再揭曉。',
     '・至少一次翻轉歸因：「這不是你能力的問題，而是＿＿的問題」。',
     '・至少一組二元對比，例如：成本 vs 投資、被管理者 vs 資產、要錢 vs 創造價值。',
@@ -95,6 +103,17 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
 }
 
 /** 解析模型輸出：優先 JSON；失敗時整段視為單則。 */
+/** 手機上一行能完整顯示的字數（保守值）；超過的行會被自動折行，排版就亂了 */
+export const LINE_MAX = 16;
+
+/** 整理排版：去掉行首尾空白、行尾逗號、當分隔線用的「-」，多個空行合成一個 */
+export function tidyPart(s: string): string {
+  return s.replace(/\r/g, '').split('\n')
+    .map((l) => l.trim().replace(/[，,、]+$/, ''))
+    .map((l) => (/^[-—–_─]{1,5}$/.test(l) ? '' : l))
+    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function parseParts(raw: string): string[] {
   const t = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
   try {
@@ -152,7 +171,7 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
     if (!raw.trim()) throw new Error('Gemini 回傳空內容');
     const max = Math.max(1, s.thread_max ?? 7);
     const e = effective(o.account ?? null, s);
-    const parts = appendCta(parseParts(raw).slice(0, max), e.cta, s.line_add_url);
+    const parts = appendCta(parseParts(raw).map(tidyPart).filter(Boolean).slice(0, max), e.cta, s.line_add_url);
     const id = await record('ok', JSON.stringify(parts), null, data?.usageMetadata?.promptTokenCount ?? 0, data?.usageMetadata?.candidatesTokenCount ?? 0);
     return { generationId: id, parts, issues: checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) }) };
   } catch (e) {
