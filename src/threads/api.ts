@@ -47,6 +47,20 @@ export async function listRecent(c: Cred, limit = 25): Promise<{ id: string; tex
   return r.data ?? [];
 }
 
+/** 帳號在一段時間內的瀏覽數（since/until 為 Unix 秒）。回傳 null 代表沒有權限。 */
+export async function accountViews(c: Cred, since: number, until: number): Promise<number | null> {
+  try {
+    const r = await call(`${BASE}/${c.userId}/threads_insights?metric=views&since=${since}&until=${until}&access_token=${encodeURIComponent(c.token)}`, { method: 'GET' }, c.f);
+    const d = (r.data ?? []).find((x: any) => x.name === 'views');
+    if (!d) return 0;
+    if (Array.isArray(d.values)) return d.values.reduce((n: number, v: any) => n + (Number(v.value) || 0), 0);
+    return Number(d.total_value?.value) || 0;
+  } catch (e) {
+    if (e instanceof ThreadsApiError && e.permission) return null;
+    throw e;
+  }
+}
+
 /** Threads 成效數據（需 threads_manage_insights）。回傳 null 代表沒有權限。 */
 export async function postInsights(c: Cred, mediaId: string): Promise<Record<string, number> | null> {
   const metrics = 'views,likes,replies,reposts,quotes,shares';

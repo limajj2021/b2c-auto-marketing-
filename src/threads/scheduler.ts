@@ -4,7 +4,7 @@ import type { Env, Post, Settings } from '../types';
 import { REGULATED_INDUSTRIES } from '../types';
 import { addDays, iso, localDate, zonedToUtc } from '../util/time';
 import { effective, listAccounts, markAccount, resolveCred, type Account } from './accounts';
-import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, notReady, postInsights, publishContainer, timing } from './api';
+import { ThreadsApiError, accountViews, ThreadsUnknownError, createContainer, listRecent, notReady, postInsights, publishContainer, timing } from './api';
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
 import { autoTag, effectiveTag } from './topic';
@@ -254,6 +254,7 @@ export async function reconcile(env: Env, now: Date): Promise<void> {
 /** 補抓近 14 天已發布貼文的成效數據（每 6 小時更新一次）。沒有權限的帳號會被標記，重新連結後再試。 */
 export async function refreshInsights(env: Env, now: Date): Promise<void> {
   const brand = await getBrand(env);
+  await refreshAccountViews(env, now);
   const rows = (await env.DB.prepare(
     `SELECT p.id,p.account_id,p.threads_post_id FROM posts p
        LEFT JOIN post_metrics m ON m.post_id=p.id LEFT JOIN threads_accounts a ON a.id=p.account_id
@@ -277,5 +278,34 @@ export async function refreshInsights(env: Env, now: Date): Promise<void> {
       `INSERT INTO post_metrics(post_id,brand_id,views,likes,replies,reposts,quotes,shares,fetched_at) VALUES(?,?,?,?,?,?,?,?,?)
        ON CONFLICT(post_id) DO UPDATE SET views=excluded.views,likes=excluded.likes,replies=excluded.replies,reposts=excluded.reposts,quotes=excluded.quotes,shares=excluded.shares,fetched_at=excluded.fetched_at`,
     ).bind(r.id, brand.id, m.views ?? 0, m.likes ?? 0, m.replies ?? 0, m.reposts ?? 0, m.quotes ?? 0, m.shares ?? 0, iso(now)).run();
+  }
+}
+
+/** 每個帳號「今天」的曝光（工作區時區），每 30 分鐘更新一次 */
+const VIEWS_EVERY_MS = 30 * 60000;
+export async function refreshAccountViews(env: Env, now: Date): Promise<void> {
+  const brand = await getBrand(env);
+  const today = localDate(now, brand.timezone);
+  const since = Math.floor(zonedToUtc(today, '00:00', brand.timezone).getTime() / 1000);
+  const until = Math.floor(now.getTime() / 1000);
+  for (const a of await listAccounts(env)) {
+    if (a.status !== 'ok' || (a as any).insights_status === 'no_permission') continue;
+    const last = await env.DB.prepare('SELECT fetched_at FROM account_daily WHERE account_id=? AND day=?').bind(a.id, today).first<{ fetched_at: string }>();
+    if (last && now.getTime() - Date.parse(last.fetched_at) < VIEWS_EVERY_MS) continue;
+    if (!canAfford(env, 3)) return;
+    const cred = await resolveCred(env, a.id);
+    if (!cred) continue;
+    let v: number | null;
+    try { v = await accountViews(cred, since, until); } catch (e) {
+      if (e instanceof BudgetError) throw e;
+      await logEvent(env, brand.id, 'warn', 'threads_insights', `@${a.username} 讀取今日曝光失敗，稍後再試：${(e as Error).message}`, undefined, { throttleMinutes: 180 });
+      continue;
+    }
+    if (v === null) {
+      await env.DB.prepare(`UPDATE threads_accounts SET insights_status='no_permission' WHERE id=?`).bind(a.id).run();
+      continue;
+    }
+    await env.DB.prepare(`INSERT INTO account_daily(account_id,brand_id,day,views,fetched_at) VALUES(?,?,?,?,?)
+      ON CONFLICT(account_id,day) DO UPDATE SET views=excluded.views,fetched_at=excluded.fetched_at`).bind(a.id, brand.id, today, v, iso(now)).run();
   }
 }

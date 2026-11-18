@@ -229,6 +229,9 @@ add('GET', '/dashboard', 'admin', async ({ env, brandId }) => {
     line_auto_reply_enabled: !!s.line_auto_reply_enabled,
     gen_today: await n('SELECT COUNT(*) c FROM ai_generations WHERE brand_id=? AND created_at>=?', brandId, dayStart),
     gen_limit: s.daily_gen_limit,
+    // 今日曝光：各帳號今天的瀏覽數（Threads 帳號成效，約每 30 分鐘更新）
+    views_today: (await env.DB.prepare('SELECT account_id,views,fetched_at FROM account_daily WHERE brand_id=? AND day=?').bind(brandId, localDate(new Date(), brand.timezone)).all<{ account_id: number; views: number; fetched_at: string }>()).results,
+    views_no_permission: accts.filter((a) => a.status === 'ok' && (a as any).insights_status === 'no_permission').map((a) => ({ id: a.id, username: a.username })),
   });
 });
 
