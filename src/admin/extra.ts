@@ -12,6 +12,8 @@ import { credFor, getAccount, listAccounts, publicAccount, removeAccounts, resol
 import { iso } from '../util/time';
 import type { Env } from '../types';
 import { hashPassword } from '../util/crypto';
+import { fill, normKeywords, parsePostUrl, rank, type Template } from '../patrol';
+import { postLink } from '../ai/gemini';
 import type { Actor } from './routes';
 
 type Ctx = { env: Env; req: Request; actor: Actor; m: RegExpMatchArray; url: URL; brandId: string };
@@ -115,6 +117,65 @@ export function registerExtra(add: Add, json: J, err: E) {
     await audit(env, brandId, actor.name, 'integration_line_webhook');
     await logEvent(env, brandId, wh.verified ? 'info' : 'warn', 'line_connect', wh.verified ? '自動接待 Webhook 已設定並驗證通過' : '自動接待 Webhook 設定未完成：請到 LINE Developers 開啟 Use webhook');
     return json({ ok: true, webhook_set: wh.set, webhook_verified: wh.verified });
+  });
+
+  // ---- 半自動海巡：固定回覆範本 ----
+  const tplRow = (r: any): Template => ({ id: r.id, title: r.title, keywords: JSON.parse(r.keywords || '[]'), reply: r.reply, enabled: !!r.enabled, uses: r.uses });
+  const tplBody = async (req: Request) => {
+    const b: any = await req.json().catch(() => ({}));
+    const reply = String(b.reply ?? '').trim(), title = String(b.title ?? '').trim().slice(0, 40), keywords = normKeywords(b.keywords);
+    if (!reply) return { error: '請填寫回覆內容' };
+    if ([...reply].length > 500) return { error: '回覆最多 500 字（Threads 的上限）' };
+    return { reply, title, keywords, enabled: b.enabled === undefined ? true : !!b.enabled };
+  };
+  add('GET', '/patrol/templates', 'staff', async ({ env, brandId }) => {
+    const rows = (await env.DB.prepare('SELECT * FROM patrol_templates WHERE brand_id=? ORDER BY enabled DESC, uses DESC, id').bind(brandId).all()).results;
+    return json(rows.map(tplRow));
+  });
+  add('POST', '/patrol/templates', 'admin', async ({ env, req, actor, brandId }) => {
+    const b = await tplBody(req); if ('error' in b) return err(400, b.error!);
+    const n = await env.DB.prepare('SELECT COUNT(*) c FROM patrol_templates WHERE brand_id=?').bind(brandId).first<{ c: number }>();
+    if ((n?.c ?? 0) >= 50) return err(400, '範本最多 50 個');
+    const r = await env.DB.prepare('INSERT INTO patrol_templates(brand_id,title,keywords,reply,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
+      .bind(brandId, b.title, JSON.stringify(b.keywords), b.reply, b.enabled ? 1 : 0, iso(), iso()).run();
+    await audit(env, brandId, actor.name, 'patrol_template_add', String(r.meta.last_row_id));
+    return json({ ok: true, id: r.meta.last_row_id });
+  });
+  add('PUT', '/patrol/templates/(\\d+)', 'admin', async ({ env, req, m, actor, brandId }) => {
+    const b = await tplBody(req); if ('error' in b) return err(400, b.error!);
+    const r = await env.DB.prepare('UPDATE patrol_templates SET title=?,keywords=?,reply=?,enabled=?,updated_at=? WHERE id=? AND brand_id=?')
+      .bind(b.title, JSON.stringify(b.keywords), b.reply, b.enabled ? 1 : 0, iso(), m[1], brandId).run();
+    if (r.meta.changes !== 1) return err(404, '找不到範本');
+    await audit(env, brandId, actor.name, 'patrol_template_edit', m[1]);
+    return json({ ok: true });
+  });
+  add('DELETE', '/patrol/templates/(\\d+)', 'admin', async ({ env, m, actor, brandId }) => {
+    const r = await env.DB.prepare('DELETE FROM patrol_templates WHERE id=? AND brand_id=?').bind(m[1], brandId).run();
+    if (r.meta.changes !== 1) return err(404, '找不到範本');
+    await audit(env, brandId, actor.name, 'patrol_template_delete', m[1]);
+    return json({ ok: true });
+  });
+  // 貼上別人的貼文 → 推薦範本（已套好連結與品牌名），並告訴你這篇是不是已經回過
+  add('POST', '/patrol/match', 'staff', async ({ env, req, brandId }) => {
+    const b: any = await req.json().catch(() => ({}));
+    const p = parsePostUrl(b.url);
+    if (!p) return err(400, '請貼上 Threads 貼文的網址（在貼文按「分享 → 複製連結」）');
+    const [brand, s] = await Promise.all([getBrand(env), getSettings(env, brandId)]);
+    const rows = (await env.DB.prepare('SELECT * FROM patrol_templates WHERE brand_id=?').bind(brandId).all()).results.map(tplRow);
+    const done = await env.DB.prepare('SELECT replied_by,created_at FROM patrol_log WHERE brand_id=? AND shortcode=?').bind(brandId, p.shortcode).first<{ replied_by: string; created_at: string }>();
+    const vars = { line: postLink(s) || '', brand: brand.name };
+    return json({ ...p, replied: done ? { by: done.replied_by, at: done.created_at } : null,
+      templates: rank(rows, String(b.text ?? '').slice(0, 2000)).map((t) => ({ id: t.id, title: t.title, hits: t.hits, reply: fill(t.reply, vars) })) });
+  });
+  // 按下「開啟 Threads 回覆」時記錄，之後貼同一篇會提醒已回覆過
+  add('POST', '/patrol/log', 'staff', async ({ env, req, actor, brandId }) => {
+    const b: any = await req.json().catch(() => ({}));
+    const p = parsePostUrl(b.url); if (!p) return err(400, '網址不正確');
+    const tid = Number(b.template_id) || null;
+    const r = await env.DB.prepare('INSERT OR IGNORE INTO patrol_log(brand_id,shortcode,author,template_id,replied_by,created_at) VALUES(?,?,?,?,?,?)')
+      .bind(brandId, p.shortcode, p.author, tid, actor.name, iso()).run();
+    if (r.meta.changes && tid) await env.DB.prepare('UPDATE patrol_templates SET uses=uses+1 WHERE id=? AND brand_id=?').bind(tid, brandId).run();
+    return json({ ok: true });
   });
 
   // ---- LINE 圖文選單 ----

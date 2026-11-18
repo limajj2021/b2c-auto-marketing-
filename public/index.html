@@ -17,6 +17,7 @@
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const IC = {
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
   home: '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/>',
   post: '<path d="M5 4h14v12H9l-4 4z"/><path d="M9 8.5h6M9 11.5h4"/>',
   line: '<path d="M4 11.5a8 7 0 0 1 16 0 8 7 0 0 1-16 0z"/><path d="M8 18.5 6.5 21 11 19"/>',
@@ -425,10 +426,11 @@ async function setupPage() {
 const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publishing: ['發布中', ''], published: ['已發布', 'ok'], failed: ['失敗', 'bad'], unknown: ['待核對', 'warn'], generating: ['生成中', ''], gen_failed: ['生成失敗', 'bad'] };
 async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
+  if (r.sub === 'patrol') return patrolPage();
   const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone;
   const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct()) : all;
   const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
-  bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
+  bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/patrol" aria-label="海巡">${svg('search')}</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
   $('[data-act=gen3]').onclick = openGenerate;
   const seg = S.postSeg, items = G[seg];
   const copy = { draft: ['沒有待審核的草稿', '開啟自動發文或按「AI 生成」後，草稿會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿或開啟自動發文後，排程會顯示在這裡。'], hist: ['還沒有發布紀錄', '貼文發布後會顯示在這裡。'] }[seg];
@@ -505,6 +507,64 @@ function manualSheet(p, parts) {
       await api('POST', `/posts/${p.id}/manual-done`); close(); S.postSeg = 'hist'; toast('已標記為已發布', 'ok'); render();
     });
   });
+}
+/* ---------- 半自動海巡：在 Threads 找到別人的貼文 → 套用固定回覆範本 → 一鍵開啟 Threads 回覆 ---------- */
+async function patrolPage() {
+  const tpls = await api('GET', '/patrol/templates'), admin = me.role === 'admin';
+  bar({ title: '海巡', back: 'posts', right: admin ? '<button class="btn sm" id="ptnew">新增範本</button>' : '' });
+  setView(`<div data-form>
+    <p class="t-sub">在 Threads 看到有人在問你能幫上忙的事，按貼文的「分享 → 複製連結」，貼到這裡。系統依關鍵字推薦你預先寫好的回覆，按一下就開啟 Threads，回覆已經填好，確認後按「發佈」。</p>
+    <section style="margin-top:16px">${sec('找到一篇想回覆的貼文')}<div class="list" style="padding:4px 16px 16px">
+      ${field('purl', 'Threads 貼文網址', `<div style="display:flex;gap:8px"><input id="purl" inputmode="url" placeholder="https://www.threads.com/@…/post/…" autocapitalize="none" autocorrect="off" style="flex:1"><button class="btn sec sm" id="ppaste" type="button">貼上</button></div>`)}
+      ${field('ptext', '貼文內容（選填）', area('ptext', '', 'placeholder="複製對方的貼文文字貼在這裡，系統會比對關鍵字推薦最適合的範本" style="min-height:80px"'))}
+      <button class="btn block" id="pgo" style="margin-top:12px">推薦回覆</button></div></section>
+    <div id="pres"></div>
+    <section style="margin-top:28px">${sec(`回覆範本（${tpls.length}）`)}
+      ${tpls.length ? `<div class="list">${tpls.map((t) => row({ act: admin ? 'ptpl' : '', go: admin, id: t.id, dot: t.enabled ? 'ok' : '', title: esc(t.title || t.reply.slice(0, 16)), sub: `${t.keywords.length ? '關鍵字：' + esc(t.keywords.join('、')) : '沒有關鍵字（手動挑選）'}・用過 ${t.uses} 次` })).join('')}</div>`
+        : empty('post', '還沒有回覆範本', '先寫幾個常用的回覆，例如有人問「有推薦剪輯師嗎」時要怎麼回。', admin ? '<button class="btn" id="ptnew2">新增第一個範本</button>' : '')}
+      <div class="note" style="margin-top:12px">回覆前先看完對方的貼文，<b>內容要真的回答到他的問題</b>；同一段話到處貼、一天回太多篇，容易被 Threads 當成洗版限制帳號。</div></section></div>`, 'form');
+
+  const openTpl = (t) => sheet(t ? '編輯範本' : '新增範本', `${field('tt', '名稱', input('tt', t?.title || '', 'placeholder="例如：有人在找剪輯師" maxlength="40"'))}
+      ${field('tk', '關鍵字', input('tk', (t?.keywords || []).join('、'), 'placeholder="推薦剪輯、找剪輯師、剪片"'), '用頓號或逗號分隔。對方的貼文含任一個，就會優先推薦這個範本。')}
+      ${field('tr', '回覆內容', area('tr', t?.reply || '', 'style="min-height:150px" placeholder="例如：我們是{品牌}，專做短影音剪輯\n可以先免費試剪一支看看 👇\n{LINE}"'), '<b>{LINE}</b> 會換成你的加好友連結，<b>{品牌}</b> 會換成品牌名稱。每行 16 字內比較好讀。')}
+      ${t ? `<div class="list" style="margin-top:16px">${row({ go: false, title: '啟用', end: sw('te', t.enabled, '啟用') })}</div>` : ''}
+      <div class="actions" style="margin-top:20px"><button class="btn" id="ts">儲存</button>${t ? '<button class="btn dng" id="td">刪除</button>' : ''}</div>`, (el, close) => {
+    $('#ts', el).onclick = (e) => {
+      if (!check([[$('#tr', el), !$('#tr', el).value.trim(), '請填寫回覆內容'], [$('#tr', el), [...$('#tr', el).value].length > 500, '回覆最多 500 字']])) return;
+      const body = { title: $('#tt', el).value, keywords: $('#tk', el).value, reply: $('#tr', el).value, enabled: t ? $('#te', el).checked : true };
+      act(e.currentTarget, async () => { t ? await api('PUT', '/patrol/templates/' + t.id, body) : await api('POST', '/patrol/templates', body); close(); render(); }, '已儲存');
+    };
+    $('#td', el)?.addEventListener('click', (e) => act(e.currentTarget, async () => { if (!(await confirmSheet('刪除這個範本？'))) return; await api('DELETE', '/patrol/templates/' + t.id); close(); render(); toast('已刪除', 'ok'); }));
+  });
+  $('#ptnew')?.addEventListener('click', () => openTpl(null)); $('#ptnew2')?.addEventListener('click', () => openTpl(null));
+  $$('[data-act=ptpl]').forEach((b) => b.onclick = () => openTpl(tpls.find((t) => t.id == b.dataset.id)));
+  $('#ppaste').onclick = async () => { try { $('#purl').value = (await navigator.clipboard.readText()).trim(); } catch { toast('無法讀取剪貼簿，請長按輸入框貼上', 'bad'); } };
+
+  $('#pgo').onclick = (e) => {
+    const url = $('#purl').value.trim();
+    if (!check([[$('#purl'), !/threads\.(com|net)\/@[^/]+\/post\//.test(url), '請貼上 Threads 貼文的網址（分享 → 複製連結）']])) return;
+    act(e.currentTarget, async () => {
+      const r = await api('POST', '/patrol/match', { url, text: $('#ptext').value });
+      const box = $('#pres');
+      if (!r.templates.length) { box.innerHTML = `<div class="note warn" style="margin-top:16px">還沒有啟用的回覆範本，${admin ? '先按右上角「新增範本」。' : '請管理員先新增範本。'}</div>`; return; }
+      box.innerHTML = `<section style="margin-top:24px">${sec(`回覆 @${esc(r.author)}`)}
+        ${r.replied ? `<div class="note warn" style="margin-bottom:12px">這篇在 ${esc(fmt(r.replied.at))} 已由 ${esc(r.replied.by || '團隊')} 回覆過，確定要再回一次嗎？</div>` : ''}
+        ${r.templates.map((t, i) => `<div class="list" style="padding:12px 16px 14px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">${esc(t.title || '範本 ' + (i + 1))}</b>${t.hits.length ? `<span class="pill ok">符合：${esc(t.hits.join('、'))}</span>` : ''}</div>
+          ${area('pr' + i, t.reply, `data-tid="${t.id}" style="min-height:110px"`)}<div class="hint" data-pc="${i}"></div>
+          <a class="btn block" href="#" data-open="${i}" style="text-decoration:none;margin-top:10px">開啟 Threads 回覆 ↗</a></div>`).join('')}
+        <p class="t-sub">會在 Threads 開啟回覆視窗，內容已填好。用的是這支手機目前登入的 Threads 帳號，請確認是你的品牌帳號再按「發佈」。</p></section>`;
+      r.templates.forEach((t, i) => { const ta = $('#pr' + i), cc = $(`[data-pc="${i}"]`); const u = () => { const n = [...ta.value].length; cc.textContent = `${n} / 500 字`; cc.className = 'hint' + (n > 500 ? ' bad' : ''); }; ta.oninput = u; u(); });
+      $$('[data-open]').forEach((a) => a.onclick = (ev) => {
+        ev.preventDefault();
+        const ta = $('#pr' + a.dataset.open), text = ta.value.trim();
+        if (!text || [...text].length > 500) return toast('回覆要在 1～500 字之間', 'bad');
+        window.open(threadsIntent(text, r.shortcode), '_blank', 'noopener');
+        api('POST', '/patrol/log', { url, template_id: +ta.dataset.tid }).catch(() => {});
+      });
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 }
 function openPost(p) {
   const draft = p.status === 'draft', parts = p.parts?.length ? [...p.parts] : [p.content], done = p.part_ids?.length || 0;
