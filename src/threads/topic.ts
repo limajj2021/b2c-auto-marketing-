@@ -6,5 +6,16 @@ export function normTopicTag(v: unknown): string | null {
   if ([...t].length > 50 || /[.&#\n]/.test(t)) return null;
   return t;
 }
-/** 這篇實際要用的標籤：貼文自己有設定（含「不加」）就用貼文的，否則用品牌預設 */
-export const effectiveTag = (postTag: string | null | undefined, brandTag: string | undefined) => (postTag ?? brandTag ?? '').trim();
+/** 這篇實際要用的標籤：貼文自己有設定就用貼文的（空字串＝客戶自己拿掉，不加）；否則用品牌預設，再沒有就用保底標籤 */
+export const effectiveTag = (postTag: string | null | undefined, brandTag: string | undefined, fallback = '') =>
+  (postTag !== null && postTag !== undefined ? postTag : brandTag || fallback).trim();
+
+/** 把任意文字整理成可用的標籤（AI 給的、品牌主題）：去掉 # . & 與多餘空白，最多 50 字；整理不出來回傳 '' */
+export function toTag(v: unknown): string {
+  const t = String(v ?? '').replace(/[#.&\n]/g, ' ').replace(/\s+/g, ' ').trim();
+  return [...t].slice(0, 50).join('').trim();
+}
+/** 保底標籤：品牌簡稱（品牌名稱在「｜」或括號前的部分），用在貼文沒有標籤、品牌也沒設定預設標籤時 */
+export function autoTag(brandName: string): string {
+  return toTag(String(brandName ?? '').split(/[｜|（(]/)[0]);
+}

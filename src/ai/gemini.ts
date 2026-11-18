@@ -4,11 +4,12 @@ import type { Brand, Env, Settings } from '../types';
 import { REGULATED_INDUSTRIES } from '../types';
 import { localDate, iso, zonedToUtc } from '../util/time';
 import { THREADS_MAX_CHARS, checkParts } from './compliance';
+import { toTag } from '../threads/topic';
 import { geminiFetch } from '../budget';
 
 export class QuotaError extends Error {}
 
-export interface GenResult { generationId: number; parts: string[]; issues: string[] }
+export interface GenResult { generationId: number; parts: string[]; issues: string[]; /** AI 為這篇挑的主題標籤 */ tag: string }
 export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey }
 
 /** 底層 Prompt 版本：寫進 ai_generations.prompt_version（格式 v2:套路代號），方便日後比較哪個套路成效好 */
@@ -97,7 +98,8 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     o.rewriteOf ? `\n# 改寫\n請改寫以下串文：保留核心觀點，但鉤子、切角、用字與例子要完全不同，符合上述人設，避免與原文雷同。\n原文：\n${o.rewriteOf.map((p, i) => `(${i + 1}) ${p}`).join('\n')}` : '',
     '',
     '# 輸出',
-    '只輸出 JSON：{"parts":["第1則內文","第2則內文", ...]}，不要輸出套路說明、備選鉤子或其他文字。',
+    '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字、跟這串的主題直接相關、讀者會搜尋的詞（例如「短影音剪輯」「房仲經營」），不含 #、句點與 &。',
+    '只輸出 JSON：{"parts":["第1則內文","第2則內文", ...],"topic_tag":"主題標籤"}，不要輸出套路說明、備選鉤子或其他文字。',
   ];
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -115,6 +117,11 @@ export function tidyPart(s: string): string {
     .map((l) => l.trim().replace(/[，,、]+$/, ''))
     .map((l) => (/^[-—–_─]{1,5}$/.test(l) ? '' : l))
     .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** 讀出模型給的主題標籤（沒有就是空字串） */
+export function parseTag(raw: string): string {
+  try { const j = JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')); return toTag(j?.topic_tag ?? ''); } catch { return ''; }
 }
 
 export function parseParts(raw: string): string[] {
@@ -181,7 +188,7 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
     const e = effective(o.account ?? null, s);
     const parts = appendCta(parseParts(raw).map(tidyPart).filter(Boolean).slice(0, max), e.cta, postLink(s));
     const id = await record('ok', JSON.stringify(parts), null, data?.usageMetadata?.promptTokenCount ?? 0, data?.usageMetadata?.candidatesTokenCount ?? 0);
-    return { generationId: id, parts, issues: checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) }) };
+    return { generationId: id, parts, tag: parseTag(raw), issues: checkParts(parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) }) };
   } catch (e) {
     await record('failed', null, String((e as Error).message).slice(0, 300));
     throw e;

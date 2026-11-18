@@ -100,7 +100,7 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
 # 存檔
 ・寫好後用 save_drafts 存成草稿，每篇的 parts 是一則一則的串文。
 ・不要自己寫連結。系統會在最後一則加上：${[s.cta_text, link].filter(Boolean).join(' ') || '（這個品牌還沒設定 CTA 與 LINE 連結）'}
-・主題標籤預設：${s.topic_tag || '（無）'}。可以在 save_drafts 每篇另外指定 topic_tag。
+・每一篇都要給一個 topic_tag（Threads 主題標籤，2～12 字、跟這篇主題相關、不含 #）。品牌預設標籤：${s.topic_tag || '（無）'}；沒給的話會用品牌預設標籤，再沒有就用品牌名稱。
 ・存好後請使用者到後台審核：${review}`, { brand: brand.name, accounts: accts.map((x) => ({ username: x.username, persona: x.persona || null, active: x.status === 'ok' })), thread_min: s.thread_min, thread_max: s.thread_max, topic_tag: s.topic_tag || null, cta: s.cta_text, link });
     }
     case 'list_posts': {

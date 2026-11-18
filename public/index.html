@@ -427,7 +427,7 @@ const PST = { draft: ['待審核', 'gold'], scheduled: ['已排程', ''], publis
 async function postsPage(r) {
   if (r.sub === 'settings') return postSettingsPage();
   if (r.sub === 'patrol') return patrolPage();
-  const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone; TAG_DEFAULT = st.settings.topic_tag || '';
+  const [all, st] = await Promise.all([api('GET', '/posts'), api('GET', '/settings'), loadAccounts()]); TZ = st.brand.timezone; TAG_DEFAULT = st.settings.topic_tag || st.settings.topic_tag_auto || '';
   const multi = ACCTS.length > 1, posts = curAcct() ? all.filter((p) => p.account_id === curAcct() || (p.account_id == null && curAcct() === ACCTS[0]?.id)) : all; // 沒指定帳號的貼文會用預設帳號（第一個）發
   const G = { draft: posts.filter((p) => p.status === 'draft'), queue: posts.filter((p) => ['scheduled', 'publishing', 'unknown', 'generating'].includes(p.status)), hist: posts.filter((p) => ['published', 'failed', 'gen_failed'].includes(p.status)) };
   bar({ title: '貼文', right: `<button class="btn sm" data-act="gen3">${svg('spark')}AI 生成</button><button class="icon" data-go="posts/patrol" aria-label="海巡">${svg('search')}</button><button class="icon" data-go="posts/settings" aria-label="發文設定">${svg('gear')}</button>` });
@@ -632,7 +632,7 @@ function openPost(p) {
       : `<p class="t-sub" style="margin-bottom:12px">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>`}
     ${draft ? `<div class="f"><label for="ptag">Threads 主題標籤</label><input id="ptag" value="${esc(p.topic_tag || '')}" placeholder="${TAG_DEFAULT ? '使用預設：' + esc(TAG_DEFAULT) : '不加標籤'}" maxlength="51">
       <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px"><input type="checkbox" id="pnotag" style="width:18px;height:18px;min-height:0" ${p.topic_tag === '' ? 'checked' : ''}>這篇不加主題標籤</label>
-      <div class="hint">只放在第 1 則，不寫進內文。留空會用預設標籤（在「發文設定」修改）。</div></div>`
+      <div class="hint">每篇都會帶標籤，只放在第 1 則、不寫進內文。留空會用預設標籤；不想要就勾「這篇不加主題標籤」。</div></div>`
       : (p.topic_tag ?? TAG_DEFAULT) ? `<p class="t-sub" style="margin-bottom:12px">主題標籤：${esc(p.topic_tag ?? TAG_DEFAULT)}</p>` : ''}
     <div id="parts">${draft ? editor() : view()}</div>
     <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="now">立即發布</button><button class="btn sec" data-a="ok">核准排程</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}${p.status === 'scheduled' ? '<button class="btn" data-a="now">立即發布</button>' : ''}
@@ -725,7 +725,7 @@ async function postSettingsPage() {
     ${field('facts', '可引用數據', area('facts', s.fact_bank, 'style="min-height:140px" placeholder="每行一筆，附上出處，例如：\n台灣大學社團活動贊助平均約 3 萬元（2025 某某調查）"'), 'AI 只能使用這裡的數字；需要數據但這裡沒有時，會寫成【待補數據】，補上真實數字前無法核准。')}
     <h2 class="t-sec" style="margin-top:32px">預設語氣與導流</h2>
     ${field('tone', '品牌語氣', input('tone', s.content_tone))}${field('tops', '內容主題', input('tops', s.content_topics.join(',')), '逗號分隔。')}${field('ban', '禁用詞', input('ban', s.banned_words.join(',')), '逗號分隔；貼文含這些詞時會被擋下。')}
-    ${field('ttag', 'Threads 主題標籤（預設）', input('ttag', s.topic_tag || '', 'placeholder="例如：短影音剪輯" maxlength="51"'), '每篇最多 1 個，只會放在串文第 1 則（不寫進內文）。不含 #、句點和 &；留空代表不加。每篇也可以在編輯時改掉。')}
+    ${field('ttag', 'Threads 主題標籤（預設）', input('ttag', s.topic_tag || '', 'placeholder="例如：短影音剪輯" maxlength="51"'), '每篇最多 1 個，只會放在串文第 1 則（不寫進內文）。不含 #、句點和 &。留空時，AI 寫的文章會用 AI 為每篇挑的標籤，其他用品牌名稱。每篇都可以在編輯時改掉或拿掉。')}
     ${field('cta', 'CTA 文字', input('cta', s.cta_text))}${field('url', 'LINE 加好友網址', input('url', s.line_add_url, 'inputmode="url" placeholder="https://line.me/R/ti/p/@你的ID"'), '貼文結尾會自動附上「CTA 文字 + 網址」。請先用手機點開確認可加入好友。')}
     <div class="savebar"><div class="in"><button class="btn grow" id="save">儲存設定</button></div></div></div>`, 'form');
   $('#mode').value = s.posting_mode;

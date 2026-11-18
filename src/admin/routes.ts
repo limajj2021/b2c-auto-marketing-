@@ -2,7 +2,7 @@ import { generateThread, QuotaError } from '../ai/gemini';
 import { checkParts } from '../ai/compliance';
 import { getAccount, listAccounts, resolveCred } from '../threads/accounts';
 import { BudgetError, budgeted } from '../budget';
-import { normTopicTag } from '../threads/topic';
+import { autoTag, normTopicTag } from '../threads/topic';
 import { publishNow } from '../threads/publishnow';
 import { lineAddUrl, lineIdFromUrl } from '../line/links';
 import { buildTraffic } from '../attribution';
@@ -272,6 +272,7 @@ add('GET', '/settings', 'admin', async ({ env, brandId }) => {
       style_preset: s.style_preset, thread_min: s.thread_min, thread_max: s.thread_max, fact_bank: s.fact_bank,
       line_id: lineIdFromUrl(s.line_add_url),
       line_short_url: s.line_short_url ?? '',
+      topic_tag_auto: autoTag(brand.name),
       topic_tag: s.topic_tag ?? '',
       line_ready: !!parseLineConfig(s.line_config).serviceInfo && !parseLineConfig(s.line_config).serviceInfo.startsWith('（'),
     },
@@ -359,8 +360,8 @@ add('POST', '/posts/generate', 'admin', async ({ env, req, actor, brandId }) => 
     const g = await generateThread(env, { topic, account });
     // 手動生成一律先成為草稿，待管理員核准
     const r = await env.DB.prepare(
-      `INSERT INTO posts(brand_id,account_id,content,parts,status,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-    ).bind(brandId, account?.id ?? null, g.parts[0], JSON.stringify(g.parts), 'draft', g.generationId, g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(), iso()).run();
+      `INSERT INTO posts(brand_id,account_id,content,parts,status,topic_tag,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(brandId, account?.id ?? null, g.parts[0], JSON.stringify(g.parts), 'draft', (await getSettings(env, brandId)).topic_tag ? null : g.tag || null, g.generationId, g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(), iso()).run();
     await audit(env, brandId, actor.name, 'post_generate');
     return json({ id: r.meta.last_row_id, issues: g.issues, parts: g.parts.length });
   } catch (e) {
@@ -511,8 +512,8 @@ add('POST', '/posts/(\\d+)/distribute', 'admin', async ({ env, req, m, actor, br
       const g = await generateThread(env, { account, rewriteOf: partsOf(src) });
       const at = new Date(Math.max(base, Date.now()) + (k + 1) * 45 * 60000).toISOString();
       const r = await env.DB.prepare(
-        `INSERT INTO posts(brand_id,account_id,source_post_id,content,parts,status,scheduled_at,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,'draft',?,?,?,?,?)`,
-      ).bind(brandId, id, src.id, g.parts[0], JSON.stringify(g.parts), at, g.generationId, g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(), iso()).run();
+        `INSERT INTO posts(brand_id,account_id,source_post_id,content,parts,status,scheduled_at,topic_tag,generation_id,error_message,updated_at,created_at) VALUES(?,?,?,?,?,'draft',?,?,?,?,?,?)`,
+      ).bind(brandId, id, src.id, g.parts[0], JSON.stringify(g.parts), at, src.topic_tag ?? ((await getSettings(env, brandId)).topic_tag ? null : g.tag || null), g.generationId, g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(), iso()).run();
       created.push(r.meta.last_row_id as number);
       if (g.issues.length) issues.push(`@${account.username}`);
     } catch (e) {

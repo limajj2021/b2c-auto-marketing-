@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { handleApi } from '../src/admin/routes';
 import { publishDue } from '../src/threads/scheduler';
-import { effectiveTag, normTopicTag } from '../src/threads/topic';
+import { autoTag, effectiveTag, normTopicTag, toTag } from '../src/threads/topic';
+import { parseTag } from '../src/ai/gemini';
 import { jres, makeEnv, mockFetch } from './helpers';
 
 let restore = () => {};
@@ -52,5 +53,22 @@ describe('topic tag in settings, drafts and publishing', () => {
     expect(((await env.DB.prepare('SELECT topic_tag FROM posts').first()) as any).topic_tag).toBe('舊');
     await call(env, 'PUT', '/api/posts/1', { parts: ['a2'], topic_tag: null }, c);
     expect(((await env.DB.prepare('SELECT topic_tag FROM posts').first()) as any).topic_tag).toBeNull();
+  });
+
+  it('every post gets a tag: its own, else the brand default, else the AI pick, else the first brand topic; only an explicit removal skips it', async () => {
+    expect(effectiveTag(null, '', '主題')).toBe('主題'); expect(effectiveTag(null, '預設', '主題')).toBe('預設');
+    expect(effectiveTag('', '預設', '主題')).toBe(''); // 客戶自己拿掉
+    expect(autoTag('安流 ANFLOW｜你的資金流動夥伴')).toBe('安流 ANFLOW'); expect(autoTag('異構資本（EGO CAPITAL）')).toBe('異構資本');
+    expect(toTag('#R&D. 研發')).toBe('R D 研發');
+    expect(parseTag('{"parts":["a"],"topic_tag":"#短影音剪輯"}')).toBe('短影音剪輯'); expect(parseTag('純文字')).toBe('');
+    // 品牌沒有預設標籤：沒標籤的貼文發布時用品牌名稱
+    const env: any = await makeEnv();
+    await env.DB.prepare(`UPDATE brand_settings SET topic_tag='' WHERE brand_id='b1'`).run();
+    await env.DB.prepare(`INSERT INTO posts(brand_id,content,parts,status,scheduled_at,approved_by,updated_at,created_at) VALUES('b1','a','["a"]','scheduled','2026-11-18T07:00:00Z','boss','x','x')`).run();
+    await env.DB.prepare(`INSERT INTO posts(brand_id,content,parts,status,topic_tag,scheduled_at,approved_by,updated_at,created_at) VALUES('b1','b','["b"]','scheduled','','2026-11-18T07:00:00Z','boss','x','x')`).run();
+    let n = 0; const m = mockFetch((u) => u.endsWith('/threads_publish') ? jres({ id: `T${++n}` }) : jres({ id: 'C' })); restore = m.restore;
+    await publishDue(env, NOW);
+    const sent = Object.fromEntries(m.calls.filter((x) => x.url.endsWith('/threads')).map((x) => { const q = new URLSearchParams(String(x.init?.body)); return [q.get('text'), q.get('topic_tag')]; }));
+    expect(sent).toEqual({ a: '測試品牌', b: null });
   });
 });

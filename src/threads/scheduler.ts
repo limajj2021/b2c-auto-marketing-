@@ -7,7 +7,7 @@ import { effective, listAccounts, markAccount, resolveCred, type Account } from 
 import { ThreadsApiError, ThreadsUnknownError, createContainer, listRecent, notReady, postInsights, publishContainer, timing } from './api';
 import { BudgetError, canAfford, reserveDb } from '../budget';
 import { trackedParts } from '../links';
-import { effectiveTag } from './topic';
+import { autoTag, effectiveTag } from './topic';
 import { renewLineTokenIfNeeded } from '../line/token';
 import { syncLineFollowers } from '../line/insights';
 import { logEvent } from '../log';
@@ -101,8 +101,8 @@ export async function ensureSlots(env: Env, now: Date): Promise<void> {
         try {
           const g = await generateThread(env, { topic: s.posting_mode === 'C' ? s.weekly_topic : '', account: a }, now);
           const status = g.issues.length || review ? 'draft' : 'scheduled';
-          await env.DB.prepare(`UPDATE posts SET content=?,parts=?,status=?,generation_id=?,approved_by=?,error_message=?,updated_at=? WHERE id=?`)
-            .bind(g.parts[0], JSON.stringify(g.parts), status, g.generationId, status === 'scheduled' ? 'auto' : null,
+          await env.DB.prepare(`UPDATE posts SET content=?,parts=?,status=?,topic_tag=?,generation_id=?,approved_by=?,error_message=?,updated_at=? WHERE id=?`)
+            .bind(g.parts[0], JSON.stringify(g.parts), status, s.topic_tag ? null : g.tag || null, g.generationId, status === 'scheduled' ? 'auto' : null,
               g.issues.length ? `內容檢查未通過：${g.issues.join('；')}` : null, iso(now), postId).run();
         } catch (err) {
           if (err instanceof BudgetError) {
@@ -172,7 +172,8 @@ export async function publishOne(env: Env, id: number, now: Date): Promise<void>
       let creation = i === ids.length ? post.threads_creation_id : null;
       if (!creation) {
         // 主題標籤只放在第 1 則（每篇最多 1 個）
-        const tag = i === 0 ? effectiveTag(post.topic_tag, (await getSettings(env, post.brand_id)).topic_tag) : '';
+        const bs = i === 0 ? await getSettings(env, post.brand_id) : null;
+        const tag = bs ? effectiveTag(post.topic_tag, bs.topic_tag, autoTag((await getBrand(env)).name)) : '';
         creation = await createContainer(cred, parts[i], i > 0 ? ids[i - 1] : undefined, tag || undefined);
         await env.DB.prepare('UPDATE posts SET threads_creation_id=? WHERE id=?').bind(creation, id).run();
       }
