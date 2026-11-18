@@ -436,12 +436,16 @@ async function postsPage(r) {
   const copy = { draft: ['沒有待審核的草稿', '開啟自動發文或按「AI 生成」後，草稿會出現在這裡。'], queue: ['沒有排程中的貼文', '核准草稿或開啟自動發文後，排程會顯示在這裡。'], hist: ['還沒有發布紀錄', '貼文發布後會顯示在這裡。'] }[seg];
   setView(`${multi ? `<div class="tight">${acctStrip()}</div>` : ''}
     <div class="tight"><div class="tabs-h" role="tablist">${[['draft', '待審核'], ['queue', '排程'], ['hist', '歷史']].map(([k, l]) => `<button role="tab" aria-selected="${seg === k}" data-seg="${k}">${l}<span class="n">${G[k].length || ''}</span></button>`).join('')}</div></div>
-    ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${esc((p.parts?.[0] || p.content).split('\n')[0] || '（空白）')}</span>`,
+    ${items.length ? `<div class="list">${items.map((p) => row({ act: 'post', id: p.id, dot: PST[p.status]?.[1] ?? '', title: `<span class="clamp2">${p.seen_at ? '' : '<span class="new-badge" aria-label="新文章">NEW</span>'}${esc((p.parts?.[0] || p.content).split('\n')[0] || '（空白）')}</span>`,
       sub: `${PST[p.status]?.[0] || p.status} · ${fmt(p.published_at || p.scheduled_at)}${p.status === 'published' && (p.views !== null && p.views !== undefined || p.clicks) ? ` · 曝光 ${nf(p.views)} · 點擊 ${p.uniques ? nf(p.uniques) + ' 人' : nf(p.clicks || 0)}` : ''}${p.parts?.length > 1 ? ` · 串文 ${p.parts.length} 則` : ''}${multi && p.account_id ? ` · ${esc(acctName(p.account_id))}` : ''}${p.source_post_id ? ' · 改寫' : ''}${p.error_message ? ' · <span style="color:var(--bad)">需處理</span>' : ''}` })).join('')}</div>` : empty('post', copy[0], copy[1], seg === 'draft' ? '<button class="btn" data-act="gen2">AI 生成串文</button>' : '')}`);
   $$('[data-seg]').forEach((b) => b.onclick = () => { S.postSeg = b.dataset.seg; render(); });
   bindAcctStrip();
   $('[data-act=gen2]')?.addEventListener('click', openGenerate);
-  $$('[data-act=post]').forEach((b) => b.onclick = () => openPost(all.find((p) => p.id == b.dataset.id)));
+  $$('[data-act=post]').forEach((b) => b.onclick = () => {
+    const p = all.find((x) => x.id == b.dataset.id);
+    if (p && !p.seen_at) { p.seen_at = new Date().toISOString(); $('.new-badge', b)?.remove(); api('POST', `/posts/${p.id}/seen`).catch(() => {}); }
+    openPost(p);
+  });
 }
 const WD = '日一二三四五六';
 function tzParts(ms) {

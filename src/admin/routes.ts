@@ -342,7 +342,7 @@ add('PUT', '/settings', 'admin', async ({ env, req, actor, brandId }) => {
 add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
-    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,p.topic_tag,a.username,
+    `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,p.topic_tag,p.seen_at,a.username,
        m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,(SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,
@@ -416,6 +416,12 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
   const hasAcct = (await listAccounts(env)).length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID);
   return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
+});
+
+// 點開過的貼文：不再標示 NEW（記在伺服器，換裝置也一樣）
+add('POST', '/posts/(\\d+)/seen', 'staff', async ({ env, m, brandId }) => {
+  await env.DB.prepare('UPDATE posts SET seen_at=? WHERE id=? AND brand_id=? AND seen_at IS NULL').bind(iso(), m[1], brandId).run();
+  return json({ ok: true });
 });
 
 // 立即發布：草稿（先過內容檢查並核准）或已排程的貼文，不等排程，直接在這次請求發出去。

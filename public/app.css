@@ -195,3 +195,6 @@ nav.tabs button.brand svg{flex:none;width:16px;height:16px;margin-left:auto;stro
 @media (pointer:coarse){.btn.sm,.link,.chip,.tabs-h button{min-height:44px}.link{padding:10px 4px}.tabs-h button{min-width:44px;padding:0 2px}.chip input{min-height:32px!important}.foot a{display:inline-block;padding:12px 6px}}
 @media print{nav.tabs,.bar .icon,#toasts,#rm{display:none!important}.bar{position:static}main{padding:0;margin:0!important}body{background:#fff;color:#000}.list{border:1px solid #ddd}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* 新文章標示：AI 剛產生、還沒有人點開看過 */
+.new-badge{display:inline-block;background:#e5484d;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.06em;line-height:1;padding:3px 6px;border-radius:5px;margin-right:7px;vertical-align:2px}
