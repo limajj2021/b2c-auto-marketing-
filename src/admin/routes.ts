@@ -1,6 +1,7 @@
 import { generateThread, QuotaError } from '../ai/gemini';
 import { checkParts } from '../ai/compliance';
-import { getAccount, listAccounts } from '../threads/accounts';
+import { getAccount, listAccounts, resolveCred } from '../threads/accounts';
+import { BudgetError, budgeted } from '../budget';
 import { lineAddUrl, lineIdFromUrl } from '../line/links';
 import { buildTraffic } from '../attribution';
 import { audit, brandBySlug, forBrand, getBrand, getSettings, isMulti, jsonArr } from '../db';
@@ -403,6 +404,31 @@ add('POST', '/posts/(\\d+)/approve', 'admin', async ({ env, req, m, actor, brand
   await audit(env, brandId, actor.name, 'post_approve', m[1]);
   const hasAcct = (await listAccounts(env)).length > 0 || !!(env.THREADS_ACCESS_TOKEN && env.THREADS_USER_ID);
   return json({ ok: true, warning: hasAcct ? null : 'Threads 尚未連結，這則貼文會等到連結後才發布' });
+});
+
+// 立即發布：草稿（先過內容檢查並核准）或已排程的貼文，不等排程，直接在這次請求發出去。
+// 用和排程相同的額度保護：串文太長、這次請求的額度不夠時，已發出的部分會記錄，其餘交給下一輪排程接續。
+add('POST', '/posts/(\\d+)/publish-now', 'admin', async ({ env, m, actor, brandId }) => {
+  const brand = await getBrand(env);
+  const s = await getSettings(env, brandId);
+  const post = await env.DB.prepare(`SELECT status,content,parts,account_id FROM posts WHERE id=? AND brand_id=? AND status IN ('draft','scheduled')`).bind(m[1], brandId).first<any>();
+  if (!post) return err(409, '這則貼文目前不能發布（可能已發出或已刪除）');
+  const issues = checkParts(partsOf(post), { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
+  if (issues.length) return err(422, `內容檢查未通過，請先修改：${issues.join('；')}`);
+  const acct = post.account_id && !(await getAccount(env, post.account_id)) ? null : post.account_id;
+  if (!(await resolveCred(env, acct))) return err(409, '這個品牌還沒有可發文的 Threads 帳號（或授權已失效）。請先連結帳號，或改用「手動發到 Threads」。');
+  const now = new Date();
+  const r = await env.DB.prepare(`UPDATE posts SET status='scheduled',approved_by=COALESCE(approved_by,?),scheduled_at=?,account_id=?,error_message=NULL,updated_at=? WHERE id=? AND status IN ('draft','scheduled')`)
+    .bind(actor.name, iso(now), acct, iso(now), m[1]).run();
+  if (r.meta.changes !== 1) return err(409, '這則貼文剛剛被其他動作更新了，請重新整理');
+  await audit(env, brandId, actor.name, 'post_publish_now', m[1]);
+  try { await publishOne(budgeted(env, 38), +m[1], now); } catch (e) { if (!(e instanceof BudgetError)) throw e; }
+  const after = await env.DB.prepare('SELECT status,error_message,part_ids,parts,threads_post_id FROM posts WHERE id=?').bind(m[1]).first<any>();
+  const sent = after?.part_ids ? JSON.parse(after.part_ids).length : 0, total = partsOf(after).length;
+  if (after?.status === 'published') return json({ ok: true, status: 'published', sent, total });
+  if (after?.status === 'scheduled' && sent > 0) return json({ ok: true, status: 'partial', sent, total, message: `已發出 ${sent}/${total} 則，其餘會在 5 分鐘內自動接續` });
+  const why = after?.error_message || '發布沒有完成，請到「系統紀錄」查看原因';
+  return err(502, after?.status === 'scheduled' ? `發布失敗：${why}（系統會在 5 分鐘內自動重試）` : `發布失敗：${why}`);
 });
 
 // ---- 手動發布（不需要 Threads 授權）：用 Threads Web Intent 開啟發文視窗，內容已填好，使用者按「發佈」即可 ----

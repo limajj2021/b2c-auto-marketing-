@@ -517,7 +517,7 @@ function openPost(p) {
     ${draft || p.status === 'scheduled' ? `<div class="sched"><div><div class="t-sub" style="margin:0">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${draft ? '核准後的發布時間' : '排程發布時間'}</div><div class="when" id="twhen"></div></div><button class="btn sm sec" data-a="time">${draft ? '選擇時間' : '調整時間'}</button><div id="tpick" style="width:100%"></div></div>`
       : `<p class="t-sub" style="margin-bottom:12px">${p.account_id ? esc(acctName(p.account_id)) + ' · ' : ''}${p.status === 'published' ? '發布於' : '排程'} ${fmt(p.published_at || p.scheduled_at)}</p>`}
     <div id="parts">${draft ? editor() : view()}</div>
-    <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="ok">核准發布</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}
+    <div class="actions" style="margin-top:20px">${draft ? '<button class="btn" data-a="now">立即發布</button><button class="btn sec" data-a="ok">核准排程</button><button class="btn sec" data-a="save">儲存修改</button>' : ''}${p.status === 'scheduled' ? '<button class="btn" data-a="now">立即發布</button>' : ''}
     ${p.status === 'failed' ? `<button class="btn" data-a="retry">${done ? `從第 ${done + 1} 則接續發布` : '重試發布'}</button>` : ''}
     ${others.length ? '<button class="btn sec" data-a="dist">改寫分發</button>' : ''}
     ${draft || p.status === 'failed' ? '<button class="btn dng" data-a="del">刪除</button>' : ''}${p.status === 'scheduled' ? '<button class="btn sec" data-a="unsched">退回待審核</button>' : ''}</div>
@@ -549,7 +549,15 @@ function openPost(p) {
       act(b, async () => {
         const a = b.dataset.a; if (draft) sync();
         const body = { parts: parts.map((x) => x.trim()) };
-        if ((a === 'save' || a === 'ok') && body.parts.some((x) => !x)) throw new Error('有空白的則數，請填寫或移除');
+        if ((a === 'save' || a === 'ok' || (a === 'now' && draft)) && body.parts.some((x) => !x)) throw new Error('有空白的則數，請填寫或移除');
+        if (a === 'now') {
+          if (draft) { const over = body.parts.findIndex((x) => [...x].length > 500); if (over >= 0) throw new Error(`第 ${over + 1} 則超過 500 字，Threads 會拒收`); }
+          if (!(await confirmSheet(`現在就發到 Threads？${body.parts.length > 1 ? `（串文 ${body.parts.length} 則）` : ''}`, '立即發布', false))) return;
+          if (draft) await api('PUT', '/posts/' + p.id, body);
+          const r = await api('POST', `/posts/${p.id}/publish-now`, {});
+          toast(r.status === 'published' ? `已發布到 Threads${r.total > 1 ? `（${r.total} 則）` : ''}` : r.message, 'ok');
+          S.postSeg = r.status === 'published' ? 'hist' : S.postSeg; close(); render(); return;
+        }
         if (a === 'save') { await api('PUT', '/posts/' + p.id, body); toast('已儲存', 'ok'); return; }
         if (a === 'ok') {
           const over = body.parts.findIndex((x) => [...x].length > 500); if (over >= 0) throw new Error(`第 ${over + 1} 則超過 500 字，Threads 會拒收`);
