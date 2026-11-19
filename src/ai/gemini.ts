@@ -12,7 +12,7 @@ export class QuotaError extends Error {}
 export interface GenResult { generationId: number; parts: string[]; issues: string[]; /** AI 為這篇挑的主題標籤 */ tag: string }
 /** autoPublish：全自動發文，寫完沒人會改，所以不能留空格給人補；fix：上一版沒過檢查的原因，這次要避開 */
 /** variant：底層 Prompt 版本（回測時可指定 v2／v3）；recent：同品牌最近發過或排好的開頭，避免各帳號寫出雷同的東西 */
-export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey; autoPublish?: boolean; fix?: string[]; variant?: 'v2' | 'v3'; recent?: string[] }
+export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey; autoPublish?: boolean; fix?: string[]; variant?: 'v2' | 'v3'; recent?: string[]; angle?: string }
 
 /** 底層 Prompt 版本：寫進 ai_generations.prompt_version（格式 v2:套路代號），方便日後比較哪個套路成效好 */
 export const PROMPT_VERSION = 'v3';
@@ -24,12 +24,20 @@ export const STOCK_OPENERS = ['其實只在乎三件事', '只在乎三件事', 
 /** 金融借貸敏感詞：Meta 對推薦借貸類內容較保守，開頭避開，改講生活裡的錢 */
 export const SENSITIVE_HOOK = ['借錢', '借款', '貸款', '放款', '核貸', '撥款', '利率', '利息', '額度', '調頭寸', '週轉', '周轉', '融資', '信貸'];
 
+/** 開頭切入角度：每篇隨機指定一種，避免 AI 每篇都寫成同一個場景（回測發現會一直寫「週五晚上的咖啡廳」） */
+export const OPENING_ANGLES = [
+  '從一則大家都知道的時事、節日或季節切入', '從一句客戶或身邊人真的會說的話（引號）切入', '從一個反直覺的數字或比例切入（只能用可引用數據，沒有就用情境假設）',
+  '從一個具體物品切入（收據、合約、手機畫面、行事曆…自己挑）', '從兩種人的對比切入', '從一個常見誤解或流行說法切入，然後反駁',
+  '從一段對話切入', '從一個時間點的倒數切入', '從一個職業或身分的日常切入', '從讀者會想留言反駁的一句話切入',
+];
+
 /** v3：比對自家帳號與高觸及帳號（SnakeSponsor）後加上的「觸及規則」 */
 function reachRules(o: GenOpts, finance: boolean): string[] {
   return [
     '# 觸及規則（最高優先，Threads 演算法會先看第一則決定要不要推）',
     '・第一則一定要有「具體錨點」：一個看得見的人、場景、時間點或金額（人物身分、地點、時刻、物品、金額擇一兩個）。不要用抽象概念開頭（例如「資金安排」「品牌經營」「短影音策略」）。',
-    '・場景要自己想、而且每篇不同：不要用「手機跳出通知」「一張帳單擺在桌上」這種大家都用過的開場，也不要跟下面列出的最近開頭用同一個場景。',
+    '・場景要自己想、而且每篇不同：不要用「手機跳出通知」「一張帳單擺在桌上」「週五晚上的咖啡廳」這種大家都用過的開場，也不要跟下面列出的最近開頭用同一個場景。',
+    `・這篇的開頭切入角度：${o.angle ?? OPENING_ANGLES[0]}。`,
     '・優先從讀者這陣子正在關注、大家都知道的事切入（節日、發薪日、購物節、新手機、熱門遊戲、演唱會、季節、社群上正在吵的話題），再轉到你的觀點；只用大家都知道的事實，不要編造新聞細節。',
     '・情境裡的金額、人數可以寫成「假設」「例如」的情境數字，但不能寫成統計結果或研究。',
     `・下列套話不能出現在第一則（模板只是骨架，換成你自己的說法）：${STOCK_OPENERS.join('、')}。`,
@@ -166,7 +174,7 @@ export function wellFormed(raw: string, minParts: number): boolean {
     const j = JSON.parse(t), arr = Array.isArray(j) ? j : j?.parts;
     if (!Array.isArray(arr)) return false;
     const p = arr.map((x: unknown) => String(x ?? '').trim()).filter(Boolean);
-    return p.length >= minParts && p.every((x: string) => [...x].length <= THREADS_MAX_CHARS - 40);
+    return p.length >= minParts && p.every((x: string) => [...x].length <= THREADS_MAX_CHARS);
   } catch { return !/^[{[]/.test(t); } // 純文字（非 JSON）沿用舊的單則處理；看起來是 JSON 卻壞掉才算失敗
 }
 
@@ -211,7 +219,7 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
     o = { ...o, recent: rows.map((r) => String(r.content).split('\n').filter(Boolean).slice(0, 2).join(' ').slice(0, 50)) };
   }
   const pattern = o.pattern ?? pickPattern(!!s.fact_bank?.trim(), last?.v?.split(':')[1]);
-  o = { ...o, pattern, variant };
+  o = { ...o, pattern, variant, angle: o.angle ?? OPENING_ANGLES[Math.floor(Math.random() * OPENING_ANGLES.length)] };
   const model = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const started = Date.now();
   const record = async (status: string, text: string | null, err: string | null, inT = 0, outT = 0) =>
