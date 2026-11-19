@@ -47,6 +47,9 @@ FROM threads_accounts_archive WHERE archive_id=<archive_id>;
 - 每行盡量寫滿約 12～18 字，不要三五個字就換行。
 - 寫在 `buildPrompt` 的「斷行嚴格規則」，並由 `tidyPart`／`mergeShortLines` 在存檔前強制修正；`tests/matrix.test.ts` 有檢查。
 
+## 代客戶操作的規則
+- **幫客戶寫或試發的貼文，一律先放進草稿**，由客戶在後台審核後自己發布；除非客戶明確說「直接發布」，不可以代為公開發出。
+
 ## 開發
 - 測試：`npx tsc --noEmit && npx vitest run`（全部要過才能部署）
 - 正式資料庫：`npx wrangler d1 migrations apply DB --remote -c .generated/wrangler.app.toml`
