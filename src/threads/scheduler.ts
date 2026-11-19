@@ -282,32 +282,43 @@ export async function refreshInsights(env: Env, now: Date): Promise<void> {
   }
 }
 
-/** 每個帳號「今天」的曝光（工作區時區），每 30 分鐘更新一次 */
+/**
+ * 每個帳號「今天」（工作區時區）的曝光，每 30 分鐘更新一次。
+ * Threads 的帳號成效以美西時間分日、只給整天的數字，沒辦法直接切出「台灣時間今天」。
+ * 做法：從「昨天 0 點」起算累計瀏覽數（同一天內起點固定），每天第一次讀到時記下 base_total，
+ * 今日曝光＝目前累計－base_total。誤差只有每天第一次讀取前的那段（最多約 30 分鐘）。
+ */
 const VIEWS_EVERY_MS = 30 * 60000;
 export async function refreshAccountViews(env: Env, now: Date): Promise<void> {
   const brand = await getBrand(env);
   const today = localDate(now, brand.timezone);
-  const since = Math.floor(zonedToUtc(today, '00:00', brand.timezone).getTime() / 1000);
+  const since = Math.floor(zonedToUtc(addDays(today, -1), '00:00', brand.timezone).getTime() / 1000);
   const until = Math.floor(now.getTime() / 1000);
   for (const a of await listAccounts(env)) {
     if (a.status !== 'ok' || (a as any).insights_status === 'no_permission') continue;
-    const last = await env.DB.prepare('SELECT fetched_at FROM account_daily WHERE account_id=? AND day=?').bind(a.id, today).first<{ fetched_at: string }>();
-    if (last && now.getTime() - Date.parse(last.fetched_at) < VIEWS_EVERY_MS) continue;
+    const row = await env.DB.prepare('SELECT fetched_at,base_total,views FROM account_daily WHERE account_id=? AND day=?').bind(a.id, today).first<{ fetched_at: string; base_total: number | null; views: number }>();
+    if (row && now.getTime() - Date.parse(row.fetched_at) < VIEWS_EVERY_MS) continue;
     if (!canAfford(env, 3)) return;
     const cred = await resolveCred(env, a.id);
     if (!cred) continue;
-    let v: number | null;
-    try { v = await accountViews(cred, since, until); } catch (e) {
+    let r: Awaited<ReturnType<typeof accountViews>>;
+    try { r = await accountViews(cred, since, until); } catch (e) {
       if (e instanceof BudgetError) throw e;
       await logEvent(env, brand.id, 'warn', 'threads_insights', `@${a.username} 讀取今日曝光失敗，稍後再試：${(e as Error).message}`, undefined, { throttleMinutes: 180 });
       continue;
     }
-    if (v === null) {
+    if (r === null) {
       await env.DB.prepare(`UPDATE threads_accounts SET insights_status='no_permission' WHERE id=?`).bind(a.id).run();
       continue;
     }
-    await env.DB.prepare(`INSERT INTO account_daily(account_id,brand_id,day,views,fetched_at) VALUES(?,?,?,?,?)
-      ON CONFLICT(account_id,day) DO UPDATE SET views=excluded.views,fetched_at=excluded.fetched_at`).bind(a.id, brand.id, today, v, iso(now)).run();
+    const cum = r.views;
+    // 今天第一次讀：記下起點。舊資料沒有起點時，用 Threads 最新一天的數字估算今天已經有的曝光
+    const base = row?.base_total ?? (row ? Math.max(0, cum - (r.raw.length ? r.raw[r.raw.length - 1][1] : 0)) : cum);
+    const views = Math.max(0, cum - base);
+    await logEvent(env, brand.id, 'info', 'views_check', `@${a.username} 今日曝光 ${views}`, { since, until, raw: r.raw, cum, base }, { throttleMinutes: 360 });
+    await env.DB.prepare(`INSERT INTO account_daily(account_id,brand_id,day,views,fetched_at,base_total,cum_total) VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(account_id,day) DO UPDATE SET views=excluded.views,fetched_at=excluded.fetched_at,base_total=excluded.base_total,cum_total=excluded.cum_total`)
+      .bind(a.id, brand.id, today, views, iso(now), base, cum).run();
   }
 }
 

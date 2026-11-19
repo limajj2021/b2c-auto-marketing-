@@ -10,26 +10,30 @@ afterEach(() => restore());
 const NOW = new Date('2026-11-08T05:00:00Z'); // 台北 13:00
 
 describe('today views per account', () => {
-  it('sums the daily views since local midnight, refreshes at most every 30 minutes, flags accounts without permission', async () => {
+  it('today = cumulative views now − cumulative at the first read of the day (Threads splits days on US Pacific time)', async () => {
     const env: any = await makeEnv();
     const a = await upsertAccount(env, 'b1', { userId: '1', username: 'main', token: 'A', expiresAt: null });
     const b = await upsertAccount(env, 'b1', { userId: '2', username: 'old', token: 'B', expiresAt: null });
     const urls: string[] = [];
+    let cur = 75; // 昨天美西那天的 75 次不能算進台灣的今天
     const m = mockFetch((u) => {
       urls.push(u);
       if (u.includes('/2/threads_insights')) return jres({ error: { code: 10, message: 'Application does not have permission for this action' } }, 403);
-      return jres({ data: [{ name: 'views', period: 'day', values: [{ value: 120, end_time: 'x' }, { value: 30, end_time: 'y' }] }] });
+      return jres({ data: [{ name: 'views', period: 'day', values: [{ value: 75, end_time: '2026-11-07T08:00:00+0000' }, { value: cur - 75, end_time: '2026-11-08T08:00:00+0000' }] }] });
     }); restore = m.restore;
-    await refreshAccountViews(env, NOW);
-    expect(urls[0]).toContain(`since=${Date.parse('2026-11-07T16:00:00Z') / 1000}`);
-    const rows: any[] = (await env.DB.prepare('SELECT account_id,day,views FROM account_daily').all()).results;
-    expect(rows).toEqual([{ account_id: a, day: '2026-11-08', views: 150 }]);
+    const MID = new Date('2026-11-07T16:05:00Z'); // 台北 11/8 00:05，當天第一次讀
+    await refreshAccountViews(env, MID);
+    expect(urls[0]).toContain(`since=${Date.parse('2026-11-06T16:00:00Z') / 1000}`); // 起點固定在昨天 0 點
+    let row: any = await env.DB.prepare('SELECT day,views,base_total FROM account_daily WHERE account_id=?').bind(a).first();
+    expect(row).toEqual({ day: '2026-11-08', views: 0, base_total: 75 });
     expect(((await env.DB.prepare('SELECT insights_status s FROM threads_accounts WHERE id=?').bind(b).first()) as any).s).toBe('no_permission');
     const n = urls.length;
-    await refreshAccountViews(env, new Date(NOW.getTime() + 10 * 60000));
-    expect(urls.length).toBe(n); // 30 分鐘內不重抓，沒權限的也不再試
-    await refreshAccountViews(env, new Date(NOW.getTime() + 31 * 60000));
-    expect(urls.length).toBe(n + 1);
+    await refreshAccountViews(env, new Date(MID.getTime() + 10 * 60000));
+    expect(urls.length).toBe(n); // 30 分鐘內不重抓
+    cur = 75 + 130;
+    await refreshAccountViews(env, new Date(MID.getTime() + 5 * 3600000));
+    row = await env.DB.prepare('SELECT views FROM account_daily WHERE account_id=?').bind(a).first();
+    expect(row.views).toBe(130);
   });
 
   it('dashboard returns today views and accounts that need reconnecting', async () => {

@@ -47,14 +47,14 @@ export async function listRecent(c: Cred, limit = 25): Promise<{ id: string; tex
   return r.data ?? [];
 }
 
-/** 帳號在一段時間內的瀏覽數（since/until 為 Unix 秒）。回傳 null 代表沒有權限。 */
-export async function accountViews(c: Cred, since: number, until: number): Promise<number | null> {
+/** 帳號在一段時間內的瀏覽數（since/until 為 Unix 秒）。回傳 null 代表沒有權限；raw 是 Threads 回傳的各日數值（核對用） */
+export async function accountViews(c: Cred, since: number, until: number): Promise<{ views: number; raw: [string, number][] } | null> {
   try {
     const r = await call(`${BASE}/${c.userId}/threads_insights?metric=views&since=${since}&until=${until}&access_token=${encodeURIComponent(c.token)}`, { method: 'GET' }, c.f);
     const d = (r.data ?? []).find((x: any) => x.name === 'views');
-    if (!d) return 0;
-    if (Array.isArray(d.values)) return d.values.reduce((n: number, v: any) => n + (Number(v.value) || 0), 0);
-    return Number(d.total_value?.value) || 0;
+    if (!d) return { views: 0, raw: [] };
+    const raw: [string, number][] = Array.isArray(d.values) ? d.values.map((v: any) => [String(v.end_time ?? ''), Number(v.value) || 0]) : [];
+    return { views: raw.length ? raw.reduce((n, [, v]) => n + v, 0) : Number(d.total_value?.value) || 0, raw };
   } catch (e) {
     if (e instanceof ThreadsApiError && e.permission) return null;
     throw e;
