@@ -165,7 +165,24 @@ export function tidyPart(s: string): string {
   const lines = s.replace(/\r/g, '').split('\n')
     .map((l) => l.trim())
     .map((l) => (/^[-—–_─]{1,5}$/.test(l) ? '' : l));
-  return mergeShortLines(lines).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return mergeShortLines(lines).flatMap(wrapAtPunct).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * 太長的行在標點後面換行，每行盡量寫滿但不超過上限；單一個子句本身就超過上限時整句保留，絕不從句子中間切。
+ * 有網址的行不動。
+ */
+export function wrapAtPunct(line: string): string[] {
+  if (len(line) <= LINE_MAX || /https?:\/\//.test(line)) return [line];
+  // 子句＝內容＋標點＋緊接的右引號／括號（不讓「」」被擠到下一行開頭）＋ emoji
+  const clauses = line.match(/[^，。？！；：…,?!;:]+[，。？！；：…,?!;:]*[」』）)】]*\s*(\p{Extended_Pictographic}\uFE0F?)*/gu) ?? [line];
+  const out: string[] = [];
+  let cur = '';
+  for (const c of clauses.map((x) => x.trim()).filter(Boolean)) {
+    if (cur && len(cur) + len(c) > LINE_MAX) { out.push(cur); cur = c; } else cur += c;
+  }
+  if (cur) out.push(cur);
+  return out;
 }
 
 const len = (t: string) => [...t].length;
