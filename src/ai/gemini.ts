@@ -28,12 +28,13 @@ export const SENSITIVE_HOOK = ['借錢', '借款', '貸款', '放款', '核貸',
 function reachRules(o: GenOpts, finance: boolean): string[] {
   return [
     '# 觸及規則（最高優先，Threads 演算法會先看第一則決定要不要推）',
-    '・第一則一定要有「具體錨點」：一個看得見的人、場景、時間點或金額，例如「月底前三天」「迎新晚會前一週」「iPhone 發表隔天」「一張 2 萬 8 的帳單」。不要用抽象概念開頭（例如「資金安排」「品牌經營」「短影音策略」）。',
+    '・第一則一定要有「具體錨點」：一個看得見的人、場景、時間點或金額（人物身分、地點、時刻、物品、金額擇一兩個）。不要用抽象概念開頭（例如「資金安排」「品牌經營」「短影音策略」）。',
+    '・場景要自己想、而且每篇不同：不要用「手機跳出通知」「一張帳單擺在桌上」這種大家都用過的開場，也不要跟下面列出的最近開頭用同一個場景。',
     '・優先從讀者這陣子正在關注、大家都知道的事切入（節日、發薪日、購物節、新手機、熱門遊戲、演唱會、季節、社群上正在吵的話題），再轉到你的觀點；只用大家都知道的事實，不要編造新聞細節。',
     '・情境裡的金額、人數可以寫成「假設」「例如」的情境數字，但不能寫成統計結果或研究。',
     `・下列套話不能出現在第一則（模板只是骨架，換成你自己的說法）：${STOCK_OPENERS.join('、')}。`,
     '・第一則要能單獨被看懂、讓人想點開看下一則；不要只丟一個口號。',
-    '・CTA 前一則放一個讀者可以直接回答的問題（二選一或「你遇過嗎？」），讓人想留言；留言比按讚更能換到推薦。',
+    '・最後一則（系統會在它後面加 CTA）要先放一行讀者可以直接回答的問句，結尾用「？」，例如二選一或「你遇過嗎？」，讓人想留言；留言比按讚更能換到推薦。',
     finance ? `・本品牌是金融相關：第一則與第二則不要出現這些字：${SENSITIVE_HOOK.join('、')}；改講生活裡跟錢有關的處境（月底、帳單、家人、工作、夢想），服務留到最後一則再輕帶。` : '',
     o.recent?.length ? `・同品牌各帳號最近已經發過或排好的開頭如下，這篇的題材、切角和開頭都不能跟它們相似：\n${o.recent.map((h) => `  ・${h}`).join('\n')}` : '',
     '',
@@ -158,6 +159,17 @@ export function parseTag(raw: string): string {
   try { const j = JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')); return toTag(j?.topic_tag ?? ''); } catch { return ''; }
 }
 
+/** 格式檢查：要能解析成 JSON 的 parts，則數夠、每則不超過 Threads 上限 */
+export function wellFormed(raw: string, minParts: number): boolean {
+  const t = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  try {
+    const j = JSON.parse(t), arr = Array.isArray(j) ? j : j?.parts;
+    if (!Array.isArray(arr)) return false;
+    const p = arr.map((x: unknown) => String(x ?? '').trim()).filter(Boolean);
+    return p.length >= minParts && p.every((x: string) => [...x].length <= THREADS_MAX_CHARS - 40);
+  } catch { return !/^[{[]/.test(t); } // 純文字（非 JSON）沿用舊的單則處理；看起來是 JSON 卻壞掉才算失敗
+}
+
 export function parseParts(raw: string): string[] {
   const t = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
   try {
@@ -206,25 +218,34 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
     (await env.DB.prepare(
       `INSERT INTO ai_generations(brand_id,provider,model,prompt_version,input_tokens,output_tokens,status,result,error_message,duration_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(brand.id, 'gemini', model, `${variant}:${pattern}`, inT, outT, status, text, err, Date.now() - started, iso(now)).run()).meta.last_row_id as number;
+  const max = Math.max(1, s.thread_max ?? 7), min = Math.min(max, Math.max(1, s.thread_min ?? 4));
+  const call = () => geminiFetch(env)(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: buildPrompt(brand, s, o) }] }],
+      generationConfig: { temperature: 0.9, maxOutputTokens: 3000, responseMimeType: 'application/json' },
+    }),
+  });
   try {
-    const res = await geminiFetch(env)(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: buildPrompt(brand, s, o) }] }],
-        generationConfig: { temperature: 0.9, maxOutputTokens: 3000, responseMimeType: 'application/json' },
-      }),
-    });
+    let res = await call(), data: any = null, raw = '';
+    // 格式壞掉（JSON 沒寫好、整串塞成一則）或 Gemini 暫時忙碌：自動再寫一次
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt) res = await call();
+      if (res.status === 503 && attempt === 0) continue;
+      if (!res.ok) break;
+      data = await res.json();
+      raw = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? '').join('') ?? '';
+      if (wellFormed(raw, max === 1 ? 1 : Math.min(2, min))) break;
+    }
     if (!res.ok) {
       // 記下 Gemini 說的原因（例如地區不支援、模型名稱錯誤、金鑰無效），不記任何內容或金鑰
       const eb: any = await res.json().catch(() => ({}));
       const why = [eb?.error?.status, eb?.error?.message].filter(Boolean).join(' ').replace(/key=[^&\s]+/gi, 'key=***').slice(0, 200);
       throw new Error(`Gemini HTTP ${res.status}${why ? `：${why}` : ''}`);
     }
-    const data: any = await res.json();
-    const raw: string = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? '').join('') ?? '';
     if (!raw.trim()) throw new Error('Gemini 回傳空內容');
-    const max = Math.max(1, s.thread_max ?? 7);
+    if (!wellFormed(raw, max === 1 ? 1 : Math.min(2, min))) throw new Error('AI 回傳的格式不正確（重試後仍失敗），稍後再試');
     const e = effective(o.account ?? null, s);
     const parts = appendCta(parseParts(raw).map(tidyPart).filter(Boolean).slice(0, max), e.cta, postLink(s));
     const id = await record('ok', JSON.stringify(parts), null, data?.usageMetadata?.promptTokenCount ?? 0, data?.usageMetadata?.candidatesTokenCount ?? 0);

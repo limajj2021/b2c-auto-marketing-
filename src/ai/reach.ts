@@ -10,8 +10,8 @@ export interface ReachScore { total: number; anchor: number; noStock: number; no
 export function reachScore(parts: string[], others: string[] = [], finance = false): ReachScore {
   const p1 = (parts[0] ?? '').replace(/\s+/g, ' ');
   const p12 = `${p1} ${parts[1] ?? ''}`;
-  const body = parts.slice(0, -1); // 最後一則是 CTA
-  const near = body.slice(-2).join(' ');
+  // 最後一則後半是系統加的 CTA；問句通常在最後一兩則
+  const near = parts.slice(-2).join(' ').replace(/https?:\/\/\S+/g, '');
   const anchor = ANCHOR.test(p1) ? 25 : 0;
   const noStock = STOCK_OPENERS.some((w) => p1.includes(w)) ? 0 : 20;
   const noSensitive = finance && SENSITIVE_HOOK.some((w) => p12.includes(w)) ? 0 : 15;
