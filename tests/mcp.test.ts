@@ -82,7 +82,7 @@ describe('AI connector tools', () => {
     expect(saved.isError).toBeUndefined(); expect(saved.structuredContent.saved).toHaveLength(2);
     const rows: any[] = (await env.DB.prepare(`SELECT parts,topic_tag,status FROM posts WHERE brand_id='b1' ORDER BY id`).all()).results;
     expect(JSON.parse(rows[0].parts)).toEqual(['鉤子一', '結尾一\n\n加 LINE 諮詢 https://line.me/R/ti/p/@test']);
-    expect(JSON.parse(rows[1].parts)[0]).toBe('鉤子二'); expect(rows[1].topic_tag).toBe('房仲'); expect(rows.every((r) => r.status === 'draft')).toBe(true);
+    expect(JSON.parse(rows[1].parts)[0]).toBe('鉤子二，'); // 標點保留 expect(rows[1].topic_tag).toBe('房仲'); expect(rows.every((r) => r.status === 'draft')).toBe(true);
     const id = saved.structuredContent.saved[0].id;
     const noConfirm = await tool(env, tok, 'publish_post', { post_id: id, confirm: false });
     expect(noConfirm.isError).toBe(true); expect(noConfirm.content[0].text).toContain('確認');

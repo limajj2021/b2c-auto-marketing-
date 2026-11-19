@@ -53,8 +53,11 @@ describe('thread generation', () => {
   it('tells the AI how to break lines for phones, and tidies what comes back', () => {
     const p = buildPrompt({ id: 'b', name: 'x', industry: 'general', description: 'd', timezone: 'Asia/Taipei' },
       { thread_min: 5, thread_max: 8, fact_bank: '', content_tone: 't', content_topics: '[]', banned_words: '[]', services: '', audience: '' } as any);
-    for (const k of ['排版規則', `最多 ${LINE_MAX} 個字`, '換行處的逗號拿掉', '不要用「-」']) expect(p).toContain(k);
-    expect(tidyPart('  第一行，\n-\n第二行  \n\n\n\n---\n第三行、')).toBe('第一行\n\n第二行\n\n第三行');
+    for (const k of ['排版規則', `最多 ${LINE_MAX} 個字`, '保留標點', '不要三五個字就換行', '不要用「-」']) expect(p).toContain(k);
+    // 標點保留；分隔線拿掉；太短又沒標點的行接到下一行
+    expect(tidyPart('  第一行，\n-\n第二行  \n\n\n\n---\n第三行、')).toBe('第一行，\n\n第二行\n\n第三行、');
+    expect(tidyPart('很多人以為\n只要努力\n就會有結果。')).toBe('很多人以為，只要努力，就會有結果。');
+    expect(tidyPart('這句已經很長而且有標點，\n下一行')).toBe('這句已經很長而且有標點，\n下一行');
     expect(tidyPart('1️⃣ 這跟我有關嗎？\n第一句就點名他')).toBe('1️⃣ 這跟我有關嗎？\n第一句就點名他');
   });
 

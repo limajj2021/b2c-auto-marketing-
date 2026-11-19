@@ -108,12 +108,12 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     '・每則 2～8 行，一則只講一個重點。',
     '',
     '# 排版規則（手機上要整齊，務必遵守）',
-    `・每一行最多 ${LINE_MAX} 個字（含標點）。超過就在語意斷點自己換行，不要寫成一長句讓手機自動折行。`,
-    '・在逗號、頓號、冒號的位置換行，換行處的逗號拿掉；不要把「」裡的詞、數字和單位、英文單字拆到兩行。',
-    '・一行只放一個意思；句子很長時拆成兩三行，每行都要能單獨讀懂。',
+    '・每一句都要有標點符號（，。？！：、），換行的地方也要保留標點，不要把標點拿掉。',
+    `・每一行盡量寫滿，約 ${LINE_MIN}～${LINE_MAX} 個字（含標點），最多 ${LINE_MAX} 個字；不要三五個字就換行，短句請用逗號接在同一行。`,
+    '・超過一行的長句，在標點的位置換行；不要把「」裡的詞、數字和單位、英文單字拆到兩行。',
     '・段落之間空一行，只空一行；不要用「-」「—」「---」之類的符號分隔。',
     '・條列時每一項獨立一行，用 emoji 或 1️⃣2️⃣3️⃣ 開頭；項目的說明寫在下一行，不要跟在同一行後面。',
-    '・行首不要空格，行尾不要逗號或空格。',
+    '・行首、行尾不要空格。',
     '・懸念切割：前一則停在「真相是……」「而是⋯」，下一則開頭重複這句再揭曉。',
     '・至少一次翻轉歸因：「這不是你能力的問題，而是＿＿的問題」。',
     '・至少一組二元對比，例如：成本 vs 投資、被管理者 vs 資產、要錢 vs 創造價值。',
@@ -152,14 +152,34 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
 export const postLink = (s: Pick<Settings, 'line_add_url' | 'line_short_url'>) => s.line_short_url || s.line_add_url;
 
 /** 手機上一行能完整顯示的字數（保守值）；超過的行會被自動折行，排版就亂了 */
-export const LINE_MAX = 16;
+export const LINE_MAX = 18;
+/** 一行至少寫到這個字數再換行（客戶要求：不要三五個字就換行） */
+export const LINE_MIN = 12;
 
 /** 整理排版：去掉行首尾空白、行尾逗號、當分隔線用的「-」，多個空行合成一個 */
 export function tidyPart(s: string): string {
-  return s.replace(/\r/g, '').split('\n')
-    .map((l) => l.trim().replace(/[，,、]+$/, ''))
-    .map((l) => (/^[-—–_─]{1,5}$/.test(l) ? '' : l))
-    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const lines = s.replace(/\r/g, '').split('\n')
+    .map((l) => l.trim())
+    .map((l) => (/^[-—–_─]{1,5}$/.test(l) ? '' : l));
+  return mergeShortLines(lines).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const len = (t: string) => [...t].length;
+const ENDS_PUNCT = /[，。？！：；、,.?!:;…⋯」』）)👇]$/u;
+const LIST_HEAD = /^(\p{Extended_Pictographic}|[0-9]️⃣|[0-9]+[.、)]|[-•・])/u;
+/**
+ * 同一段裡，太短而且沒有標點就換行的行，用逗號接到下一行（接起來不超過一行上限才接）。
+ * 條列（emoji、1️⃣ 開頭）與空行不動。
+ */
+export function mergeShortLines(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const l of lines) {
+    const prev = out[out.length - 1];
+    if (prev && l && !LIST_HEAD.test(l) && !LIST_HEAD.test(prev) && !ENDS_PUNCT.test(prev) && len(prev) < LINE_MIN && len(prev) + 1 + len(l) <= LINE_MAX) {
+      out[out.length - 1] = `${prev}，${l}`;
+    } else out.push(l);
+  }
+  return out;
 }
 
 /** 讀出模型給的主題標籤（沒有就是空字串） */
