@@ -19,12 +19,12 @@ const MAX_POSTS = 10, MAX_PARTS = 10, MAX_CHARS = 500;
 
 const INSTRUCTIONS = `這是「異構資本」的 Threads 貼文助理連接器。寫貼文前一定先呼叫 get_brand_guide 取得這個品牌的資料與寫作規則，照規則寫。
 寫好先在對話裡給使用者看，使用者同意後再用 save_drafts 存成草稿（一次最多 10 篇）。要寫很多篇時，每次 5 篇分批寫，品質比較穩定。
-這個品牌有多個 Threads 帳號時，每個工具都可以用 account 參數指定帳號（例如 @vuca.tw）：save_drafts 存到指定帳號、update_draft 改到別的帳號、publish_post 發到指定帳號、schedule_posts 排到指定帳號。使用者說「發到某帳號」時直接帶 account，不要說做不到。
+這個品牌有多個 Threads 帳號時，每個工具都可以用 account 參數指定帳號（例如 @vuca.tw）：save_drafts 存到指定帳號、update_draft 改到別的帳號、publish_post 發到指定帳號、schedule_posts 排到指定帳號。使用者說「發到某帳號」時直接帶 account，不要說做不到。如果你看到的 save_drafts 沒有 account 欄位（連接器是舊版），在每篇第一則最前面加一行「帳號：@帳號名稱」就能指定。
 要把多篇草稿排程發出（可以分給多個帳號輪流發，或每個帳號都發）用 schedule_posts；排程前先把帳號、方式、開始時間、間隔講給使用者確認，同意後再把 confirm 設為 true。
 不要自己編造數字、案例或引言。發布（publish_post）一定要使用者在對話中明確說要發布，並把 confirm 設為 true。`;
 
 /** 工具清單有變動就改版本號，提醒 AI 用戶端重新抓工具 */
-const TOOLS_VERSION = '1.4.0';
+const TOOLS_VERSION = '1.5.0';
 const TOOLS = [
   { name: 'get_brand_guide', title: '讀取品牌資料與寫作規則', description: '取得目前連接品牌的介紹、服務、受眾、語氣、主題、禁用詞、可引用數據、Threads 串文寫作與排版規則、結尾 CTA。寫任何貼文前先呼叫。',
     inputSchema: { type: 'object', properties: { topic: { type: 'string', description: '這次想寫的主題（選填）' }, account: { type: 'string', description: '要用哪個 Threads 帳號的人設寫（選填，例如 @vuca.tw）' } }, additionalProperties: false },
@@ -83,6 +83,18 @@ const cleanTag = (v: unknown): string | null => {
   const t = normTopicTag(v); if (t === null) throw new ToolError('主題標籤最多 50 字，不能有句點或 &'); return t;
 };
 
+/**
+ * 舊版連接器相容：ChatGPT 會沿用第一次加入時的工具清單，沒有 account 欄位。
+ * 這時可以在第一則最前面加一行「帳號：@xxx」指定帳號，系統取出後把這行拿掉。
+ */
+const ACCT_LINE = /^\s*(?:帳號|账号|account)\s*[:：]\s*@?([A-Za-z0-9._]+)\s*(?:\n|$)/i;
+function accountFromParts(parts: unknown): { parts: unknown; account?: string } {
+  if (!Array.isArray(parts) || typeof parts[0] !== 'string') return { parts };
+  const m = parts[0].match(ACCT_LINE);
+  if (!m) return { parts };
+  return { parts: [parts[0].slice(m[0].length), ...parts.slice(1)], account: m[1] };
+}
+
 /** 找出要發文的帳號：指定了就必須是這個品牌的帳號；沒指定用品牌預設（第一個） */
 function pickAccount(accts: Account[], v: unknown): Account | null {
   if (v === undefined || v === null || String(v).trim() === '') return accts[0] ?? null;
@@ -134,12 +146,12 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
     }
     case 'save_drafts': {
       needAdmin(a);
-      const posts = Array.isArray(args?.posts) ? args.posts : [];
+      const posts = (Array.isArray(args?.posts) ? args.posts : []).map((p: any) => { const x = accountFromParts(p?.parts); return { ...p, parts: x.parts, account: p?.account ?? x.account }; });
       if (!posts.length) throw new ToolError('沒有要存的貼文');
       if (posts.length > MAX_POSTS) throw new ToolError(`一次最多存 ${MAX_POSTS} 篇`);
       const link = postLink(s), saved: { id: number; parts: number; account: string; issues: string[] }[] = [];
       const live = accts.filter((x) => x.status === 'ok');
-      if (live.length > 1 && !args?.account && posts.some((p: any) => !p?.account)) throw new ToolError(`這個品牌有 ${live.map((x) => '@' + x.username).join('、')} 多個帳號，請先問使用者要存到哪一個，並在每篇的 account 填上帳號。`);
+      if (live.length > 1 && !args?.account && posts.some((p: any) => !p?.account)) throw new ToolError(`這個品牌有 ${live.map((x) => '@' + x.username).join('、')} 多個帳號，請先問使用者要存到哪一個，並在 account 填上帳號。如果工具沒有 account 欄位（連接器是舊版），就在每篇第一則的最前面加一行「帳號：@帳號名稱」，系統會自動辨識並拿掉這行。`);
       const prepared = posts.map((p: any) => ({ parts: withCta(cleanParts(p?.parts), s.cta_text, link), tag: cleanTag(p?.topic_tag), acct: pickAccount(accts, p?.account ?? args?.account) }));
       for (const p of prepared) {
         const issues = checkParts(p.parts, { industry: brand.industry, bannedWords: jsonArr(s.banned_words) });
@@ -155,6 +167,7 @@ ${accts.length > 1 ? '・這個品牌有多個帳號：寫之前先問使用者�
       needAdmin(a);
       const cur = await env.DB.prepare(`SELECT parts,content FROM posts WHERE id=? AND brand_id=? AND status='draft'`).bind(Number(args?.post_id), a.brandId).first<any>();
       if (!cur) throw new ToolError('只有待審核的草稿可以修改（找不到這篇草稿，或它已排程／發布）');
+      if (args?.parts !== undefined) { const x = accountFromParts(args.parts); args = { ...args, parts: x.parts, account: args.account ?? x.account }; }
       if (args?.parts === undefined && args?.account === undefined && args?.topic_tag === undefined) throw new ToolError('沒有要修改的內容');
       const parts = args?.parts === undefined ? partsOf(cur) : withCta(cleanParts(args.parts), s.cta_text, postLink(s)), tag = args?.topic_tag === undefined ? undefined : cleanTag(args.topic_tag);
       const acct = args?.account === undefined ? undefined : pickAccount(accts, args.account);

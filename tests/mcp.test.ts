@@ -189,6 +189,11 @@ describe('AI connector tools', () => {
     const miss = await tool(env, tok, 'save_drafts', { posts: [{ parts: ['GTA6'] }] });
     expect(miss.isError).toBe(true); expect(miss.content[0].text).toContain('@vuca.tw');
     const id = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['GTA6'], account: '@vuca.canada' }] })).structuredContent.saved[0].id;
+    // 舊版連接器（沒有 account 欄位）：錯誤訊息教 AI 在第一則前面加「帳號：@xxx」
+    expect(miss.content[0].text).toContain('帳號：@');
+    const old = (await tool(env, tok, 'save_drafts', { posts: [{ parts: ['帳號：@vuca.tw\nGTA6 舊版', '結尾'] }] })).structuredContent.saved[0];
+    expect(old.account).toBe('@vuca.tw');
+    expect(JSON.parse(((await env.DB.prepare('SELECT parts FROM posts WHERE id=?').bind(old.id).first()) as any).parts)[0]).toBe('GTA6 舊版');
     const top = (await tool(env, tok, 'save_drafts', { account: '@vuca.tw', posts: [{ parts: ['整批'] }] })).structuredContent.saved[0];
     expect(top.account).toBe('@vuca.tw');
     // 只改帳號，不用重傳內容
