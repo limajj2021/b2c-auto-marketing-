@@ -111,7 +111,7 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     '# 斷行嚴格規則（違反就整串重寫）',
     '・只能在標點符號後面換行：每一行的最後一個字必須是標點（，。？！：；…）或 emoji。',
     '・絕對不能在一句話中間換行（不准斷句）。錯誤示範：「很多人以為只要」換行「努力就會成功」。正確：「很多人以為，只要努力就會成功。」',
-    `・每一行盡量寫滿，約 ${LINE_MIN}～${LINE_MAX} 個字（含標點）；不要三五個字就換行，短句用逗號接在同一行。`,
+    `・每一行 ${LINE_MIN}～${LINE_MAX} 個字（含標點）：最少 ${LINE_MIN} 字、最多 ${LINE_MAX} 字；不要三五個字就換行，短句用逗號接在同一行。`,
     `・一句話超過 ${LINE_MAX} 個字時，把句子改短，或在句中的逗號處換行；寧可整句放在同一行，也不能從句子中間切開。`,
     '・每一句都要有標點符號，換行的地方也要保留標點，不要把標點拿掉。',
     '・不要把「」裡的詞、數字和單位、英文單字拆到兩行。',
@@ -156,9 +156,9 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
 export const postLink = (s: Pick<Settings, 'line_add_url' | 'line_short_url'>) => s.line_short_url || s.line_add_url;
 
 /** 手機上一行能完整顯示的字數（保守值）；超過的行會被自動折行，排版就亂了 */
-export const LINE_MAX = 20;
+export const LINE_MAX = 18;
 /** 一行至少寫到這個字數再換行（客戶要求：不要三五個字就換行） */
-export const LINE_MIN = 14;
+export const LINE_MIN = 15;
 
 /** 整理排版：去掉行首尾空白、行尾逗號、當分隔線用的「-」，多個空行合成一個 */
 export function tidyPart(s: string): string {
@@ -197,7 +197,9 @@ export function mergeShortLines(lines: string[]): string[] {
   for (const l of lines) {
     const prev = out[out.length - 1];
     if (prev && l && !LIST_HEAD.test(l) && !LIST_HEAD.test(prev) && !ENDS_PUNCT.test(prev) && !/\p{Extended_Pictographic}$/u.test(prev)) {
-      out[out.length - 1] = `${prev}${l}`;
+      out[out.length - 1] = `${prev}${l}`; // 句子被切開：接回去
+    } else if (prev && l && !LIST_HEAD.test(l) && !LIST_HEAD.test(prev) && /[，、：；,:;]$/.test(prev) && len(prev) < LINE_MIN && len(prev) + len(l) <= LINE_MAX) {
+      out[out.length - 1] = `${prev}${l}`; // 逗號後就換行、又不到最少字數：同一句的下一段接上來
     } else out.push(l);
   }
   return out;
