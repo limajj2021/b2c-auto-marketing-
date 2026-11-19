@@ -41,6 +41,12 @@ SELECT brand_id,threads_user_id,username,token_enc,expires_at,'ok',persona,tone,
 FROM threads_accounts_archive WHERE archive_id=<archive_id>;
 ```
 
+## 貼文排版嚴格規則（客戶指定，不可改回）
+- 只能在標點符號（，。？！：；…）或 emoji 後面換行，**絕對不能在一句話中間換行（不准斷句）**。
+- 每一句都要有標點，換行處保留標點（不可以再自動刪掉行尾逗號）。
+- 每行盡量寫滿約 12～18 字，不要三五個字就換行。
+- 寫在 `buildPrompt` 的「斷行嚴格規則」，並由 `tidyPart`／`mergeShortLines` 在存檔前強制修正；`tests/matrix.test.ts` 有檢查。
+
 ## 開發
 - 測試：`npx tsc --noEmit && npx vitest run`（全部要過才能部署）
 - 正式資料庫：`npx wrangler d1 migrations apply DB --remote -c .generated/wrangler.app.toml`
