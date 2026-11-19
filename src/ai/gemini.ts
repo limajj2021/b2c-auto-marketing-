@@ -156,9 +156,9 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
 export const postLink = (s: Pick<Settings, 'line_add_url' | 'line_short_url'>) => s.line_short_url || s.line_add_url;
 
 /** 手機上一行能完整顯示的字數（保守值）；超過的行會被自動折行，排版就亂了 */
-export const LINE_MAX = 18;
+export const LINE_MAX = 20;
 /** 一行至少寫到這個字數再換行（客戶要求：不要三五個字就換行） */
-export const LINE_MIN = 12;
+export const LINE_MIN = 14;
 
 /** 整理排版：去掉行首尾空白、行尾逗號、當分隔線用的「-」，多個空行合成一個 */
 export function tidyPart(s: string): string {

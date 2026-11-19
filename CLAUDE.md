@@ -44,7 +44,7 @@ FROM threads_accounts_archive WHERE archive_id=<archive_id>;
 ## 貼文排版嚴格規則（客戶指定，不可改回）
 - 只能在標點符號（，。？！：；…）或 emoji 後面換行，**絕對不能在一句話中間換行（不准斷句）**。
 - 每一句都要有標點，換行處保留標點（不可以再自動刪掉行尾逗號）。
-- 每行盡量寫滿約 12～18 字，不要三五個字就換行。
+- 每行盡量寫滿約 14～20 字（上限 20 字，依使用者手機截圖：Threads 一行約 22 字，留 2 字緩衝），不要三五個字就換行。
 - 寫在 `buildPrompt` 的「斷行嚴格規則」，並由 `tidyPart`／`mergeShortLines` 在存檔前強制修正；`tests/matrix.test.ts` 有檢查。
 
 ## 代客戶操作的規則
