@@ -350,7 +350,7 @@ add('GET', '/posts', 'admin', async ({ env, brandId, url }) => {
   const st = url.searchParams.get('status');
   const rows = await env.DB.prepare(
     `SELECT p.id,p.content,p.parts,p.part_ids,p.status,p.scheduled_at,p.published_at,p.threads_post_id,p.error_message,p.approved_by,p.account_id,p.source_post_id,p.topic_tag,p.seen_at,p.idea,a.username,
-       m.views,m.likes,m.replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,(SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
+       m.views,m.likes,CASE WHEN m.replies IS NULL THEN NULL ELSE MAX(0,m.replies-(COALESCE(json_array_length(p.parts),1)-1)) END replies,(SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,(SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status<>'deleted' AND (? IS NULL OR p.status=?) ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 150`,
   ).bind(brandId, st, st).all<any>();
@@ -642,13 +642,17 @@ add('GET', '/funnel', 'admin', async ({ env, url, brandId }) => {
   // 只看單一 Threads 帳號：曝光、互動、點擊都是該帳號貼文的真實數字；新好友 LINE 不會告知來源帳號，只能用「推估」
   const acct = Number(url.searchParams.get('account_id')) || 0;
   const posts = (await env.DB.prepare(
-    `SELECT p.id,p.content,p.parts,p.account_id,p.published_at,a.username,m.views,m.likes,m.replies,m.reposts,m.quotes,m.shares,
+    `SELECT p.id,p.content,p.parts,p.account_id,p.published_at,a.username,m.views,m.likes,CASE WHEN m.replies IS NULL THEN NULL ELSE MAX(0,m.replies-(COALESCE(json_array_length(p.parts),1)-1)) END replies,m.reposts,m.quotes,m.shares,
        (SELECT SUM(l.clicks) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) clicks,
        (SELECT SUM(l.uniques) FROM post_links l WHERE l.brand_id=p.brand_id AND l.post_id=p.id) uniques
      FROM posts p LEFT JOIN threads_accounts a ON a.id=p.account_id LEFT JOIN post_metrics m ON m.post_id=p.id
      WHERE p.brand_id=? AND p.status='published' AND p.published_at>=? AND p.published_at<?${acct ? ' AND p.account_id=?' : ''} ORDER BY p.published_at DESC LIMIT 500`,
   ).bind(...(acct ? [brandId, fromIso, toIso, acct] : [brandId, fromIso, toIso])).all<any>()).results;
   const sum = (k: string) => posts.reduce((a, p) => a + (p[k] ?? 0), 0);
+  // 曝光：用 Threads「帳號」每天的瀏覽數加總（跟首頁「今日曝光」同一個來源，包含舊文、個人頁被看到的次數）；
+  // 帳號成效開始記錄之前的日子沒有資料，所以跟逐篇貼文的瀏覽數加總取大的那個
+  const acctViews = (await env.DB.prepare(`SELECT COALESCE(SUM(views),0) v, COUNT(*) n FROM account_daily WHERE brand_id=? AND day>=? AND day<?${acct ? ' AND account_id=?' : ''}`)
+    .bind(...(acct ? [brandId, from, to, acct] : [brandId, from, to])).first<{ v: number; n: number }>()) ?? { v: 0, n: 0 };
   const withMetrics = posts.filter((p) => p.views !== null && p.views !== undefined).length;
   const accts = await listAccounts(env);
   const insights = accts.some((a) => (a as any).insights_status === 'ok') || withMetrics > 0 ? 'ok'
@@ -668,7 +672,7 @@ add('GET', '/funnel', 'admin', async ({ env, url, brandId }) => {
     from, to, timezone: brand.timezone, insights, tracking: !!env.PUBLIC_BASE_URL, leads_enabled: !!s.leads_enabled,
     totals: {
       posts: posts.length, posts_with_metrics: withMetrics,
-      views: sum('views'), likes: sum('likes'), replies: sum('replies'), reposts: sum('reposts'), quotes: sum('quotes'), shares: sum('shares'),
+      views: Math.max(acctViews.v, sum('views')), post_views: sum('views'), account_views: acctViews.n ? acctViews.v : null, likes: sum('likes'), replies: sum('replies'), reposts: sum('reposts'), quotes: sum('quotes'), shares: sum('shares'),
       clicks: acct ? sum('clicks') : await metricSum(env, brandId, 'link_click', from, to),
       unique_clicks: acct ? sum('uniques') : await metricSum(env, brandId, 'link_unique', from, to),
       friends: acct ? (traffic.est_total === null ? 0 : Math.round(traffic.est_total)) : await metricSum(env, brandId, 'friend_add', from, to),
