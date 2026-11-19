@@ -102,7 +102,8 @@ describe('#8 cron reuses brand/settings within a workspace pass', () => {
     await runAllTenants(env, new Date('2026-11-08T01:07:00Z')); // 非整點：不含每小時一次的紀錄清理
     // 13：自動發文關閉的工作區也要多查 1 次「有沒有人工核准、待發布的貼文」，避免核准過的貼文永遠發不出去
     // 14：再加 1 次讀帳號清單，更新各帳號「今日曝光」
-    expect(peak).toBeLessThanOrEqual(14);
+    // 15：再加 1 次查有沒有排隊中的 Prompt 回測
+    expect(peak).toBeLessThanOrEqual(15);
   });
 });
 

@@ -11,10 +11,34 @@ export class QuotaError extends Error {}
 
 export interface GenResult { generationId: number; parts: string[]; issues: string[]; /** AI 為這篇挑的主題標籤 */ tag: string }
 /** autoPublish：全自動發文，寫完沒人會改，所以不能留空格給人補；fix：上一版沒過檢查的原因，這次要避開 */
-export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey; autoPublish?: boolean; fix?: string[] }
+/** variant：底層 Prompt 版本（回測時可指定 v2／v3）；recent：同品牌最近發過或排好的開頭，避免各帳號寫出雷同的東西 */
+export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?: string[]; pattern?: PatternKey; autoPublish?: boolean; fix?: string[]; variant?: 'v2' | 'v3'; recent?: string[] }
 
 /** 底層 Prompt 版本：寫進 ai_generations.prompt_version（格式 v2:套路代號），方便日後比較哪個套路成效好 */
-export const PROMPT_VERSION = 'v2';
+export const PROMPT_VERSION = 'v3';
+/** 正式環境用哪一版（回測通過才切換）；回測時用 GenOpts.variant 指定 */
+export const ACTIVE_PROMPT: 'v2' | 'v3' = 'v2';
+
+/** 開頭不能直接套用的套話：模板只當骨架，照抄會讓每個帳號看起來一樣，也是演算法判定低品質的訊號 */
+export const STOCK_OPENERS = ['其實只在乎三件事', '只在乎三件事', '醒醒吧', '這不是你能力的問題', '別再被假', '像在「乞討」', '像在乞討', '別傻了', '你以為只要'];
+/** 金融借貸敏感詞：Meta 對推薦借貸類內容較保守，開頭避開，改講生活裡的錢 */
+export const SENSITIVE_HOOK = ['借錢', '借款', '貸款', '放款', '核貸', '撥款', '利率', '利息', '額度', '調頭寸', '週轉', '周轉', '融資', '信貸'];
+
+/** v3：比對自家帳號與高觸及帳號（SnakeSponsor）後加上的「觸及規則」 */
+function reachRules(o: GenOpts, finance: boolean): string[] {
+  return [
+    '# 觸及規則（最高優先，Threads 演算法會先看第一則決定要不要推）',
+    '・第一則一定要有「具體錨點」：一個看得見的人、場景、時間點或金額，例如「月底前三天」「迎新晚會前一週」「iPhone 發表隔天」「一張 2 萬 8 的帳單」。不要用抽象概念開頭（例如「資金安排」「品牌經營」「短影音策略」）。',
+    '・優先從讀者這陣子正在關注、大家都知道的事切入（節日、發薪日、購物節、新手機、熱門遊戲、演唱會、季節、社群上正在吵的話題），再轉到你的觀點；只用大家都知道的事實，不要編造新聞細節。',
+    '・情境裡的金額、人數可以寫成「假設」「例如」的情境數字，但不能寫成統計結果或研究。',
+    `・下列套話不能出現在第一則（模板只是骨架，換成你自己的說法）：${STOCK_OPENERS.join('、')}。`,
+    '・第一則要能單獨被看懂、讓人想點開看下一則；不要只丟一個口號。',
+    '・CTA 前一則放一個讀者可以直接回答的問題（二選一或「你遇過嗎？」），讓人想留言；留言比按讚更能換到推薦。',
+    finance ? `・本品牌是金融相關：第一則與第二則不要出現這些字：${SENSITIVE_HOOK.join('、')}；改講生活裡跟錢有關的處境（月底、帳單、家人、工作、夢想），服務留到最後一則再輕帶。` : '',
+    o.recent?.length ? `・同品牌各帳號最近已經發過或排好的開頭如下，這篇的題材、切角和開頭都不能跟它們相似：\n${o.recent.map((h) => `  ・${h}`).join('\n')}` : '',
+    '',
+  ];
+}
 
 /**
  * 觀點拆解串文的套路庫。needs：需要「可引用數據」裡有素材才能用（引言、案例、報告），沒有素材時不選，避免捏造。
@@ -47,6 +71,8 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
   const min = Math.max(1, s.thread_min ?? 4), max = Math.max(min, s.thread_max ?? 7);
   const facts = s.fact_bank?.trim() || '';
   const pat = o.pattern ? PATTERNS[o.pattern] : null;
+  const v3 = (o.variant ?? ACTIVE_PROMPT) === 'v3';
+  const finance = regulated || /借|貸|資金|理財|財務|金融|錢/.test(`${brand.industry}${brand.description}${s.services}`);
   const lines = [
     '# 角色',
     `你是「${brand.name}」的 Threads 內容策略師${e.persona ? `，人設：${e.persona}` : ''}，專寫「觀點拆解串文」。`,
@@ -67,6 +93,7 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     pat ? `使用「${pat.name}」當主架構：${pat.flow}` : '從文化對比、荒謬場景、打臉迷思、反常識金句、只在乎三件事、揭弊、錢從哪來中挑一個最適合主題的當主架構。',
     '套路是骨架，句型裡的「＿＿」要換成符合品牌與讀者的具體內容；不必逐字照抄。',
     '',
+    ...(v3 ? reachRules(o, finance) : []),
     '# 寫作規則',
     max === 1 ? '・只寫 1 則。' : `・共 ${min} 到 ${max} 則。第 1 則是鉤子：1 到 3 行、不超過 60 字，不給答案、不放連結。`,
     '・每則 2～8 行，一則只講一個重點。',
@@ -87,7 +114,8 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     '・不加 hashtag，不寫「總之」，不寫網址。',
     '',
     '# 事實規則（最高優先，違反就整串作廢）',
-    '・數字、比例、金額、排名、報告、引言、客戶案例只能來自「可引用數據」，並寫出來源。',
+    v3 ? '・統計數字、比例、排名、報告、引言、客戶案例只能來自「可引用數據」，並寫出來源；情境裡的假設金額可以用，但要寫成「假設」「例如」。'
+      : '・數字、比例、金額、排名、報告、引言、客戶案例只能來自「可引用數據」，並寫出來源。',
     '・沒有素材時改用具體場景、案例情境或邏輯推演，不要寫成統計結果；不可以寫「研究顯示」「某業內人直言」「調查發現」這類沒有出處的說法。',
     o.autoPublish
       ? '・這串會直接自動發布，沒有人會再修改：絕對不要寫【待補數據】或任何要人補的空格、括號註記；沒有素材就不要用數字，改用具體場景或邏輯推演。'
@@ -103,7 +131,8 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     o.rewriteOf ? `\n# 改寫\n請改寫以下串文：保留核心觀點，但鉤子、切角、用字與例子要完全不同，符合上述人設，避免與原文雷同。\n原文：\n${o.rewriteOf.map((p, i) => `(${i + 1}) ${p}`).join('\n')}` : '',
     '',
     '# 輸出',
-    '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字、跟這串的主題直接相關、讀者會搜尋的詞（例如「短影音剪輯」「房仲經營」），不含 #、句點與 &。',
+    v3 ? '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字，是目標讀者會追蹤或搜尋的興趣社群（例如「小資理財」「迎新」「短影音剪輯」「房仲經營」），不要用品牌名稱，不含 #、句點與 &。'
+      : '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字、跟這串的主題直接相關、讀者會搜尋的詞（例如「短影音剪輯」「房仲經營」），不含 #、句點與 &。',
     '只輸出 JSON：{"parts":["第1則內文","第2則內文", ...],"topic_tag":"主題標籤"}，不要輸出套路說明、備選鉤子或其他文字。',
   ];
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -162,15 +191,21 @@ export async function generateThread(env: Env, o: GenOpts = {}, now = new Date()
   const s = await getSettings(env, brand.id);
   await checkQuota(env, brand, s, now);
   // 換個套路：避開這個品牌上一次用過的
-  const last = await env.DB.prepare(`SELECT prompt_version v FROM ai_generations WHERE brand_id=? AND prompt_version LIKE ? ORDER BY id DESC LIMIT 1`).bind(brand.id, `${PROMPT_VERSION}:%`).first<{ v: string }>();
+  const variant = o.variant ?? ACTIVE_PROMPT;
+  const last = await env.DB.prepare(`SELECT prompt_version v FROM ai_generations WHERE brand_id=? AND prompt_version LIKE 'v_:%' ORDER BY id DESC LIMIT 1`).bind(brand.id).first<{ v: string }>();
+  // v3：同品牌各帳號最近的開頭一起給 AI，避免幾個帳號同時寫出雷同的貼文
+  if (variant === 'v3' && !o.recent) {
+    const rows = (await env.DB.prepare(`SELECT content FROM posts WHERE brand_id=? AND content IS NOT NULL AND status IN ('published','scheduled','draft','publishing') ORDER BY id DESC LIMIT 15`).bind(brand.id).all<{ content: string }>()).results;
+    o = { ...o, recent: rows.map((r) => String(r.content).split('\n').filter(Boolean).slice(0, 2).join(' ').slice(0, 50)) };
+  }
   const pattern = o.pattern ?? pickPattern(!!s.fact_bank?.trim(), last?.v?.split(':')[1]);
-  o = { ...o, pattern };
+  o = { ...o, pattern, variant };
   const model = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const started = Date.now();
   const record = async (status: string, text: string | null, err: string | null, inT = 0, outT = 0) =>
     (await env.DB.prepare(
       `INSERT INTO ai_generations(brand_id,provider,model,prompt_version,input_tokens,output_tokens,status,result,error_message,duration_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-    ).bind(brand.id, 'gemini', model, `${PROMPT_VERSION}:${pattern}`, inT, outT, status, text, err, Date.now() - started, iso(now)).run()).meta.last_row_id as number;
+    ).bind(brand.id, 'gemini', model, `${variant}:${pattern}`, inT, outT, status, text, err, Date.now() - started, iso(now)).run()).meta.last_row_id as number;
   try {
     const res = await geminiFetch(env)(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',

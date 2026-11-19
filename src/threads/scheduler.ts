@@ -53,6 +53,7 @@ export async function runCron(env: Env, now = new Date()): Promise<void> {
   }
   if (auto) await step('generate', () => ensureSlots(env, now));
   await step('insights', () => refreshInsights(env, now));
+  await step('backtest', () => runBacktest(env, now));
 }
 
 async function housekeeping(env: Env, now: Date) {
@@ -307,5 +308,23 @@ export async function refreshAccountViews(env: Env, now: Date): Promise<void> {
     }
     await env.DB.prepare(`INSERT INTO account_daily(account_id,brand_id,day,views,fetched_at) VALUES(?,?,?,?,?)
       ON CONFLICT(account_id,day) DO UPDATE SET views=excluded.views,fetched_at=excluded.fetched_at`).bind(a.id, brand.id, today, v, iso(now)).run();
+  }
+}
+
+/** Prompt 回測：處理排隊中的回測（每輪最多 3 篇），結果存在 backtest_runs，不會進貼文池 */
+export async function runBacktest(env: Env, now: Date): Promise<void> {
+  const brand = await getBrand(env);
+  const rows = (await env.DB.prepare(`SELECT id,account_id,variant,pattern FROM backtest_runs WHERE brand_id=? AND status='pending' ORDER BY id LIMIT 3`).bind(brand.id).all<{ id: number; account_id: number | null; variant: 'v2' | 'v3'; pattern: string }>().catch(() => ({ results: [] as any[] }))).results;
+  if (!rows.length) return;
+  const accts = await listAccounts(env);
+  for (const r of rows) {
+    if (!canAfford(env, 10)) return;
+    try {
+      const g = await generateThread(env, { account: accts.find((a) => a.id === r.account_id) ?? null, variant: r.variant, pattern: r.pattern as any }, now);
+      await env.DB.prepare(`UPDATE backtest_runs SET status='done',parts=?,tag=?,done_at=? WHERE id=?`).bind(JSON.stringify(g.parts), g.tag, iso(now), r.id).run();
+    } catch (e) {
+      if (e instanceof BudgetError) throw e;
+      await env.DB.prepare(`UPDATE backtest_runs SET status='failed',error=?,done_at=? WHERE id=?`).bind(String((e as Error).message).slice(0, 200), iso(now), r.id).run();
+    }
   }
 }
