@@ -17,7 +17,7 @@ export interface GenOpts { topic?: string; account?: Account | null; rewriteOf?:
 /** 底層 Prompt 版本：寫進 ai_generations.prompt_version（格式 v2:套路代號），方便日後比較哪個套路成效好 */
 export const PROMPT_VERSION = 'v3';
 /** 正式環境用哪一版（回測通過才切換）；回測時用 GenOpts.variant 指定 */
-export const ACTIVE_PROMPT: 'v2' | 'v3' = 'v2';
+export const ACTIVE_PROMPT: 'v2' | 'v3' = 'v3'; // 2026-11-19 回測：觸及預測分數 v2 57～58 → v3 70～81，開頭雷同度 0.1 → 0.0
 
 /** 開頭不能直接套用的套話：模板只當骨架，照抄會讓每個帳號看起來一樣，也是演算法判定低品質的訊號 */
 export const STOCK_OPENERS = ['其實只在乎三件事', '只在乎三件事', '醒醒吧', '這不是你能力的問題', '別再被假', '像在「乞討」', '像在乞討', '別傻了', '你以為只要'];
@@ -140,7 +140,7 @@ export function buildPrompt(brand: Brand, s: Settings, o: GenOpts = {}): string 
     o.rewriteOf ? `\n# 改寫\n請改寫以下串文：保留核心觀點，但鉤子、切角、用字與例子要完全不同，符合上述人設，避免與原文雷同。\n原文：\n${o.rewriteOf.map((p, i) => `(${i + 1}) ${p}`).join('\n')}` : '',
     '',
     '# 輸出',
-    v3 ? '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字，是目標讀者會追蹤或搜尋的興趣社群（例如「小資理財」「迎新」「短影音剪輯」「房仲經營」），不要用品牌名稱，不含 #、句點與 &。'
+    v3 ? '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字，是目標讀者會追蹤或搜尋的興趣社群，而且要跟本品牌的服務直接相關（開頭用時事切入也一樣，標籤要回到品牌領域，例如「小資理財」「短影音剪輯」「房仲經營」），不要用品牌名稱，不含 #、句點與 &。'
       : '・另外給這串一個 Threads 主題標籤 topic_tag：2～12 個字、跟這串的主題直接相關、讀者會搜尋的詞（例如「短影音剪輯」「房仲經營」），不含 #、句點與 &。',
     '只輸出 JSON：{"parts":["第1則內文","第2則內文", ...],"topic_tag":"主題標籤"}，不要輸出套路說明、備選鉤子或其他文字。',
   ];
