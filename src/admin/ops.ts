@@ -1,0 +1,322 @@
+// 營運總後台 API：跨工作區的健康狀態、用量計量、開通與暫停。
+// 原則：營運人員只看「計數與狀態」，不讀顧客留資內容等個資。
+import type { Env } from '../types';
+import { forBrand } from '../db';
+import { SOURCES, logEvent } from '../log';
+import { normUsername, requestInvite } from '../threads/invites';
+import { LINK_DAYS, makeConnectLink } from '../threads/connectlink';
+import { hashPassword, signToken, verifyPassword, verifyToken } from '../util/crypto';
+import { isValidTimezone, iso } from '../util/time';
+
+const SESSION_SEC = 8 * 3600;
+const PLATFORM = '_platform'; // audit_logs 的 brand_id，用來記錄營運人員的操作
+const json = (d: unknown, status = 200, h: Record<string, string> = {}) =>
+  new Response(JSON.stringify(d), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...h } });
+const err = (status: number, error: string) => json({ error }, status);
+const cookieOf = (req: Request) => (req.headers.get('cookie') ?? '').match(/(?:^|;\s*)osid=([^;]+)/)?.[1] ?? null;
+const log = (env: Env, actor: string | null, action: string, detail = '') =>
+  env.DB.prepare('INSERT INTO audit_logs(brand_id,actor,action,detail,created_at) VALUES(?,?,?,?,?)').bind(PLATFORM, actor, action, detail, iso()).run();
+
+// 營運人員的登入憑證用獨立金鑰簽發，客戶端的登入憑證無法被拿來冒充營運人員
+const opSecret = (env: Env) => `${env.SESSION_SECRET}:operator`;
+const randomPassword = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(12)))).replace(/[+/=]/g, '').slice(0, 14);
+const monthStart = (m?: string | null) => (m && /^\d{4}-\d{2}$/.test(m) ? `${m}-01T00:00:00.000Z` : `${iso().slice(0, 7)}-01T00:00:00.000Z`);
+const nextMonth = (start: string) => { const d = new Date(start); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString(); };
+
+async function operator(env: Env, req: Request) {
+  const tok = cookieOf(req); if (!tok) return null;
+  const v = await verifyToken(opSecret(env), tok, Math.floor(Date.now() / 1000)); if (!v || v.p) return null;
+  return env.DB.prepare('SELECT id,username,role FROM operators WHERE id=? AND enabled=1').bind(v.uid).first<{ id: number; username: string; role: 'admin' | 'support' }>();
+}
+
+export async function handleOps(env: Env, req: Request): Promise<Response> {
+  const url = new URL(req.url), path = url.pathname.slice('/api/op'.length);
+  if (req.method !== 'GET' && req.headers.get('x-requested-with') !== 'admin-ui') return err(403, 'forbidden');
+
+  if (path === '/login' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const username = String(b.username ?? '').slice(0, 64);
+    const fails = await env.DB.prepare(`SELECT COUNT(*) c FROM audit_logs WHERE brand_id=? AND action='op_login_fail' AND detail=? AND created_at>?`)
+      .bind(PLATFORM, username, new Date(Date.now() - 15 * 60000).toISOString()).first<{ c: number }>();
+    if ((fails?.c ?? 0) >= 5) return err(429, '嘗試次數過多，請 15 分鐘後再試');
+    const u = await env.DB.prepare('SELECT id,password_hash FROM operators WHERE username=? AND enabled=1').bind(username).first<any>();
+    const ok = u ? await verifyPassword(String(b.password ?? ''), u.password_hash) : (await hashPassword('x'), false);
+    if (!ok) { await log(env, null, 'op_login_fail', username); return err(401, '帳號或密碼錯誤'); }
+    const tok = await signToken(opSecret(env), { uid: u.id, exp: Math.floor(Date.now() / 1000) + SESSION_SEC });
+    await log(env, username, 'op_login');
+    return json({ ok: true }, 200, { 'set-cookie': `osid=${tok}; Path=/api/op; Max-Age=${SESSION_SEC}; HttpOnly; Secure; SameSite=Strict` });
+  }
+
+  const op = await operator(env, req);
+  if (!op) return err(401, 'unauthorized');
+  if (path === '/logout') return json({ ok: true }, 200, { 'set-cookie': 'osid=; Path=/api/op; Max-Age=0; HttpOnly; Secure; SameSite=Strict' });
+  if (path === '/me') return json({ username: op.username, role: op.role });
+
+  // 自己變更密碼
+  if (path === '/password' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const row = await env.DB.prepare('SELECT password_hash FROM operators WHERE id=?').bind(op.id).first<any>();
+    if (!(await verifyPassword(String(b.current ?? ''), row.password_hash))) return err(400, '目前密碼錯誤');
+    if (String(b.next ?? '').length < 12) return err(400, '新密碼至少 12 字元');
+    await env.DB.prepare('UPDATE operators SET password_hash=? WHERE id=?').bind(await hashPassword(b.next), op.id).run();
+    await log(env, op.username, 'op_password_change');
+    return json({ ok: true });
+  }
+
+  // 維護人員（support）只能查看狀態與協助重設客戶密碼；其餘變更限管理者（admin）
+  // 處理 Threads 測試邀請屬於日常工作，維護人員也可以做
+  const writes = req.method !== 'GET' && !/^\/tenants\/[a-z0-9-]{2,40}\/(reset-admin|connect-link)$/.test(path) && !/^\/invites(\/\d+)?$/.test(path);
+  if (writes && op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
+
+  if (path === '/operators' && req.method === 'GET') {
+    if (op.role !== 'admin') return err(403, '此操作需要營運管理者權限');
+    return json((await env.DB.prepare('SELECT id,username,role,enabled,created_at FROM operators ORDER BY id').all()).results);
+  }
+  if (path === '/operators' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const username = String(b.username ?? '').trim();
+    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) return err(400, '帳號需為 3–32 字英數');
+    if (!['admin', 'support'].includes(b.role)) return err(400, '角色不合法');
+    const pw = randomPassword();
+    const r = await env.DB.prepare('INSERT OR IGNORE INTO operators(username,password_hash,role,created_at) VALUES(?,?,?,?)').bind(username, await hashPassword(pw), b.role, iso()).run();
+    if (r.meta.changes !== 1) return err(409, '帳號已存在');
+    await log(env, op.username, 'operator_create', `${username}:${b.role}`);
+    return json({ username, role: b.role, password: pw }, 201);
+  }
+  const om = path.match(/^\/operators\/(\d+)$/);
+  if (om && req.method === 'PATCH') {
+    if (Number(om[1]) === op.id) return err(400, '不能修改自己的帳號狀態或角色');
+    const b: any = await req.json().catch(() => ({}));
+    const sets: string[] = [], vals: unknown[] = [];
+    if (typeof b.enabled === 'boolean') { sets.push('enabled=?'); vals.push(b.enabled ? 1 : 0); }
+    if (b.role !== undefined) { if (!['admin', 'support'].includes(b.role)) return err(400, '角色不合法'); sets.push('role=?'); vals.push(b.role); }
+    if (b.reset_password === true) { const pw = randomPassword(); sets.push('password_hash=?'); vals.push(await hashPassword(pw)); (b as any)._pw = pw; }
+    if (!sets.length) return err(400, 'nothing to update');
+    const r = await env.DB.prepare(`UPDATE operators SET ${sets.join(',')} WHERE id=?`).bind(...vals, om[1]).run();
+    if (!r.meta.changes) return err(404, '找不到人員');
+    await log(env, op.username, 'operator_update', `${om[1]}:${JSON.stringify({ enabled: b.enabled, role: b.role, reset: !!b.reset_password })}`);
+    return json({ ok: true, password: (b as any)._pw });
+  }
+
+  // 所有工作區的健康狀態與本月用量（一次查詢彙總，不逐一開啟工作區）
+  if (path === '/tenants' && req.method === 'GET') {
+    const ms = monthStart(url.searchParams.get('month')), me = nextMonth(ms);
+    const rows = (await env.DB.prepare(
+      `SELECT b.id,b.slug,b.name,b.industry,b.status,b.plan,b.created_at,b.last_cron_at,s.auto_post_enabled,s.line_auto_reply_enabled,s.daily_gen_limit,s.leads_enabled,s.line_add_url,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_unique' AND d.day>=? AND d.day<?) uniques,
+        (SELECT COALESCE(SUM(m.views),0) FROM post_metrics m JOIN posts p ON p.id=m.post_id WHERE m.brand_id=b.id AND p.published_at>=? AND p.published_at<?) views,
+        (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
+        (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.handling_status='pending') leads_pending,
+        (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
+        (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status IN ('failed','unknown','gen_failed')) post_errors,
+        (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='draft') drafts,
+        (SELECT COUNT(*) FROM ai_generations g WHERE g.brand_id=b.id AND g.created_at>=? AND g.created_at<?) generations,
+        (SELECT COALESCE(SUM(input_tokens+output_tokens),0) FROM ai_generations g WHERE g.brand_id=b.id AND g.created_at>=? AND g.created_at<?) tokens,
+        (SELECT COUNT(*) FROM threads_accounts a WHERE a.brand_id=b.id) threads_accounts,
+        (SELECT COUNT(*) FROM threads_accounts a WHERE a.brand_id=b.id AND a.status<>'ok') threads_invalid,
+        (SELECT MIN(a.expires_at) FROM threads_accounts a WHERE a.brand_id=b.id) threads_expires,
+        (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name IN ('line_channel_secret','line_channel_access_token')) line_creds,
+        (SELECT COUNT(*) FROM integrations x WHERE x.brand_id=b.id AND x.name='gemini_api_key') gemini_key
+       FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.created_at`,
+    ).bind(ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me, ms, me, ms, me).all<any>()).results;
+    const cronAge = (t: string | null) => (t ? Date.now() - new Date(t).getTime() : Infinity);
+    return json({
+      month: ms.slice(0, 7),
+      tenants: rows.map((r) => {
+        const issues: string[] = [];
+        if (r.status === 'active') {
+          if (r.threads_invalid) issues.push('Threads 授權失效');
+          if (!r.threads_accounts) issues.push('未連結 Threads');
+          if (!r.line_add_url) issues.push('未設定 LINE 加好友連結');
+          if (r.post_errors) issues.push(`${r.post_errors} 則貼文異常`);
+          if (r.auto_post_enabled && cronAge(r.last_cron_at) > 30 * 60000) issues.push('排程超過 30 分鐘未執行');
+        }
+        return { ...r, leads_enabled: !!r.leads_enabled, line_configured: r.line_creds >= 2, gemini_own_key: !!r.gemini_key, health: r.status !== 'active' ? 'paused' : issues.length ? 'attention' : 'ok', issues };
+      }),
+    });
+  }
+
+  // 計費用量（按合格留資計費的依據）：可指定月份
+  if (path === '/usage' && req.method === 'GET') {
+    const ms = monthStart(url.searchParams.get('month')), me = nextMonth(ms);
+    const rows = (await env.DB.prepare(
+      `SELECT b.slug,b.name,b.plan,s.leads_enabled,
+        (SELECT COUNT(*) FROM inquiries i WHERE i.brand_id=b.id AND i.created_at>=? AND i.created_at<?) leads,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='friend_add' AND d.day>=? AND d.day<?) friends,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='handoff' AND d.day>=? AND d.day<?) handoffs,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_click' AND d.day>=? AND d.day<?) clicks,
+        (SELECT COALESCE(SUM(count),0) FROM metrics_daily d WHERE d.brand_id=b.id AND d.name='link_unique' AND d.day>=? AND d.day<?) uniques,
+        (SELECT COALESCE(SUM(m.views),0) FROM post_metrics m JOIN posts p ON p.id=m.post_id WHERE m.brand_id=b.id AND p.published_at>=? AND p.published_at<?) views,
+        (SELECT COUNT(*) FROM posts p WHERE p.brand_id=b.id AND p.status='published' AND p.published_at>=? AND p.published_at<?) published,
+        (SELECT COUNT(*) FROM threads_accounts a WHERE a.brand_id=b.id) threads_accounts,
+        (SELECT COUNT(*) FROM ai_generations g WHERE g.brand_id=b.id AND g.created_at>=? AND g.created_at<?) generations
+       FROM brands b LEFT JOIN brand_settings s ON s.brand_id=b.id ORDER BY b.slug`,
+    ).bind(ms, me, ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms.slice(0, 10), me.slice(0, 10), ms, me, ms, me, ms, me).all()).results;
+    return json({ month: ms.slice(0, 7), rows });
+  }
+
+  // Threads 測試邀請：客戶提出申請後，由營運人員在 Meta 後台送出邀請，再回來標記
+  if (path === '/invites' && req.method === 'GET') {
+    const rows = (await env.DB.prepare(`SELECT i.id,i.username,i.status,i.created_at,i.updated_at,b.name,b.slug FROM threads_invites i JOIN brands b ON b.id=i.brand_id
+      WHERE i.status IN ('requested','invited') ORDER BY (i.status='requested') DESC, i.id`).all()).results;
+    return json({ rows, app_mode: env.THREADS_APP_MODE === 'live' ? 'live' : 'development' });
+  }
+  // 替客戶建立 Threads 連結申請：開通時就知道客戶的帳號，先在 Meta 送出邀請，客戶第一次登入就直接看到「接受邀請」
+  if (path === '/invites' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const t = await env.DB.prepare('SELECT id,name FROM brands WHERE slug=?').bind(String(b.slug ?? '')).first<{ id: string; name: string }>();
+    if (!t) return err(404, '找不到這個工作區');
+    const names = String(b.usernames ?? b.username ?? '').split(/[\s,，、]+/).filter(Boolean).map(normUsername);
+    if (!names.length || names.some((n) => !n)) return err(400, 'Threads 帳號名稱格式不正確（不含 @，多個用逗號分隔）');
+    const status = b.status === 'accepted' ? 'accepted' : b.status === 'invited' ? 'invited' : 'requested';
+    const out = [];
+    for (const n of names as string[]) out.push({ username: n, result: await requestInvite(forBrand(env, t.id), t.id, n, status, `營運人員 ${op.username}`) });
+    await log(env, op.username, 'threads_invite_create', `${t.id}:${names.join(',')}:${status}`);
+    return json({ ok: true, invites: out });
+  }
+  const im = path.match(/^\/invites\/(\d+)$/);
+  if (im && req.method === 'PATCH') {
+    const b: any = await req.json().catch(() => ({}));
+    if (!['invited', 'accepted', 'cancelled'].includes(b.status)) return err(400, '狀態不正確');
+    const r = await env.DB.prepare(`UPDATE threads_invites SET status=?,updated_at=? WHERE id=? AND status IN ('requested','invited')`).bind(b.status, iso(), im[1]).run();
+    if (r.meta.changes !== 1) return err(409, '這筆申請已經處理過了');
+    const row = await env.DB.prepare('SELECT brand_id,username FROM threads_invites WHERE id=?').bind(im[1]).first<{ brand_id: string; username: string }>();
+    await log(env, op.username, 'threads_invite', `${im[1]}:${b.status}`);
+    if (row) await logEvent(env, row.brand_id, 'info', 'threads_oauth', b.status === 'invited' ? `服務商已在 Meta 送出 @${row.username} 的測試邀請，等待對方接受` : b.status === 'accepted' ? `@${row.username} 已確認是測試人員，可以直接授權` : `@${row.username} 的連結申請已取消`);
+    return json({ ok: true });
+  }
+
+  // 系統紀錄：全部工作區，可依工作區、等級、來源、關鍵字篩選（紀錄本身不含顧客訊息與憑證）
+  if (path === '/logs' && req.method === 'GET') {
+    const q = new URL(req.url).searchParams;
+    const where: string[] = [], args: unknown[] = [];
+    const ws = q.get('workspace');
+    if (ws === '_platform') where.push('l.brand_id IS NULL');
+    else if (ws) { where.push('b.slug=?'); args.push(ws); }
+    const lv = q.get('level');
+    if (lv === 'error') where.push(`l.level='error'`);
+    else if (lv === 'warn') where.push(`l.level IN ('warn','error')`);
+    if (q.get('source')) { where.push('l.source=?'); args.push(q.get('source')); }
+    if (q.get('q')) { where.push('l.message LIKE ?'); args.push(`%${q.get('q')!.slice(0, 50)}%`); }
+    if (q.get('before')) { where.push('l.id<?'); args.push(Number(q.get('before'))); }
+    const rows = (await env.DB.prepare(
+      `SELECT l.id,l.level,l.source,l.message,l.detail,l.created_at,b.slug,b.name FROM event_logs l LEFT JOIN brands b ON b.id=l.brand_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY l.id DESC LIMIT 100`,
+    ).bind(...args).all()).results;
+    const since = new Date(Date.now() - 86400000).toISOString();
+    const c = await env.DB.prepare(`SELECT SUM(level='error') e, SUM(level='warn') w FROM event_logs WHERE created_at>?`).bind(since).first<{ e: number; w: number }>();
+    return json({ rows, sources: SOURCES, last24h: { error: c?.e ?? 0, warn: c?.w ?? 0 } });
+  }
+
+  // 開通新工作區：建立品牌、設定與第一位管理員，回傳一次性密碼
+  if (path === '/tenants' && req.method === 'POST') {
+    const b: any = await req.json().catch(() => ({}));
+    const name = String(b.name ?? '').trim(), industry = String(b.industry ?? 'general');
+    // 內部編號（LINE Webhook 網址與營運後台辨識用）：不再要求輸入，由系統產生；仍接受自行指定（腳本用）
+    let slug = String(b.slug ?? '').trim().toLowerCase();
+    if (!slug) {
+      for (let i = 0; i < 10 && !slug; i++) {
+        const c = 'w' + Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => (x % 36).toString(36)).join('');
+        if (!(await env.DB.prepare('SELECT 1 FROM brands WHERE slug=? OR id=?').bind(c, c).first())) slug = c;
+      }
+    }
+    // 共用既有客戶帳號：新品牌出現在這位客戶的「切換品牌」清單，不另外建立帳號
+    const shareWith = String(b.share_with ?? '').trim();
+    const shareUser = shareWith ? await env.DB.prepare('SELECT id,authentication_id FROM admin_users WHERE lower(authentication_id)=lower(?) AND enabled=1').bind(shareWith).first<{ id: number; authentication_id: string }>() : null;
+    if (shareWith && !shareUser) return err(404, '找不到這個客戶帳號，請確認帳號名稱');
+    const admin = shareUser ? '' : String(b.admin_username || (b.slug ? `${slug.slice(0, 24)}-admin` : '')).trim();
+    if (!shareUser && !admin) return err(400, '請輸入管理員帳號');
+    if (!/^[a-z0-9-]{2,40}$/.test(slug) || slug.startsWith('_')) return err(400, '內部編號需為 2–40 字英文小寫、數字或連字號');
+    if (!name || name.length > 100) return err(400, '請輸入品牌名稱');
+    if (!shareUser && !/^[a-zA-Z0-9_.-]{3,32}$/.test(admin)) return err(400, '管理員帳號需為 3–32 字英數');
+    if (!['general', 'lending', 'finance', 'loan'].includes(industry)) return err(400, '產業類別不合法');
+    const timezone = String(b.timezone ?? 'Asia/Taipei').trim();
+    if (!isValidTimezone(timezone)) return err(400, '時區不正確，請使用例如 Asia/Taipei 的格式');
+    if (await env.DB.prepare('SELECT 1 FROM brands WHERE slug=? OR id=?').bind(slug, slug).first()) return err(409, '這個內部編號已被使用');
+    if (!shareUser && await env.DB.prepare('SELECT 1 FROM admin_users WHERE lower(authentication_id)=lower(?)').bind(admin).first()) return err(409, '這個管理員帳號已被使用（帳號在整個系統內不可重複），請換一個');
+    const id = slug, now = iso(), pw = randomPassword();
+    await env.DB.prepare(`INSERT INTO brands(id,slug,name,industry,description,timezone,created_at,status,plan) VALUES(?,?,?,?,'',?,?,'active',?)`)
+      .bind(id, slug, name, industry, timezone, now, String(b.plan ?? 'standard')).run();
+    await env.DB.prepare(`INSERT INTO brand_settings(brand_id,updated_at,auto_post_enabled,line_auto_reply_enabled) VALUES(?,?,0,1)`).bind(id, now).run();
+    if (shareUser) await env.DB.prepare(`INSERT INTO user_brands(user_id,brand_id,role,created_at) VALUES(?,?,'admin',?)`).bind(shareUser.id, id, now).run();
+    else await env.DB.prepare(`INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES(?,'admin',?,?)`).bind(id, admin, await hashPassword(pw)).run();
+    await log(env, op.username, 'tenant_create', shareUser ? `${slug}+share:${shareUser.authentication_id}` : slug);
+    // 開通時已知客戶的 Threads 帳號：一併建立連結申請（已在 Meta 送出邀請時狀態直接是 invited）
+    const hint = String(b.threads_usernames ?? '').split(/[\s,，、]+/).map(normUsername).filter((x): x is string => !!x);
+    for (const n of hint) await requestInvite(forBrand(env, id), id, n, b.invites_sent ? 'invited' : 'requested', `營運人員 ${op.username}`);
+    return json(shareUser ? { slug, name, shared_with: shareUser.authentication_id, login_url: url.origin, invites: hint.length } : { slug, name, admin_username: admin, password: pw, login_url: url.origin, invites: hint.length }, 201);
+  }
+
+  // 產生 Threads 授權連結（傳給客戶的帳號擁有者）
+  const cl = path.match(/^\/tenants\/([a-z0-9-]{2,40})\/connect-link$/);
+  if (cl && req.method === 'POST') {
+    const t = await env.DB.prepare('SELECT id FROM brands WHERE slug=?').bind(cl[1]).first<{ id: string }>();
+    if (!t) return err(404, '找不到這個品牌');
+    const b: any = await req.json().catch(() => ({}));
+    const name = b.username ? normUsername(b.username) : undefined;
+    if (b.username && !name) return err(400, 'Threads 帳號名稱格式不正確（不含 @）');
+    await logEvent(env, t.id, 'info', 'threads_oauth', `營運人員 ${op.username} 產生了 Threads 授權連結${name ? `（要連結 @${name}）` : ''}`);
+    return json({ url: await makeConnectLink(env, url.origin, t.id, name ?? undefined), days: LINK_DAYS });
+  }
+
+  // 哪些登入帳號可以進入這個品牌（主要帳號＋共用帳號），以及新增／移除共用
+  const am = path.match(/^\/tenants\/([a-z0-9-]{2,40})\/access(?:\/(\d+))?$/);
+  if (am) {
+    const t = await env.DB.prepare('SELECT id FROM brands WHERE slug=?').bind(am[1]).first<{ id: string }>();
+    if (!t) return err(404, '找不到這個品牌');
+    if (req.method === 'GET') {
+      return json((await env.DB.prepare(
+        `SELECT id,authentication_id AS username,role,enabled,1 AS owner FROM admin_users WHERE brand_id=?
+         UNION ALL SELECT u.id,u.authentication_id,ub.role,u.enabled,0 FROM user_brands ub JOIN admin_users u ON u.id=ub.user_id WHERE ub.brand_id=? ORDER BY owner DESC, id`).bind(t.id, t.id).all()).results);
+    }
+    if (req.method === 'POST' && !am[2]) {
+      const b: any = await req.json().catch(() => ({}));
+      const role = b.role === 'staff' ? 'staff' : 'admin';
+      const u = await env.DB.prepare('SELECT id,brand_id,authentication_id FROM admin_users WHERE lower(authentication_id)=lower(?) AND enabled=1').bind(String(b.username ?? '').trim()).first<{ id: number; brand_id: string; authentication_id: string }>();
+      if (!u) return err(404, '找不到這個登入帳號');
+      if (u.brand_id === t.id) return err(409, '這個帳號本來就屬於這個品牌');
+      await env.DB.prepare('INSERT INTO user_brands(user_id,brand_id,role,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,brand_id) DO UPDATE SET role=excluded.role').bind(u.id, t.id, role, iso()).run();
+      await log(env, op.username, 'brand_access_add', `${am[1]}:${u.authentication_id}:${role}`);
+      return json({ ok: true });
+    }
+    if (req.method === 'DELETE' && am[2]) {
+      await env.DB.prepare('DELETE FROM user_brands WHERE user_id=? AND brand_id=?').bind(am[2], t.id).run();
+      await env.DB.prepare('UPDATE admin_users SET last_brand_id=NULL WHERE id=? AND last_brand_id=?').bind(am[2], t.id).run();
+      await log(env, op.username, 'brand_access_remove', `${am[1]}:${am[2]}`);
+      return json({ ok: true });
+    }
+  }
+
+  const m = path.match(/^\/tenants\/([a-z0-9-]{2,40})$/);
+  if (m && req.method === 'PATCH') {
+    const b: any = await req.json().catch(() => ({}));
+    const sets: string[] = [], vals: unknown[] = [];
+    if (b.status !== undefined) { if (!['active', 'suspended'].includes(b.status)) return err(400, '狀態不合法'); sets.push('status=?'); vals.push(b.status); }
+    if (b.plan !== undefined) { if (typeof b.plan !== 'string' || b.plan.length > 40) return err(400, '方案不合法'); sets.push('plan=?'); vals.push(b.plan); }
+    if (typeof b.leads_enabled === 'boolean') {
+      // 加購項目：開通或關閉留資（存在 brand_settings）
+      const r = await env.DB.prepare('UPDATE brand_settings SET leads_enabled=? WHERE brand_id=(SELECT id FROM brands WHERE slug=?)').bind(b.leads_enabled ? 1 : 0, m[1]).run();
+      if (!r.meta.changes) return err(404, '找不到工作區');
+      if (!sets.length) { await log(env, op.username, 'tenant_leads', `${m[1]}:${b.leads_enabled}`); return json({ ok: true }); }
+    }
+    if (!sets.length) return err(400, 'nothing to update');
+    const r = await env.DB.prepare(`UPDATE brands SET ${sets.join(',')} WHERE slug=?`).bind(...vals, m[1]).run();
+    if (!r.meta.changes) return err(404, '找不到工作區');
+    await log(env, op.username, 'tenant_update', `${m[1]}:${JSON.stringify(b)}`);
+    return json({ ok: true });
+  }
+  // 協助客戶重設管理員密碼（不需要看到任何客戶資料）
+  const rp = path.match(/^\/tenants\/([a-z0-9-]{2,40})\/reset-admin$/);
+  if (rp && req.method === 'POST') {
+    const u = await env.DB.prepare(`SELECT a.id,a.authentication_id FROM admin_users a JOIN brands b ON b.id=a.brand_id WHERE b.slug=? AND a.role='admin' ORDER BY a.id LIMIT 1`).bind(rp[1]).first<any>();
+    if (!u) return err(404, '找不到工作區管理員');
+    const pw = randomPassword();
+    await env.DB.prepare('UPDATE admin_users SET password_hash=?,enabled=1 WHERE id=?').bind(await hashPassword(pw), u.id).run();
+    await log(env, op.username, 'tenant_reset_admin', rp[1]);
+    return json({ admin_username: u.authentication_id, password: pw });
+  }
+  return err(404, 'not found');
+}

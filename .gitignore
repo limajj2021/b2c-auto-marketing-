@@ -1,0 +1,9 @@
+node_modules
+.wrangler
+.dev.vars
+.secrets
+.generated
+backups
+brands/test.json
+brands/test2.json
+brands/app.json

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>資料刪除說明</title><link rel="stylesheet" href="/legal.css"></head>
+<body><main><article>
+<h1>資料刪除說明</h1><p class="mut"><span class="brand">本服務</span></p>
+<p id="status" hidden style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px">已收到您的刪除要求，相關授權資料已移除。確認碼：<b id="code"></b></p>
+<h2>Threads 授權資料</h2>
+<ol>
+<li>開啟 Threads App → 設定 → 帳號 → 網站權限。</li>
+<li>找到本服務並選擇「移除」。我們會收到通知並刪除您的授權權杖與帳號代碼。</li>
+<li>企業管理者也可在後台「設定 → 連線」中直接中斷 Threads 連結。</li>
+</ol>
+<h2>LINE 諮詢資料</h2>
+<p>在本服務的 LINE 官方帳號對話中輸入「刪除我的資料」，並依指示輸入「確認刪除」，即刪除您所有的諮詢紀錄與聯絡資料。</p>
+<h2>其他方式</h2>
+<p>您也可以透過 LINE 官方帳號聯繫專人，請求協助刪除。我們會在合理期間內處理。</p>
+</article></main>
+<script>
+const c=new URLSearchParams(location.search).get('code');if(c){document.getElementById('code').textContent=c;document.getElementById('status').hidden=false}
+fetch('/api/public').then(r=>r.json()).then(d=>{if(d.name)document.querySelectorAll('.brand').forEach(e=>e.textContent=d.name)}).catch(()=>{})
+</script></body></html>

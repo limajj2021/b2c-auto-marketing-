@@ -1,0 +1,174 @@
+// Threads 連結流程：觸發（客戶提出）→ 同意（客戶接受邀請）→ 授權
+import { afterEach, describe, expect, it } from 'vitest';
+import { handleApi } from '../src/admin/routes';
+import { listAccounts } from '../src/threads/accounts';
+import { buildAuthorizeUrl, handleCallback } from '../src/threads/oauth';
+import { hashPassword } from '../src/util/crypto';
+import { jres, makeEnv, mockFetch } from './helpers';
+
+let restore = () => {};
+afterEach(() => restore());
+const call = (env: any, method: string, path: string, body?: unknown, cookie?: string) => handleApi(env, new Request(`https://x${path}`, {
+  method, body: body ? JSON.stringify(body) : undefined, headers: { 'content-type': 'application/json', 'x-requested-with': 'admin-ui', ...(cookie ? { cookie } : {}) } }));
+const ck = (r: Response) => (r.headers.get('set-cookie') ?? '').split(';')[0];
+const customer = async (env: any) => ck(await call(env, 'POST', '/api/login', { username: 'boss', password: 'correct-horse-1' }));
+const operator = async (env: any, role: 'admin' | 'support') => {
+  await env.DB.prepare('INSERT INTO operators(username,password_hash,role,created_at) VALUES(?,?,?,?)').bind(`op-${role}`, await hashPassword('operator-pass-1'), role, 'x').run();
+  return ck(await call(env, 'POST', '/api/op/login', { username: `op-${role}`, password: 'operator-pass-1' }));
+};
+const invites = async (env: any, c: string) => ((await (await call(env, 'GET', '/api/integrations', undefined, c)).json()) as any).threads;
+
+describe('three-step Threads connection', () => {
+  it('request → operator sends invite → customer accepts → authorize; each step is enforced in order', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'app'; env.THREADS_APP_SECRET = 's';
+    const c = await customer(env);
+    // 1 觸發
+    expect((await call(env, 'POST', '/api/threads/invites', { username: 'not valid!' }, c)).status).toBe(400);
+    const made = (await (await call(env, 'POST', '/api/threads/invites', { username: '@Acme.Shop' }, c)).json()) as any;
+    expect(made).toMatchObject({ status: 'requested', username: 'acme.shop' });
+    expect(((await (await call(env, 'POST', '/api/threads/invites', { username: 'https://www.threads.com/@acme.shop' }, c)).json()) as any).id).toBe(made.id); // 重複申請不會新增
+    expect((await invites(env, c))).toMatchObject({ requires_invite: true, invites: [{ username: 'acme.shop', status: 'requested' }] });
+    // 還沒送出邀請：不能說已接受，也不能授權
+    expect((await call(env, 'POST', `/api/threads/invites/${made.id}/accepted`, undefined, c)).status).toBe(409);
+    expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${made.id}`, undefined, c)).status).toBe(409);
+    // 營運人員（維護人員也可以）送出邀請後標記
+    const sup = await operator(env, 'support');
+    const list = (await (await call(env, 'GET', '/api/op/invites', undefined, sup)).json()) as any;
+    expect(list.rows).toMatchObject([{ id: made.id, username: 'acme.shop', status: 'requested' }]);
+    expect((await call(env, 'PATCH', `/api/op/invites/${made.id}`, { status: 'bogus' }, sup)).status).toBe(400);
+    expect((await call(env, 'PATCH', `/api/op/invites/${made.id}`, { status: 'invited' }, sup)).status).toBe(200);
+    // 2 同意
+    expect((await invites(env, c)).invites[0].status).toBe('invited');
+    expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${made.id}`, undefined, c)).status).toBe(409); // 還沒接受
+    expect((await call(env, 'POST', `/api/threads/invites/${made.id}/accepted`, undefined, c)).status).toBe(200);
+    // 3 授權
+    const r = await call(env, 'GET', `/api/integrations/threads/connect?invite=${made.id}`, undefined, c);
+    expect(r.status).toBe(200); expect(((await r.json()) as any).url).toContain('threads.net/oauth/authorize');
+    expect((await invites(env, c)).invites[0].authorize_started_at).toBeTruthy();
+    // 授權成功 → 邀請標為已連結，不再出現在進行中清單
+    const state = new URL(await buildAuthorizeUrl(env, 'https://x.dev', 1)).searchParams.get('state')!;
+    const m = mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '7', username: 'Acme.Shop' }));
+    restore = m.restore;
+    expect((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')).toBe('/?threads=connected');
+    expect((await listAccounts(env)).map((a) => a.username)).toEqual(['Acme.Shop']);
+    expect((await invites(env, c)).invites).toEqual([]);
+    expect(((await env.DB.prepare('SELECT status FROM threads_invites').first()) as any).status).toBe('connected');
+    expect((await call(env, 'POST', '/api/threads/invites', { username: 'acme.shop' }, c)).status).toBe(409); // 已連結的帳號不必再申請
+  });
+
+  it('operator can mark an existing tester as accepted, or cancel; other workspaces cannot touch the request', async () => {
+    const env: any = await makeEnv();
+    const c = await customer(env);
+    const a = (await (await call(env, 'POST', '/api/threads/invites', { username: 'tester1' }, c)).json()) as any;
+    const b = (await (await call(env, 'POST', '/api/threads/invites', { username: 'tester2' }, c)).json()) as any;
+    const op = await operator(env, 'admin');
+    expect((await call(env, 'PATCH', `/api/op/invites/${a.id}`, { status: 'accepted' }, op)).status).toBe(200); // 對方早就是測試人員
+    expect((await call(env, 'PATCH', `/api/op/invites/${a.id}`, { status: 'invited' }, op)).status).toBe(409);   // 已處理過
+    expect((await call(env, 'PATCH', `/api/op/invites/${b.id}`, { status: 'cancelled' }, op)).status).toBe(200);
+    expect(((await (await call(env, 'GET', '/api/op/invites', undefined, op)).json()) as any).rows).toEqual([]);
+    expect((await invites(env, c)).invites.map((i: any) => i.status)).toEqual(['accepted']);
+    // 另一個工作區的管理員不能代為接受或取消
+    await env.DB.prepare("INSERT INTO brands(id,slug,name,industry,description,timezone,created_at) VALUES('b2','beta','Beta','general','','Asia/Taipei','x')").run();
+    await env.DB.prepare("INSERT INTO brand_settings(brand_id,updated_at) VALUES('b2','x')").run();
+    await env.DB.prepare("INSERT INTO admin_users(brand_id,role,authentication_id,password_hash) VALUES('b2','admin','beta-boss',?)").bind(await hashPassword('beta-password-1')).run();
+    const c2 = ck(await call(env, 'POST', '/api/login', { username: 'beta-boss', password: 'beta-password-1' }));
+    expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${a.id}`, undefined, c2)).status).toBe(404);
+    await call(env, 'DELETE', `/api/threads/invites/${a.id}`, undefined, c2);
+    expect((await invites(env, c)).invites.length).toBe(1);
+    // 客戶自己可以取消
+    await call(env, 'DELETE', `/api/threads/invites/${a.id}`, undefined, c);
+    expect((await invites(env, c)).invites).toEqual([]);
+  });
+
+  it('once the Meta app is live (no invites needed), authorization is allowed straight away', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'app'; env.THREADS_APP_SECRET = 's'; env.THREADS_APP_MODE = 'live';
+    const c = await customer(env);
+    expect((await invites(env, c)).requires_invite).toBe(false);
+    const made = (await (await call(env, 'POST', '/api/threads/invites', { username: 'newcomer' }, c)).json()) as any;
+    expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${made.id}`, undefined, c)).status).toBe(200);
+  });
+
+  it('operator pre-registers the customer’s account at onboarding, so the customer starts directly at "accept the invite"', async () => {
+    const env: any = await makeEnv();
+    env.MULTI_TENANT = '1';
+    const op = await operator(env, 'support'); // 維護人員也可以代為建立
+    const adminOp = await operator(env, 'admin');
+    // 開通新客戶時一併帶入 Threads 帳號，並標示已在 Meta 送出邀請
+    const made = (await (await call(env, 'POST', '/api/op/tenants', { name: '阿福咖啡', admin_username: 'afu-admin', threads_usernames: '@Afu.Coffee, afu_shop', invites_sent: true }, adminOp)).json()) as any;
+    expect(made.invites).toBe(2);
+    const c = ck(await call(env, 'POST', '/api/login', { username: 'afu-admin', password: made.password }));
+    expect((await invites(env, c)).invites.map((i: any) => [i.username, i.status])).toEqual([['afu.coffee', 'invited'], ['afu_shop', 'invited']]);
+    // 客戶一鍵：已接受 → 可直接授權
+    const id = (await invites(env, c)).invites[0].id;
+    expect((await call(env, 'POST', `/api/threads/invites/${id}/accepted`, undefined, c)).status).toBe(200);
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    expect((await call(env, 'GET', `/api/integrations/threads/connect?invite=${id}`, undefined, c)).status).toBe(200);
+    // 替既有客戶補新增；已存在的申請只會往前推進，不會倒退；格式錯誤會被擋下
+    expect((await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'afu_shop', status: 'requested' }, op)).status).toBe(200);
+    expect((await invites(env, c)).invites.find((i: any) => i.username === 'afu_shop').status).toBe('invited');
+    expect((await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'bad name!' }, op)).status).toBe(400);
+    expect((await call(env, 'POST', '/api/op/invites', { slug: 'nobody', usernames: 'x' }, op)).status).toBe(404);
+    // 沒勾「已送出邀請」時，狀態是待送出，會出現在營運後台的待辦
+    await call(env, 'POST', '/api/op/invites', { slug: made.slug, usernames: 'later.one' }, op);
+    expect(((await (await call(env, 'GET', '/api/op/invites', undefined, op)).json()) as any).rows.map((r: any) => [r.username, r.status])).toEqual([['later.one', 'requested'], ['afu_shop', 'invited']]);
+  });
+
+  it('refuses to connect when the browser is logged in as a different Threads account than the one being connected', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    const c = await customer(env);
+    await env.DB.prepare("UPDATE brands SET slug='acme' WHERE id='b1'").run();
+    const made = (await (await call(env, 'POST', '/api/op/invites', { slug: 'acme', usernames: 'vuca.tw', status: 'accepted' }, await operator(env, 'admin'))).json()) as any;
+    const id = (await invites(env, c)).invites[0].id; expect(made.ok).toBe(true);
+    const authUrl = ((await (await call(env, 'GET', `/api/integrations/threads/connect?invite=${id}`, undefined, c)).json()) as any).url;
+    const state = new URL(authUrl).searchParams.get('state')!;
+    // 使用者的 Threads App 登入的是 vuca.canada，所以授權回來的是 vuca.canada
+    const respond = (name: string) => mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '9', username: name }));
+    let m = respond('vuca.canada'); restore = m.restore;
+    const r = await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`));
+    const loc = decodeURIComponent(r.headers.get('location')!);
+    expect(loc).toContain('threads=error'); expect(loc).toContain('你授權的是 @vuca.canada'); expect(loc).toContain('@vuca.tw');
+    expect(await listAccounts(env)).toEqual([]);                                                   // 沒有默默連到錯的帳號
+    expect((await invites(env, c)).invites[0].status).toBe('accepted');                            // 申請還在，可以重試
+    expect(((await env.DB.prepare("SELECT level,message FROM event_logs WHERE source='threads_oauth' ORDER BY id DESC LIMIT 1").first()) as any)).toMatchObject({ level: 'warn' });
+    m.restore();
+    // 換成正確的帳號（大小寫不拘）就能連結
+    m = respond('Vuca.TW'); restore = m.restore;
+    expect((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')).toBe('/?threads=connected');
+    expect((await listAccounts(env)).map((a) => a.username)).toEqual(['Vuca.TW']);
+  });
+
+  it('reconnecting an existing account also expects that same account', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    const c = await customer(env);
+    await env.DB.prepare("INSERT INTO threads_accounts(brand_id,threads_user_id,username,token_enc,status,created_at,updated_at) VALUES('b1','7','vuca.tw','x','token_invalid','x','x')").run();
+    const url = ((await (await call(env, 'GET', '/api/integrations/threads/connect?account=1', undefined, c)).json()) as any).url;
+    const state = new URL(url).searchParams.get('state')!;
+    const m = mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '8', username: 'vuca.canada' })); restore = m.restore;
+    expect(decodeURIComponent((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')!)).toContain('你授權的是 @vuca.canada');
+    expect((await listAccounts(env)).map((a) => a.username)).toEqual(['vuca.tw']);                  // 原本的帳號不變
+    expect((await call(env, 'GET', '/api/integrations/threads/connect?account=999', undefined, c)).status).toBe(404);
+  });
+
+  it('a multi-brand customer authorizing from brand B gets the account in brand B, not their primary brand', async () => {
+    const env: any = await makeEnv();
+    env.THREADS_APP_ID = 'a'; env.THREADS_APP_SECRET = 's';
+    await env.DB.prepare("INSERT INTO brands(id,slug,name,industry,description,timezone,created_at) VALUES('b2','beta','乙','general','','Asia/Taipei','x')").run();
+    await env.DB.prepare("INSERT INTO brand_settings(brand_id,updated_at) VALUES('b2','x')").run();
+    await env.DB.prepare("INSERT INTO user_brands(user_id,brand_id,role,created_at) VALUES(1,'b2','admin','x')").run();
+    const c1 = await customer(env);
+    const c2 = ck(await call(env, 'POST', '/api/brand/switch', { brand_id: 'b2' }, c1));
+    const url = ((await (await call(env, 'GET', '/api/integrations/threads/connect', undefined, c2)).json()) as any).url;
+    const state = new URL(url).searchParams.get('state')!;
+    const m = mockFetch((u) => u.includes('/oauth/access_token') ? jres({ access_token: 's' }) : u.includes('th_exchange_token') ? jres({ access_token: 'L', expires_in: 5184000 }) : jres({ id: '5', username: 'brand.b' })); restore = m.restore;
+    await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`));
+    expect((await env.DB.prepare('SELECT brand_id FROM threads_accounts').all()).results).toEqual([{ brand_id: 'b2' }]);
+    // 權限被收回後，同一個授權連結不能再把帳號放進那個品牌
+    await env.DB.prepare('DELETE FROM user_brands').run(); await env.DB.prepare('DELETE FROM threads_accounts').run();
+    expect((await handleCallback(env, new Request(`https://x.dev/threads/callback?code=c&state=${encodeURIComponent(state)}`))).headers.get('location')).toContain('threads=error');
+    expect(((await env.DB.prepare('SELECT COUNT(*) c FROM threads_accounts').first()) as any).c).toBe(0);
+  });
+});
