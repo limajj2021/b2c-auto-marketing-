@@ -277,15 +277,13 @@ async function logsPage() {
 function newPage() {
   bar('開通新工作區');
   view(`<div>${field('nn', '品牌名稱', '<input id="nn" placeholder="例如：阿福咖啡">')}
-    <div class="two" style="margin-top:16px"><div class="f" style="margin:0"><label for="ni">產業</label><select id="ni"><option value="general">一般</option><option value="lending">放款（強制審核）</option><option value="finance">金融（強制審核）</option></select></div>
-      <div class="f" style="margin:0"><label for="np">方案</label><select id="np"><option value="standard">標準版</option><option value="growth">成長版</option><option value="pilot">共創試用</option></select></div></div>
     ${field('nt', '客戶的 Threads 帳號（選填）', '<input id="nt" placeholder="例如：acme.shop，多個用逗號分隔" autocapitalize="none" autocorrect="off">', '先填的話，客戶第一次登入就直接看到「接受邀請」，不用再申請、不用等你。')}
     <label class="row static" style="padding:0;min-height:0;margin-top:10px;gap:10px;align-items:center"><input type="checkbox" id="nsent" style="width:18px;height:18px;min-height:0"><span class="t-sub">我已在 Meta 後台為這些帳號送出測試邀請</span></label>
     ${field('nsh', '共用既有客戶的登入帳號（選填）', '<input id="nsh" placeholder="例如：afu-admin" autocapitalize="none" autocorrect="off">', '同一位客戶的另一個品牌：填他現有的帳號，新品牌就會出現在他的「切換品牌」清單，不另外建立帳號、不用再發密碼。')}
     ${field('na', '管理員帳號', '<input id="na" placeholder="例如：acme-admin" autocapitalize="none" autocorrect="off">', '客戶用這個帳號登入。帳號在整個系統內不可重複，客戶登入後可以自己改。')}
     <button class="btn block" id="create" style="margin-top:24px">建立工作區</button><div id="made" style="margin-top:16px"></div></div>`);
   $('#create').onclick = (e) => act(e.currentTarget, async () => {
-    const r = await api('POST', '/tenants', { name: $('#nn').value.trim(), industry: $('#ni').value, plan: $('#np').value, admin_username: $('#na').value.trim(), share_with: $('#nsh').value.trim(), threads_usernames: $('#nt').value.trim(), invites_sent: $('#nsent').checked });
+    const r = await api('POST', '/tenants', { name: $('#nn').value.trim(), admin_username: $('#na').value.trim(), share_with: $('#nsh').value.trim(), threads_usernames: $('#nt').value.trim(), invites_sent: $('#nsent').checked });
     T = [];
     $('#made').innerHTML = (r.shared_with ? (h) => `<div class="secret">${h}</div>` : secret)((r.shared_with ? `已建立 <b>${esc(r.name)}</b>，並開放給 <code>${esc(r.shared_with)}</code><br>這位客戶重新整理或登入後，就能在「切換品牌」看到它。${r.invites ? `<br>已建立 ${r.invites} 個 Threads 連結申請` : ''}` : `已建立 <b>${esc(r.name)}</b><br>登入網址：<code>${esc(r.login_url)}</code><br>帳號：<code>${esc(r.admin_username)}</code><br>一次性密碼：<code>${esc(r.password)}</code>${r.invites ? `<br>已建立 ${r.invites} 個 Threads 連結申請` : ''}`)) +
       '<p class="t-sub" style="margin-top:10px">客戶登入後，首頁的「開通進度」會帶他完成 LINE、AI、Threads 設定。Meta App 仍在開發模式時，記得先把客戶的 Threads 帳號加為測試人員。</p>';
